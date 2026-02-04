@@ -111,6 +111,10 @@ The server is pointed at the user repo path as its “workspace” / cwd.
    - `WORKSPACE_DIR=/path/to/user-config-repo`
    - `PORT=...`
    - Provider keys (e.g. `OPENAI_API_KEY=...`, etc.)
+   - `PI_CODING_AGENT_DIR=/path/to/pi-agent-state` (optional)
+     - overrides pi-coding-agent’s config/state directory (default: `~/.pi/agent`)
+     - this is where `settings.json`, **sessions**, and global `skills/`, `prompts/`, `extensions/`, `themes/` live
+     - ensure this path is on persistent storage (e.g. Docker volume)
    - (optional) `TELEGRAM_BOT_TOKEN=...`
 
 3) Start server
@@ -134,11 +138,36 @@ Users define policies and conventions in `AGENTS.md` files.
 These are loaded into the agent context automatically (global + workspace + parent dirs).
 
 ### Packages (skills/prompts/extensions/themes)
-Users install packages from git/npm into their own environment (global or project-local).
+Pi packages bundle extensions, skills, prompt templates, and themes and can be installed from **npm**, **git**, or a **local path**.
+
+Install and manage packages with the `pi` CLI:
+
+```bash
+pi install npm:@foo/bar@1.0.0
+pi install git:github.com/user/repo@v1
+pi install https://github.com/user/repo  # raw URLs work too
+pi install /absolute/path/to/package
+
+pi remove npm:@foo/bar
+pi list
+pi update
+```
+
+**Scope:** by default, `pi install/remove` write to global settings (`~/.pi/agent/settings.json`, or `PI_CODING_AGENT_DIR/settings.json` if set).
+Use `-l` to write to project settings (`.pi/settings.json`) instead:
+
+```bash
+pi install -l npm:@foo/bar
+```
+
+Project settings are the recommended way to share a reproducible setup in a user config repo: pi will install any missing packages automatically.
+
 The core server should:
 - load built-in packages (shipped with core) by default
 - load user-installed packages from the workspace/global pi directories
 - support a “reload” action to pick up changes without restarting
+
+> **Security:** Pi packages run with full system access. Review third-party packages before installing.
 
 ### Dynamic context injection (recommended pattern)
 Use a pi extension hook to inject *dynamic* context into the system prompt at agent start:
@@ -164,19 +193,52 @@ The CLI should be:
   - fetch status/results
   - tail logs (optional)
 
-### Telegram
-Telegram adapter should:
-- map chat messages → workflow triggers
-- support a minimal command set:
-  - `/start`, `/help`
-  - `/reload` (reload workspace packages/extensions)
-  - optional “approval” UX (approve/deny actions)
+### Telegram (personal chats only, for now)
+Telegram support is split into two pieces:
+- **Ingest** (how updates arrive): long-polling or webhooks
+- **Workflow** (what we do with a message): a built-in `telegram.message` workflow (user-overridable)
+
+#### Ingest modes
+Both modes must normalize updates into the same internal event shape and call the same Telegram workflow. Ingest mode does not change conversation/session semantics.
+
+- **Long polling (recommended default for self-hosters):** the server periodically calls `getUpdates` and processes updates.
+  - easiest to run locally (no public URL required)
+- **Webhook:** the server exposes an HTTP endpoint and configures the bot webhook.
+  - better latency and lower idle load, but needs a public URL / tunnel
+
+#### Incoming message → workflow
+For a personal message to the bot, the adapter triggers the built-in workflow `telegram.message` with a normalized payload:
+- `conversation_key: <telegram chat_id>`
+- `user_key: <telegram from.id>`
+- `text: <message text>`
+- `raw: <raw telegram update>` (optional, for debugging)
+
+#### Conversation sessions
+pi manages the **session contents** (on-disk JSON files). The runtime manages only the **routing**: which Telegram conversation maps to which pi `session_id`.
+
+For personal chats we use **one agent session per Telegram `chat_id`**.
+
+The built-in `telegram.message` workflow is intentionally boring:
+1) **Command routing**
+   - `/start`, `/help`
+   - `/reload` (reload workspace packages/extensions)
+   - `/new` resets the conversation by clearing the `session_id` mapping for this `conversation_key`
+2) **Resolve session**
+   - look up `conversation_key -> session_id` in Postgres
+   - if missing/null: create a new pi session and upsert the mapping
+3) **Run agent**
+   - start/resume pi with `session_id` and pass the message text
+   - send the agent response back to Telegram
+
+**Operational note:** pi session state lives on disk under the pi config directory (default `~/.pi/agent`, override via `PI_CODING_AGENT_DIR`). Ensure this directory is on persistent storage (e.g. a Docker volume) so sessions survive restarts.
 
 ---
 
 ## Workflows
 
 Workflows live in user-land (`workflows/`) and are loaded by the server.
+
+Core may ship a small set of **adapter-scoped** built-in workflows (e.g. `telegram.message`, `whatsapp.message`, `slack.message`). If the user repo defines a workflow with the same name, it overrides the built-in one.
 
 Guidelines:
 - keep workflows small and composable
