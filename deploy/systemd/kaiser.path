@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart kaiser when workspace changes
+
+[Path]
+PathModified=/var/lib/kaiser/workspace/workflows
+PathModified=/var/lib/kaiser/workspace/.pi
+Unit=kaiser-restart.service
+
+[Install]
+WantedBy=multi-user.target

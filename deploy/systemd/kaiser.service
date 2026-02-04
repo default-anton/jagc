@@ -1,0 +1,24 @@
+[Unit]
+Description=kaiser server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kaiser
+Group=kaiser
+WorkingDirectory=/opt/kaiser
+EnvironmentFile=/etc/kaiser/kaiser.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env pnpm start
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# Logs end up in journald. View with:
+#   journalctl -u kaiser -f
+
+[Install]
+WantedBy=multi-user.target

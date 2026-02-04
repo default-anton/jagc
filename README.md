@@ -1,4 +1,4 @@
-# pi-kaiser
+# kaiser
 
 Self-hosted “life automation” runtime built on:
 - **pi-coding-agent** as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
@@ -125,7 +125,7 @@ The server is pointed at the user repo path as its “workspace” / cwd.
 - `pnpm dev` (or similar; define the exact commands as you scaffold)
 
 4) Talk to it
-- CLI: `pi-kaiser ask "..." --json`
+- CLI: `kaiser ask "..." --json`
 - Telegram: message the bot
 
 ---

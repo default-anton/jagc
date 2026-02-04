@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.kaiser.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>pnpm</string>
+      <string>start</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/opt/kaiser</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <!-- Make sure pnpm/node are discoverable under launchd's minimal environment. -->
+      <key>PATH</key>
+      <string>/usr/local/bin:/usr/bin:/bin</string>
+
+      <key>DATABASE_URL</key>
+      <string>postgres://user:pass@127.0.0.1:5432/kaiser</string>
+      <key>WORKSPACE_DIR</key>
+      <string>/Users/you/kaiser-workspace</string>
+      <key>PORT</key>
+      <string>31415</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/kaiser.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/kaiser.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+  </dict>
+</plist>
