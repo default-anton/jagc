@@ -115,7 +115,11 @@ The server is pointed at the user repo path as its “workspace” / cwd.
      - overrides pi-coding-agent’s config/state directory (default: `~/.pi/agent`)
      - this is where `settings.json`, **sessions**, and global `skills/`, `prompts/`, `extensions/`, `themes/` live
      - ensure this path is on persistent storage (e.g. Docker volume)
-   - (optional) `TELEGRAM_BOT_TOKEN=...`
+   - Telegram (optional)
+     - `TELEGRAM_BOT_TOKEN=...`
+     - `TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
+     - (webhook) `TELEGRAM_WEBHOOK_PATH=/telegram/webhook`
+     - (webhook) `TELEGRAM_WEBHOOK_SECRET=...` (recommended)
 
 3) Start server
 - `pnpm dev` (or similar; define the exact commands as you scaffold)
@@ -205,6 +209,18 @@ Both modes must normalize updates into the same internal event shape and call th
   - easiest to run locally (no public URL required)
 - **Webhook:** the server exposes an HTTP endpoint and configures the bot webhook.
   - better latency and lower idle load, but needs a public URL / tunnel
+
+#### Implementation (library)
+We implement the Telegram adapter using [grammY](https://grammy.dev/) (`grammy`).
+
+Recommended wiring:
+- **Polling:** use `@grammyjs/runner` to run long polling reliably.
+- **Webhook:** expose a webhook endpoint (default: `POST /telegram/webhook`) and mount grammY’s webhook callback in the HTTP server.
+
+Suggested env (in addition to `TELEGRAM_BOT_TOKEN`):
+- `TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
+- `TELEGRAM_WEBHOOK_PATH=/telegram/webhook` (webhook mode)
+- `TELEGRAM_WEBHOOK_SECRET=...` (optional; recommended for spoofing protection)
 
 #### Incoming message → workflow
 For a personal message to the bot, the adapter triggers the built-in workflow `telegram.message` with a normalized payload:
@@ -303,4 +319,4 @@ Recommended baseline:
 
 [1]: https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/README.md "raw.githubusercontent.com"
 [2]: https://raw.githubusercontent.com/default-anton/dotfiles/refs/heads/master/pi/agent/extensions/inject-context.impl.mjs "raw.githubusercontent.com"
-[3]: https://www.dbos.dev/dbos-transact?utm_source=chatgpt.com "DBOS Transact | Open Source Durable Execution Library"
+[3]: https://www.dbos.dev/dbos-transact "DBOS Transact | Open Source Durable Execution Library"
