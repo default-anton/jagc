@@ -20,6 +20,11 @@ A small server + adapters:
   - Dispatches to **DBOS workflows** (durable, retryable, schedulable).
   - Runs **pi agent sessions** as workflow steps (tool calling, context compaction, branching).
 
+- **Process model (simplicity-first default)**
+  - Everything runs in **one Node.js process** by default: HTTP ingress, Telegram ingest (polling/webhook), and DBOS workflow execution.
+  - Concurrency comes from async I/O + DBOS scheduling. We still guarantee **per-conversation serialization** where needed (see Telegram section).
+  - **Polling mode assumes a single running instance** (one process) to avoid competing `getUpdates` consumers.
+
 - **Adapters (core interfaces)**
   - `cli`: non-interactive command interface (JSON in/out)
   - `telegram`: chat interface (bot)
@@ -233,6 +238,16 @@ For a personal message to the bot, the adapter triggers the built-in workflow `t
 pi manages the **session contents** (on-disk JSON files). The runtime manages only the **routing**: which Telegram conversation maps to which pi `session_id`.
 
 For personal chats we use **one agent session per Telegram `chat_id`**.
+
+#### Concurrency & ordering (DBOS-backed serialization)
+Telegram (and webhooks/CLI) can deliver messages faster than an agent turn completes. We want high concurrency across *different* conversations, but we must process messages **sequentially per `conversation_key`** to avoid overlapping writes to the same pi session.
+
+We enforce this with **DBOS/Postgres-backed serialization**, not in-memory locks:
+- The adapter records/dispatches the message into DBOS.
+- The workflow execution acquires a **durable per-conversation lock** (e.g., row-level lock or advisory lock keyed by `conversation_key`) inside a DBOS transaction before running the agent step.
+- Only one `telegram.message` execution can hold the lock for a given `conversation_key` at a time; other messages for the same chat wait, while other chats proceed concurrently.
+
+This gives us correct ordering and crash safety (if the process restarts, Postgres releases locks and DBOS retries resume cleanly).
 
 The built-in `telegram.message` workflow is intentionally boring:
 1) **Command routing**
