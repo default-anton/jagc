@@ -1,4 +1,4 @@
-# kaiser
+# my-kaiser
 
 Self-hosted “life automation” runtime built on:
 - **pi-coding-agent** as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
