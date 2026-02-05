@@ -4,6 +4,52 @@ Self-hosted “life automation” runtime built on:
 - **pi-coding-agent** as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
 - **DBOS Transact (TypeScript)** as the durable workflow engine (Postgres-backed workflows/queues/scheduling).
 
+---
+
+## Repository map (high-level)
+
+> Staff-engineering note: this repo is intentionally empty today. The map below is the *intended* structure so contributors can scaffold consistently when implementation begins. Keep it in sync as we add code.
+
+```
+/
+├─ apps/
+│  ├─ server/                # DBOS app, HTTP ingress, workflow runner
+│  └─ cli/                   # JSON-first CLI client
+├─ packages/
+│  ├─ runtime/               # Thin wrapper around pi SDK/RPC (“AgentRunner”)
+│  ├─ adapters/              # Optional adapters (telegram, slack, etc.)
+│  └─ shared/                # Shared types/utilities/config
+├─ configs/                  # Centralized config templates (env, db, etc.)
+├─ scripts/                  # Dev/CI helper scripts
+├─ docs/                     # Architecture notes, runbooks
+├─ deploy/                   # Infra, container, and deployment assets
+├─ tests/                    # Cross-package tests (if needed)
+├─ package.json              # Monorepo root
+└─ pnpm-workspace.yaml       # Workspace definition
+```
+
+### Code organization principles
+- **Monorepo with workspaces:** apps for runnable targets; packages for libraries/adapters; shared types live in `packages/shared`.
+- **Thin core:** core server + CLI only; integrations live in `packages/adapters/*`.
+- **User config repo stays separate:** workflows, skills, prompts, and tools remain in user-land.
+- **Stable boundaries:** adapters depend on `runtime` + `shared`, not on other adapters.
+
+---
+
+## JS/TS stack baseline (pnpm + pi-mono alignment)
+
+We will use **pnpm** and mirror the JS/TS stack choices from **pi-mono** wherever applicable, adapted for this repo:
+
+- **Node.js:** `>= 20` (same baseline as pi-mono).
+- **TypeScript:** latest stable (`^5.x`) with `type: "module"` ESM defaults.
+- **TS execution:** `tsx` for dev/cli scripting.
+- **Lint/format:** **Biome** (`@biomejs/biome`) as the default formatter + linter.
+- **Monorepo tools:** pnpm workspaces + `pnpm -r` equivalents for multi-package tasks.
+- **Dev scripts:** `concurrently` for multi-app dev where needed.
+- **Git hooks:** `husky` for pre-commit checks (optional but aligned with pi-mono).
+
+We’ll pin versions and scripts once scaffolding starts, but this baseline guides initial setup.
+
 The goal is a **thin core** that:
 - Accepts events/messages (initially **CLI** + **Telegram**).
 - Runs **TypeScript workflows** that can invoke **pi agents** (and spawn sub-agents / branches).
