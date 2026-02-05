@@ -11,7 +11,7 @@ Self-hosted “life automation” runtime built on:
 - **Pre-alpha.** Expect breaking changes.
 - **Contracts we intend to stabilize early:**
   - Workspace layout + override rules (see **Workspace contract**)
-  - Normalized event schema (see **Normalized events**)
+  - Normalized event schema + idempotency semantics (see **Normalized events**)
 - **Everything else is allowed to change** (HTTP/CLI surface, DB schema, workflow names).
 
 ### Deployment files are drafts
@@ -25,7 +25,7 @@ Everything under `deploy/` is a **draft**. It exists to communicate *intended* o
 Build a **thin core** that:
 - Accepts events/messages (initially **CLI** + **Telegram**).
 - Runs **TypeScript workflows** that can invoke **pi agents** (and spawn sub-agents / branches).
-- Lets users extend/override behavior (system prompt, skills, extensions, packages, workflows) via a **separate “user config repo”** (git/GitHub), not by forking core.
+- Lets users extend/override behavior via a **separate “user config repo”** (git/GitHub), not by forking core, using **pi concepts** (skills, prompt templates, extensions, themes, packages) plus jagc workflows.
 
 ## Non-goals
 
@@ -149,7 +149,8 @@ User config repo (separate git repo, **repo-root files** — no `.pi/` nesting):
 - `prompts/`                 prompt templates
 - `extensions/`              custom tools, hooks, gates
 - `themes/`                  optional
-- `settings.json`            pi/jagc settings (optional)
+- `jagc.json`                jagc workspace config (optional)
+- `settings.json`            pi workspace-local settings (optional)
 - `git/` / `npm/`            project-local pi package installs (optional)
 - `AGENTS.md`                user “policy + conventions” (loaded as context)
 - `workflows/`               TypeScript workflows (loaded by the server)
@@ -208,7 +209,7 @@ Example:
 - `JAGC_DATABASE_URL`
   - Postgres connection string.
 - `JAGC_WORKSPACE_DIR`
-  - Path to the user config repo (contains `workflows/`, `AGENTS.md`, and optional pi/jagc overrides such as `SYSTEM.md`, `skills/`, `extensions/`, etc.).
+  - Path to the user config repo (contains `workflows/`, `AGENTS.md`, optional jagc config like `jagc.json`, and optional pi artifacts such as `SYSTEM.md`, `skills/`, `extensions/`, etc.).
 - `JAGC_PORT`
   - Server bind port.
 
@@ -218,6 +219,10 @@ Example:
   - Overrides pi-coding-agent’s config/state directory (default: `~/.pi/agent`).
   - This is where **sessions**, global `skills/`, `prompts/`, `extensions/`, `themes/`, and `settings.json` live.
   - **Must be persisted** (e.g. Docker volume) if you want sessions to survive restarts.
+
+- Workspace config file: `$JAGC_WORKSPACE_DIR/jagc.json` (planned)
+  - jagc-specific, non-secret configuration that lives with the workspace repo.
+  - Precedence intent: CLI flags > env vars > `jagc.json` > built-in defaults.
 
 - Logging (recommended to implement early)
   - `JAGC_LOG_LEVEL=debug|info|warn|error` (default: `info`)
@@ -253,13 +258,25 @@ $JAGC_WORKSPACE_DIR/
   prompts/            (optional)
   extensions/         (optional)
   themes/             (optional)
-  settings.json       (optional)
+  jagc.json           (optional)
+  settings.json       (optional, pi workspace-local settings)
 ```
 
 ### Override rules (intent)
 
 - Core may ship built-in workflows such as `telegram.message`.
 - If the workspace defines a workflow with the same name, the workspace version **wins**.
+- For **pi artifacts** (skills, prompt templates, extensions, themes), jagc relies on pi’s model; jagc does not define a separate extension system.
+- In practice, if a workspace artifact has the same logical name as a built-in one, the workspace artifact **wins**.
+
+### Workspace config files
+
+- `jagc.json`
+  - jagc-specific workspace config (non-secrets).
+  - Recommended for runtime/workflow defaults that should live with the workspace repo.
+- `settings.json`
+  - pi workspace-local settings file (used by `pi install -l`, package declarations, etc.).
+  - This remains a pi file; jagc should not repurpose it.
 
 ### System prompt overrides
 
@@ -294,7 +311,8 @@ This is a **draft** API contract we should implement for the MVP.
   - Returns 200 when the process is up.
 - `POST /v1/events`
   - Accepts a normalized event payload (see below)
-  - Returns `{ run_id }`
+  - Supports idempotent ingest via `event_id` in payload (or `Idempotency-Key` header)
+  - Returns `{ run_id }` (for duplicate idempotent submits, returns the existing `run_id`)
 - `GET /v1/runs/:run_id`
   - Returns status and (when complete) output
 
@@ -311,6 +329,9 @@ All ingresses (CLI, Telegram, webhooks) should normalize into a common event:
 ```json
 {
   "schema_version": 1,
+  "event_id": "evt_123",
+  "source": "telegram",
+  "received_at": "2026-02-05T12:34:56.000Z",
   "type": "telegram.message",
   "conversation_key": "...",
   "user_key": "...",
@@ -321,6 +342,9 @@ All ingresses (CLI, Telegram, webhooks) should normalize into a common event:
 
 Notes:
 - `schema_version` allows intentional evolution.
+- `event_id` is used for idempotent ingest/deduplication.
+- `source` identifies ingress origin (e.g. `cli`, `telegram`, `webhook`).
+- `received_at` is optional but recommended for traceability.
 - `raw` is optional and should be treated carefully (may contain PII/secrets).
 
 ---
@@ -390,8 +414,6 @@ Implementation strategy:
 - Disk stores:
   - pi session state under `PI_CODING_AGENT_DIR` (or default `~/.pi/agent`)
 
-**Backups:** to preserve conversations, back up **both** Postgres and `PI_CODING_AGENT_DIR`.
-
 ---
 
 ## Logging & observability (recommended defaults)
@@ -417,6 +439,8 @@ Supported by design:
 
 ## Packages (skills/prompts/extensions/themes)
 
+`extensions`, `skills`, `prompt templates`, `themes`, and `packages` are **pi concepts**. jagc uses pi’s extension model directly; jagc does not define a separate package/extension system.
+
 Pi packages bundle extensions, skills, prompt templates, and themes and can be installed from **npm**, **git**, or a **local path**.
 
 Install and manage packages with the `pi` CLI:
@@ -433,11 +457,13 @@ pi update
 ```
 
 **Scope:** by default, `pi install/remove` write to global settings (`~/.pi/agent/settings.json`, or `PI_CODING_AGENT_DIR/settings.json` if set).
-Use `-l` to write to workspace-local settings (`settings.json` in the workspace root, per jagc convention) instead:
+Use `-l` to write to workspace-local settings (`settings.json` in the workspace root, per pi convention) instead:
 
 ```bash
 pi install -l npm:@foo/bar
 ```
+
+Override behavior (intent): jagc may ship built-in pi artifacts for a good default UX; workspace-local artifacts with the same logical name override those built-ins.
 
 > Security: Pi packages run with full system access. Review third-party packages before installing.
 
@@ -557,7 +583,7 @@ The CLI is part of the test harness. It must be able to drive the system the way
 
 - `jagc event send`
   - sends a **normalized event** to `POST /v1/events`
-  - supports `--type`, `--conversation-key`, `--user-key`, `--text`, and `--raw @file.json`
+  - supports `--event-id`, `--source`, `--type`, `--conversation-key`, `--user-key`, `--text`, and `--raw @file.json`
 
 - `jagc message "…"`
   - convenience wrapper for `event send` targeting the default message workflow
@@ -586,6 +612,16 @@ Planned script names (intent):
 - `pnpm test:integration` — black-box integration tests against a running server
 - `pnpm test:e2e:real` — local-only smoke tests that hit a real LLM provider (requires credentials)
 - `pnpm verify` — lint + typecheck + unit + integration
+
+## Post-MVP priorities (P1)
+
+Immediately after MVP, we should add:
+- `jagc doctor`
+  - validates environment, DB connectivity, workspace structure, and version compatibility
+- `jagc workspace init`
+  - scaffolds a canonical workspace (repo-root layout, sample workflow, minimal defaults)
+- Structured observability baseline
+  - JSON logs + core counters (run latency, queue depth, lock wait time, failure classes)
 
 ## Development
 
