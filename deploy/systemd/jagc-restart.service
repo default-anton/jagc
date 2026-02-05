@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart jagc (triggered by jagc.path)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart jagc.service

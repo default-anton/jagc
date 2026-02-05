@@ -1,6 +1,0 @@
-[Unit]
-Description=Restart kaiser (triggered by kaiser.path)
-
-[Service]
-Type=oneshot
-ExecStart=/bin/systemctl restart kaiser.service

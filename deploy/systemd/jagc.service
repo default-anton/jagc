@@ -1,14 +1,14 @@
 [Unit]
-Description=kaiser server
+Description=jagc server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=kaiser
-Group=kaiser
-WorkingDirectory=/opt/kaiser
-EnvironmentFile=/etc/kaiser/kaiser.env
+User=jagc
+Group=jagc
+WorkingDirectory=/opt/jagc
+EnvironmentFile=/etc/jagc/jagc.env
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env pnpm start
 ExecReload=/bin/kill -HUP $MAINPID
@@ -18,7 +18,7 @@ TimeoutStopSec=30
 KillSignal=SIGINT
 
 # Logs end up in journald. View with:
-#   journalctl -u kaiser -f
+#   journalctl -u jagc -f
 
 [Install]
 WantedBy=multi-user.target

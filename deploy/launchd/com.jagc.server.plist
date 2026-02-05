@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.kaiser.server</string>
+    <string>com.jagc.server</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -13,7 +13,7 @@
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/opt/kaiser</string>
+    <string>/opt/jagc</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -27,19 +27,19 @@
       <key>PATH</key>
       <string>/usr/local/bin:/usr/bin:/bin</string>
 
-      <key>KAISER_DATABASE_URL</key>
-      <string>postgres://user:pass@127.0.0.1:5432/kaiser</string>
-      <key>KAISER_WORKSPACE_DIR</key>
-      <string>/Users/you/kaiser-workspace</string>
-      <key>KAISER_PORT</key>
+      <key>JAGC_DATABASE_URL</key>
+      <string>postgres://user:pass@127.0.0.1:5432/jagc</string>
+      <key>JAGC_WORKSPACE_DIR</key>
+      <string>/Users/you/jagc-workspace</string>
+      <key>JAGC_PORT</key>
       <string>31415</string>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/tmp/kaiser.out.log</string>
+    <string>/tmp/jagc.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/kaiser.err.log</string>
+    <string>/tmp/jagc.err.log</string>
 
     <key>ProcessType</key>
     <string>Background</string>

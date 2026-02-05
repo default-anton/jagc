@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart jagc when workspace changes
+
+[Path]
+PathModified=/var/lib/jagc/workspace/workflows
+PathModified=/var/lib/jagc/workspace/.pi
+Unit=jagc-restart.service
+
+[Install]
+WantedBy=multi-user.target

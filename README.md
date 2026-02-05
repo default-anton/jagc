@@ -1,4 +1,6 @@
-# my-kaiser
+# jagc
+
+> **jagc** = **j**ust **a** **g**ood **c**lanker. Name is a joke; runtime is serious.
 
 Self-hosted “life automation” runtime built on:
 - **pi-coding-agent** as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
@@ -41,7 +43,7 @@ This is the first slice we should ship before expanding scope:
   - HTTP health endpoint
   - Ingest a message event, run a workflow durably via DBOS, return a `run_id`
 - CLI:
-  - `kaiser message "..."` sends an event and prints a JSON result
+  - `jagc message "..."` sends an event and prints a JSON result
 - Telegram (polling mode):
   - Receive personal chat messages
   - Per-conversation serialization (no concurrent agent runs for the same chat; each run may include multiple internal turns/tool calls)
@@ -49,7 +51,7 @@ This is the first slice we should ship before expanding scope:
 
 ### Acceptance tests (behavior)
 
-- `kaiser message "ping" --json` returns a JSON response that includes:
+- `jagc message "ping" --json` returns a JSON response that includes:
   - `run_id`
   - `status` (`succeeded|failed|running`)
   - `output` (when succeeded)
@@ -147,7 +149,7 @@ User config repo (separate git repo, **repo-root files** — no `.pi/` nesting):
 - `prompts/`                 prompt templates
 - `extensions/`              custom tools, hooks, gates
 - `themes/`                  optional
-- `settings.json`            pi/kaiser settings (optional)
+- `settings.json`            pi/jagc settings (optional)
 - `git/` / `npm/`            project-local pi package installs (optional)
 - `AGENTS.md`                user “policy + conventions” (loaded as context)
 - `workflows/`               TypeScript workflows (loaded by the server)
@@ -171,20 +173,20 @@ The server is pointed at the user repo path as its “workspace”.
 
 ### Environment
 
-All application config env vars are prefixed with **`KAISER_`**, except `PI_CODING_AGENT_DIR`.
+All application config env vars are prefixed with **`JAGC_`**, except `PI_CODING_AGENT_DIR`.
 
 Example:
 
-- `KAISER_DATABASE_URL=postgres://...`
-- `KAISER_WORKSPACE_DIR=/path/to/user-config-repo`
-- `KAISER_PORT=31415`
+- `JAGC_DATABASE_URL=postgres://...`
+- `JAGC_WORKSPACE_DIR=/path/to/user-config-repo`
+- `JAGC_PORT=31415`
 - Provider keys (e.g. `OPENAI_API_KEY=...`, etc.)
 - `PI_CODING_AGENT_DIR=/path/to/pi-agent-state` (optional)
 - Telegram (optional)
-  - `KAISER_TELEGRAM_BOT_TOKEN=...`
-  - `KAISER_TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
-  - (webhook) `KAISER_TELEGRAM_WEBHOOK_PATH=/telegram/webhook`
-  - (webhook) `KAISER_TELEGRAM_WEBHOOK_SECRET=...` (recommended)
+  - `JAGC_TELEGRAM_BOT_TOKEN=...`
+  - `JAGC_TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
+  - (webhook) `JAGC_TELEGRAM_WEBHOOK_PATH=/telegram/webhook`
+  - (webhook) `JAGC_TELEGRAM_WEBHOOK_SECRET=...` (recommended)
 
 ### Run
 
@@ -194,7 +196,7 @@ Example:
 3) Start server
    - `pnpm dev`
 4) Talk to it
-   - CLI: `kaiser message "..." --json`
+   - CLI: `jagc message "..." --json`
    - Telegram: message the bot
 
 ---
@@ -203,11 +205,11 @@ Example:
 
 ### Required
 
-- `KAISER_DATABASE_URL`
+- `JAGC_DATABASE_URL`
   - Postgres connection string.
-- `KAISER_WORKSPACE_DIR`
-  - Path to the user config repo (contains `workflows/`, `AGENTS.md`, and optional pi/kaiser overrides such as `SYSTEM.md`, `skills/`, `extensions/`, etc.).
-- `KAISER_PORT`
+- `JAGC_WORKSPACE_DIR`
+  - Path to the user config repo (contains `workflows/`, `AGENTS.md`, and optional pi/jagc overrides such as `SYSTEM.md`, `skills/`, `extensions/`, etc.).
+- `JAGC_PORT`
   - Server bind port.
 
 ### Optional
@@ -218,31 +220,31 @@ Example:
   - **Must be persisted** (e.g. Docker volume) if you want sessions to survive restarts.
 
 - Logging (recommended to implement early)
-  - `KAISER_LOG_LEVEL=debug|info|warn|error` (default: `info`)
-  - `KAISER_LOG_FORMAT=pretty|json` (default: `pretty` in dev, `json` in prod)
+  - `JAGC_LOG_LEVEL=debug|info|warn|error` (default: `info`)
+  - `JAGC_LOG_FORMAT=pretty|json` (default: `pretty` in dev, `json` in prod)
 
 ### Telegram
 
-- `KAISER_TELEGRAM_BOT_TOKEN`
-- `KAISER_TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
-- `KAISER_TELEGRAM_WEBHOOK_PATH` (default: `/telegram/webhook`)
-- `KAISER_TELEGRAM_WEBHOOK_SECRET` (optional; recommended)
+- `JAGC_TELEGRAM_BOT_TOKEN`
+- `JAGC_TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
+- `JAGC_TELEGRAM_WEBHOOK_PATH` (default: `/telegram/webhook`)
+- `JAGC_TELEGRAM_WEBHOOK_SECRET` (optional; recommended)
 
 ### Provider credentials
 
-LLM provider credentials are **passed through** to pi/provider SDKs; kaiser does not interpret them. Example:
+LLM provider credentials are **passed through** to pi/provider SDKs; jagc does not interpret them. Example:
 - `OPENAI_API_KEY=...`
 
 ---
 
-## Workspace contract (KAISER_WORKSPACE_DIR)
+## Workspace contract (JAGC_WORKSPACE_DIR)
 
 The workspace is a **trusted** local directory (usually a git repo) that contains user overrides and automation logic.
 
 ### Minimal workspace
 
 ```text
-$KAISER_WORKSPACE_DIR/
+$JAGC_WORKSPACE_DIR/
   workflows/
   AGENTS.md           (recommended)
   SYSTEM.md           (optional)
@@ -394,7 +396,7 @@ Implementation strategy:
 
 ## Logging & observability (recommended defaults)
 
-- Default to structured logs in production (`KAISER_LOG_FORMAT=json`).
+- Default to structured logs in production (`JAGC_LOG_FORMAT=json`).
 - Include correlation fields in every log line:
   - `run_id`, `workflow_name`, `conversation_key` (when applicable)
 
@@ -431,7 +433,7 @@ pi update
 ```
 
 **Scope:** by default, `pi install/remove` write to global settings (`~/.pi/agent/settings.json`, or `PI_CODING_AGENT_DIR/settings.json` if set).
-Use `-l` to write to workspace-local settings (`settings.json` in the workspace root, per kaiser convention) instead:
+Use `-l` to write to workspace-local settings (`settings.json` in the workspace root, per jagc convention) instead:
 
 ```bash
 pi install -l npm:@foo/bar
@@ -448,9 +450,9 @@ Draft assets exist under:
 - `deploy/launchd/`
 
 They currently assume conventions like:
-- code in `/opt/kaiser`
-- workspace in `/var/lib/kaiser/workspace`
-- env file in `/etc/kaiser/kaiser.env`
+- code in `/opt/jagc`
+- workspace in `/var/lib/jagc/workspace`
+- env file in `/etc/jagc/jagc.env`
 
 These are **not stable** yet; treat them as examples.
 
@@ -494,7 +496,7 @@ This implies:
 
 - Start the whole stack (server + Postgres) and test it only through public interfaces:
   - HTTP (`/v1/events`, `/v1/runs/:id`)
-  - CLI (`kaiser …`)
+  - CLI (`jagc …`)
   - Telegram ingress (simulated via CLI webhook sender)
 - Best at catching wiring/config regressions.
 - Works great for local verification and for running in CI with a mock/deterministic LLM provider.
@@ -506,9 +508,9 @@ This implies:
 
 Then verification is just:
 
-- `kaiser health`
-- `kaiser message "ping" --json`
-- `kaiser run wait <run_id> --timeout 60s --json`
+- `jagc health`
+- `jagc message "ping" --json`
+- `jagc run wait <run_id> --timeout 60s --json`
 
 **What the integration suite must cover (minimum):**
 - health check (`/healthz`)
@@ -538,7 +540,7 @@ Tradeoff: fixtures drift if not curated; best used as a supplement to A/B.
 
 The CLI is part of the test harness. It must be able to drive the system the way external systems do.
 
-**Command name:** `kaiser`
+**Command name:** `jagc`
 
 **Global conventions (intent):**
 - `--json` for machine output, human-friendly output by default
@@ -546,34 +548,34 @@ The CLI is part of the test harness. It must be able to drive the system the way
 - `--no-input` disables prompts (required for CI)
 - server target is configurable (flags beat env):
   - `--api-url http://127.0.0.1:31415` (default)
-  - `KAISER_API_URL=http://127.0.0.1:31415`
+  - `JAGC_API_URL=http://127.0.0.1:31415`
 
 #### Proposed command surface (minimal but complete)
 
-- `kaiser health`
+- `jagc health`
   - checks HTTP health (`/healthz`) and exits non-zero if unhealthy
 
-- `kaiser event send`
+- `jagc event send`
   - sends a **normalized event** to `POST /v1/events`
   - supports `--type`, `--conversation-key`, `--user-key`, `--text`, and `--raw @file.json`
 
-- `kaiser message "…"`
+- `jagc message "…"`
   - convenience wrapper for `event send` targeting the default message workflow
 
-- `kaiser ask "…"`
-  - alias for `kaiser message` (deprecated; may be removed once the CLI surface stabilizes)
+- `jagc ask "…"`
+  - alias for `jagc message` (deprecated; may be removed once the CLI surface stabilizes)
 
-- `kaiser run get <run_id>`
+- `jagc run get <run_id>`
   - fetches status/output from `GET /v1/runs/:run_id`
 
-- `kaiser run wait <run_id>`
+- `jagc run wait <run_id>`
   - waits until completion (or timeout); useful for scripts and integration tests
 
-- `kaiser webhook send`
+- `jagc webhook send`
   - simulates third-party webhooks by posting JSON to the relevant endpoint
   - examples:
-    - `kaiser webhook send --path /telegram/webhook --body @tests/fixtures/telegram/update.json`
-    - `kaiser webhook send --path /telegram/webhook --header "X-Telegram-Bot-Api-Secret-Token: …" --body @…`
+    - `jagc webhook send --path /telegram/webhook --body @tests/fixtures/telegram/update.json`
+    - `jagc webhook send --path /telegram/webhook --header "X-Telegram-Bot-Api-Secret-Token: …" --body @…`
 
 > Design note: we intentionally keep webhook simulation generic (`--path/--body/--header`) so we can test *any* adapter without adding a new command every time.
 
@@ -605,5 +607,5 @@ Planned repo scripts (names we should standardize on):
 ## Upstream references used for design alignment (pi + DBOS)
 
 - pi is designed as a minimal harness that is extended via **extensions, skills, prompt templates, themes**, and shared as **pi packages** installable from **npm or git**.
-- pi loads **AGENTS.md** context files and supports **system prompt replacement** (kaiser workspaces place this at `SYSTEM.md` + optional `APPEND_SYSTEM.md` at repo root).
+- pi loads **AGENTS.md** context files and supports **system prompt replacement** (jagc workspaces place this at `SYSTEM.md` + optional `APPEND_SYSTEM.md` at repo root).
 - DBOS Transact is positioned as an open-source **durable execution/workflows** library (including TypeScript) backed by **Postgres**.
