@@ -27,11 +27,11 @@
       <key>PATH</key>
       <string>/usr/local/bin:/usr/bin:/bin</string>
 
-      <key>DATABASE_URL</key>
+      <key>KAISER_DATABASE_URL</key>
       <string>postgres://user:pass@127.0.0.1:5432/kaiser</string>
-      <key>WORKSPACE_DIR</key>
+      <key>KAISER_WORKSPACE_DIR</key>
       <string>/Users/you/kaiser-workspace</string>
-      <key>PORT</key>
+      <key>KAISER_PORT</key>
       <string>31415</string>
     </dict>
 
