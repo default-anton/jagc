@@ -41,7 +41,7 @@ This is the first slice we should ship before expanding scope:
   - HTTP health endpoint
   - Ingest a message event, run a workflow durably via DBOS, return a `run_id`
 - CLI:
-  - `kaiser ask "..."` sends an event and prints a JSON result
+  - `kaiser message "..."` sends an event and prints a JSON result
 - Telegram (polling mode):
   - Receive personal chat messages
   - Per-conversation serialization (no concurrent agent runs for the same chat; each run may include multiple internal turns/tool calls)
@@ -49,7 +49,7 @@ This is the first slice we should ship before expanding scope:
 
 ### Acceptance tests (behavior)
 
-- `kaiser ask "ping" --json` returns a JSON response that includes:
+- `kaiser message "ping" --json` returns a JSON response that includes:
   - `run_id`
   - `status` (`succeeded|failed|running`)
   - `output` (when succeeded)
@@ -194,7 +194,7 @@ Example:
 3) Start server
    - `pnpm dev`
 4) Talk to it
-   - CLI: `kaiser ask "..." --json`
+   - CLI: `kaiser message "..." --json`
    - Telegram: message the bot
 
 ---
@@ -474,6 +474,116 @@ Recommended baseline:
 - maintain an audit log of tool calls and external side effects
 
 ---
+
+## Verifiability & testing (design contract)
+
+Verifiability is a core product requirement, especially because the system will run AI agents that can change behavior over time. The rule of thumb:
+
+- **If an integration can’t be triggered and observed via CLI, it’s not “real” yet.**
+
+This implies:
+- every ingress (CLI, HTTP, Telegram webhook/polling) has a **CLI equivalent** for simulation/replay
+- the CLI can **wait for runs**, fetch results, and surface logs in a scriptable way
+- we support **“real stack” local runs** (no mocks) and **deterministic CI runs** (mocks/fixtures)
+
+### Integration test options
+
+**Decision (default): we will implement Option A first** (black-box end-to-end via the CLI + a real running server). Options B/C remain valuable supplements once the core is stable.
+
+#### Option A (default): Black-box end-to-end tests via the CLI + a real running server
+
+- Start the whole stack (server + Postgres) and test it only through public interfaces:
+  - HTTP (`/v1/events`, `/v1/runs/:id`)
+  - CLI (`kaiser …`)
+  - Telegram ingress (simulated via CLI webhook sender)
+- Best at catching wiring/config regressions.
+- Works great for local verification and for running in CI with a mock/deterministic LLM provider.
+
+**Dev UX target:** one command starts everything “for real”:
+
+- `pnpm dev` — start the server in watch mode
+- `pnpm dev:up` — start all dependencies (ex: Postgres) + run migrations + start server (exact scripting TBD)
+
+Then verification is just:
+
+- `kaiser health`
+- `kaiser message "ping" --json`
+- `kaiser run wait <run_id> --timeout 60s --json`
+
+**What the integration suite must cover (minimum):**
+- health check (`/healthz`)
+- event ingest (`POST /v1/events`) + run completion (`GET /v1/runs/:id`)
+- webhook simulation path (post a fixture JSON to an adapter endpoint)
+- per-conversation serialization (send two events with same `conversation_key` and assert ordered processing)
+
+#### Option B: Integration tests in-process (Vitest) + ephemeral Postgres (Testcontainers)
+
+- Run tests against a real Postgres, provisioned per test run.
+- Call the HTTP server in-process (random port) and assert on responses.
+- Faster feedback than full multi-process tests; excellent for CI.
+
+Tradeoff: can miss some “real process” issues (env wiring, logging, signal handling) unless paired with Option A smoke tests.
+
+#### Option C: Fixture/replay tests for adapters + normalized events
+
+- Keep a small library of real-ish fixtures:
+  - Telegram update JSON payloads
+  - Webhook payloads from other providers
+  - Normalized event JSON inputs
+- CI replays fixtures through the same normalization + workflow dispatch path and snapshots outputs.
+
+Tradeoff: fixtures drift if not curated; best used as a supplement to A/B.
+
+### CLI capabilities required for verifiable testing
+
+The CLI is part of the test harness. It must be able to drive the system the way external systems do.
+
+**Command name:** `kaiser`
+
+**Global conventions (intent):**
+- `--json` for machine output, human-friendly output by default
+- stderr for logs/diagnostics, stdout for primary output
+- `--no-input` disables prompts (required for CI)
+- server target is configurable (flags beat env):
+  - `--api-url http://127.0.0.1:31415` (default)
+  - `KAISER_API_URL=http://127.0.0.1:31415`
+
+#### Proposed command surface (minimal but complete)
+
+- `kaiser health`
+  - checks HTTP health (`/healthz`) and exits non-zero if unhealthy
+
+- `kaiser event send`
+  - sends a **normalized event** to `POST /v1/events`
+  - supports `--type`, `--conversation-key`, `--user-key`, `--text`, and `--raw @file.json`
+
+- `kaiser message "…"`
+  - convenience wrapper for `event send` targeting the default message workflow
+
+- `kaiser ask "…"`
+  - alias for `kaiser message` (deprecated; may be removed once the CLI surface stabilizes)
+
+- `kaiser run get <run_id>`
+  - fetches status/output from `GET /v1/runs/:run_id`
+
+- `kaiser run wait <run_id>`
+  - waits until completion (or timeout); useful for scripts and integration tests
+
+- `kaiser webhook send`
+  - simulates third-party webhooks by posting JSON to the relevant endpoint
+  - examples:
+    - `kaiser webhook send --path /telegram/webhook --body @tests/fixtures/telegram/update.json`
+    - `kaiser webhook send --path /telegram/webhook --header "X-Telegram-Bot-Api-Secret-Token: …" --body @…`
+
+> Design note: we intentionally keep webhook simulation generic (`--path/--body/--header`) so we can test *any* adapter without adding a new command every time.
+
+### Suggested repo scripts (for repeatable verification)
+
+Planned script names (intent):
+- `pnpm test` — unit + integration (mock provider)
+- `pnpm test:integration` — black-box integration tests against a running server
+- `pnpm test:e2e:real` — local-only smoke tests that hit a real LLM provider (requires credentials)
+- `pnpm verify` — lint + typecheck + unit + integration
 
 ## Development
 
