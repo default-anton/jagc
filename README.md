@@ -4,6 +4,52 @@ Self-hosted “life automation” runtime built on:
 - **pi-coding-agent** as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
 - **DBOS Transact (TypeScript)** as the durable workflow engine (Postgres-backed workflows/queues/scheduling).
 
+---
+
+## Repository map (high-level, single project)
+
+> Staff-engineering note: this repo is intentionally empty today. The map below is the *intended* structure so contributors can scaffold consistently when implementation begins. Keep it in sync as we add code.
+
+```
+/
+├─ src/
+│  ├─ server/                # HTTP ingress + DBOS workflow runner
+│  ├─ cli/                   # JSON-first CLI entrypoints
+│  ├─ runtime/               # Thin wrapper around pi SDK/RPC (“AgentRunner”)
+│  ├─ adapters/              # Built-in adapters (telegram, cli, etc.)
+│  ├─ workflows/             # Built-in workflows shipped with core
+│  ├─ skills/                # Built-in skills shipped with core
+│  └─ shared/                # Shared types/utilities/config
+├─ configs/                  # Centralized config templates (env, db, etc.)
+├─ scripts/                  # Dev/CI helper scripts
+├─ docs/                     # Architecture notes, runbooks
+├─ deploy/                   # Infra, container, and deployment assets
+├─ tests/                    # Tests (if needed)
+├─ package.json              # Single-project root
+└─ pnpm-lock.yaml            # pnpm lockfile (once we add deps)
+```
+
+### Code organization principles
+- **Single project:** one Node.js app with clear module boundaries (no workspaces).
+- **Thin core, but ships defaults:** core includes built-in adapters, workflows, and skills so the system is usable out of the box.
+- **User config repo stays separate:** user workflows, skills, prompts, and tools live in user-land and can override built-ins.
+- **Stable boundaries:** adapters depend on `runtime` + `shared`, not on each other.
+
+---
+
+## JS/TS stack baseline (pnpm + pi-mono alignment)
+
+We will use **pnpm** and mirror the JS/TS stack choices from **pi-mono** wherever applicable, adapted for this repo:
+
+- **Node.js:** `>= 20` (same baseline as pi-mono).
+- **TypeScript:** latest stable (`^5.x`) with `type: "module"` ESM defaults.
+- **TS execution:** `tsx` for dev/cli scripting.
+- **Lint/format:** **Biome** (`@biomejs/biome`) as the default formatter + linter.
+- **Dev scripts:** `concurrently` for multi-process dev where needed.
+- **Git hooks:** `husky` for pre-commit checks (optional but aligned with pi-mono).
+
+We’ll pin versions and scripts once scaffolding starts, but this baseline guides initial setup.
+
 The goal is a **thin core** that:
 - Accepts events/messages (initially **CLI** + **Telegram**).
 - Runs **TypeScript workflows** that can invoke **pi agents** (and spawn sub-agents / branches).
@@ -77,11 +123,13 @@ Core stays small and updateable; users keep their customizations in their own re
 
 ## Repository layout (suggested)
 
-Core repo (this repo):
-- `apps/server/`         DBOS app + HTTP ingress + workflow runner
-- `apps/cli/`            CLI that talks to the server (JSON friendly)
-- `packages/runtime/`    thin wrapper around pi SDK/RPC (“AgentRunner”)
-- `packages/adapters/telegram/` Telegram adapter (optional package if you prefer)
+Core repo (this repo, single project):
+- `src/server/`         DBOS app + HTTP ingress + workflow runner
+- `src/cli/`            CLI that talks to the server (JSON friendly)
+- `src/runtime/`        thin wrapper around pi SDK/RPC (“AgentRunner”)
+- `src/adapters/`       built-in adapters (telegram, cli, etc.)
+- `src/workflows/`      built-in workflows shipped with core
+- `src/skills/`         built-in skills shipped with core
 
 User config repo (separate git repo):
 - `.pi/`
