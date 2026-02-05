@@ -3,7 +3,7 @@
 > **jagc** = **j**ust **a** **g**ood **c**lanker. Name is a joke; runtime is serious.
 
 Self-hosted “life automation” runtime built on:
-- **pi-coding-agent** as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
+- **pi-coding-agent** (from [`pi-mono`](https://github.com/badlogic/pi-mono), package: [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)) as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
 - **DBOS Transact (TypeScript)** as the durable workflow engine (Postgres-backed workflows/queues/scheduling).
 
 ## Status
@@ -606,6 +606,8 @@ Planned repo scripts (names we should standardize on):
 
 ## Upstream references used for design alignment (pi + DBOS)
 
+- pi upstream monorepo: [`badlogic/pi-mono`](https://github.com/badlogic/pi-mono)
+- pi coding agent package in that monorepo: [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 - pi is designed as a minimal harness that is extended via **extensions, skills, prompt templates, themes**, and shared as **pi packages** installable from **npm or git**.
 - pi loads **AGENTS.md** context files and supports **system prompt replacement** (jagc workspaces place this at `SYSTEM.md` + optional `APPEND_SYSTEM.md` at repo root).
 - DBOS Transact is positioned as an open-source **durable execution/workflows** library (including TypeScript) backed by **Postgres**.
