@@ -11,7 +11,7 @@ Self-hosted AI assistant to automate your life:
 - **Pre-alpha.** Expect breaking changes.
 - **Contracts we intend to stabilize early:**
   - Workspace layout + override rules (see **Workspace contract**)
-  - Normalized event schema + idempotency semantics (see **Normalized events**)
+  - Ingress envelope + idempotency semantics (internal), and thread/run behavior (see **Ingress envelope (internal)** and **Threads, runs, and queued messages**)
 - **Everything else is allowed to change** (HTTP/CLI surface, DB schema, workflow names).
 
 ### Deployment files are drafts
@@ -23,7 +23,7 @@ Everything under `deploy/` is a **draft**. It exists to communicate *intended* o
 ## Goals
 
 Build a **thin core** that:
-- Accepts events/messages (initially **CLI** + **Telegram**).
+- Accepts **messages** from multiple ingresses (initially **CLI** + **Telegram**; webhooks as a specific ingress type).
 - Runs **TypeScript workflows** that can invoke **pi agents** (and spawn sub-agents / branches).
 - Lets users extend/override behavior via a **separate “user config repo”** (git/GitHub), not by forking core, using **pi concepts** (skills, prompt templates, extensions, themes, packages) plus jagc workflows.
 
@@ -41,12 +41,12 @@ This is the first slice we should ship before expanding scope:
 
 - Server:
   - HTTP health endpoint
-  - Ingest a message event, run a workflow durably via DBOS, return a `run_id`
+  - Ingest a message, run a workflow durably via DBOS, return a `run_id`
 - CLI:
-  - `jagc message "..."` sends an event and prints a JSON result
+  - `jagc message "..."` sends a message and prints a JSON result
 - Telegram (polling mode):
   - Receive personal chat messages
-  - Per-conversation serialization (no concurrent agent runs for the same chat; each run may include multiple internal turns/tool calls)
+  - One active run per Telegram thread (chat), with queued input behavior matching pi (`steer` and `followUp`)
   - Reply with the agent output
 
 ### Acceptance tests (behavior)
@@ -55,8 +55,8 @@ This is the first slice we should ship before expanding scope:
   - `run_id`
   - `status` (`succeeded|failed|running`)
   - `output` (when succeeded)
-- If two messages arrive for the same `conversation_key`, they are processed **sequentially**.
-- Messages for different `conversation_key`s can be processed concurrently.
+- If two messages arrive for the same thread while a run is active, delivery obeys mode (`steer` interrupts after current tool; `followUp` queues for after completion).
+- Different threads can execute concurrently.
 
 ---
 
@@ -65,14 +65,14 @@ This is the first slice we should ship before expanding scope:
 A small server + adapters:
 
 - **Core server**
-  - Receives inbound messages/events (HTTP webhook, CLI calls, Telegram updates).
+  - Receives inbound messages from adapters (CLI calls, Telegram updates, webhooks).
   - Dispatches to **DBOS workflows** (durable, retryable, schedulable).
   - Runs **pi agent sessions** as workflow steps (tool calling, context compaction, branching).
 
 - **Process model (simplicity-first default)**
   - Everything runs in **one Node.js process** by default: HTTP ingress, Telegram ingest (polling/webhook), and DBOS workflow execution.
   - Concurrency comes from async I/O + DBOS scheduling.
-  - We still guarantee **per-conversation serialization** where needed (see **Concurrency guarantees**).
+  - We still guarantee **per-thread run isolation** where needed (see **Concurrency guarantees**).
   - **Polling mode assumes a single running instance** to avoid competing `getUpdates` consumers.
 
 - **Adapters (core interfaces)**
@@ -265,12 +265,16 @@ This is a **draft** API contract we should implement for the MVP.
 
 - `GET /healthz`
   - Returns 200 when the process is up.
-- `POST /v1/events`
-  - Accepts a normalized event payload (see below)
-  - Supports idempotent ingest via `event_id` in payload (or `Idempotency-Key` header)
-  - Returns `{ run_id }` (for duplicate idempotent submits, returns the existing `run_id`)
+- `POST /v1/messages`
+  - Primary ingest API for first-class user/system messages.
+  - Accepts message payload (source + thread identity + text/payload + delivery mode).
+  - Supports idempotent ingest via `idempotency_key` in payload (or `Idempotency-Key` header).
+  - Returns `{ run_id }` (for duplicate idempotent submits, returns the existing `run_id`).
+- `POST /v1/webhooks/:source`
+  - Raw webhook ingest endpoint for third-party callback payloads.
+  - Normalizes to internal ingress envelope, then dispatches workflow.
 - `GET /v1/runs/:run_id`
-  - Returns status and (when complete) output
+  - Returns status and (when complete) output.
 
 **Error shape (draft):**
 
@@ -278,19 +282,21 @@ This is a **draft** API contract we should implement for the MVP.
 { "error": { "code": "...", "message": "..." } }
 ```
 
-### Normalized events
+### Ingress envelope (internal)
 
-All ingresses (CLI, Telegram, webhooks) should normalize into a common event:
+Internally, all ingresses normalize into one envelope for routing/idempotency/observability.
+This is an implementation detail; users should think in terms of **messages** and **webhooks**, not “events everywhere”.
 
 ```json
 {
   "schema_version": 1,
-  "event_id": "evt_123",
+  "ingress_id": "ing_123",
   "source": "telegram",
   "received_at": "2026-02-05T12:34:56.000Z",
-  "type": "telegram.message",
-  "conversation_key": "...",
-  "user_key": "...",
+  "kind": "message",
+  "thread_key": "telegram:chat:123456",
+  "user_key": "telegram:user:999",
+  "delivery_mode": "steer",
   "text": "...",
   "raw": {}
 }
@@ -298,10 +304,52 @@ All ingresses (CLI, Telegram, webhooks) should normalize into a common event:
 
 Notes:
 - `schema_version` allows intentional evolution.
-- `event_id` is used for idempotent ingest/deduplication.
-- `source` identifies ingress origin (e.g. `cli`, `telegram`, `webhook`).
-- `received_at` is optional but recommended for traceability.
+- `ingress_id` is used for idempotent ingest/deduplication.
+- `thread_key` is the concurrency/routing key (not globally shared across channels by default).
+- `delivery_mode` applies when a run is active (`steer` / `followUp`; see below).
 - `raw` is optional and should be treated carefully (may contain PII/secrets).
+
+---
+
+## Threads, runs, and queued messages
+
+This section is the core behavior contract for multi-ingress conversations.
+
+### Terminology
+
+- **Ingress**: where input came from (`telegram`, `cli`, `webhook`, future `whatsapp`, etc.).
+- **Thread**: a channel-scoped conversation identity used for session routing + concurrency (e.g. `telegram:chat:<chat_id>`).
+- **Run**: one active agent loop for a thread.
+
+### Delivery behavior while a run is active (pi-aligned)
+
+Behavior is intentionally aligned with pi SDK/RPC semantics:
+
+- **`steer`**:
+  - Message is queued and delivered after the current tool execution boundary.
+  - Remaining planned tool calls from the current run are skipped.
+  - Use this to interrupt and redirect in-flight work.
+- **`followUp`**:
+  - Message is queued and delivered only after the current run reaches idle.
+  - Use this to append work without interrupting the current task.
+
+Defaults (intent): `one-at-a-time` delivery for both steer and follow-up queues, matching pi defaults (`steeringMode` / `followUpMode`).
+
+### Cross-channel isolation (default)
+
+Sessions are isolated by thread identity, not by user identity alone.
+
+- Telegram chat and WhatsApp chat from the same human are **different threads** by default.
+- Telegram message while a webhook-triggered run is active does **not** join that webhook run unless explicitly linked.
+- Cross-channel thread linking is a future explicit feature, not implicit behavior.
+
+### Webhook thread policy (default)
+
+Webhook runs use their own thread namespace and are independent from chat channels.
+
+- Preferred key: `thread_key = webhook:<source>:<external_thread_id>` when the source payload has a stable external thread/job identifier.
+- Fallback key: `thread_key = webhook:<source>:<ingress_id>` (ephemeral one-shot thread).
+- Webhook runs are not merged into Telegram/WhatsApp threads unless an explicit linking workflow chooses to do that.
 
 ---
 
@@ -313,7 +361,7 @@ Telegram support is split into two pieces:
 
 ### Ingest modes
 
-Both modes must normalize updates into the same internal event shape and call the same Telegram workflow.
+Both modes must normalize updates into the same internal ingress envelope and call the same Telegram workflow.
 
 - **Long polling (recommended default for self-hosters):** the server periodically calls `getUpdates` and processes updates.
   - easiest to run locally (no public URL required)
@@ -330,33 +378,37 @@ Recommended wiring:
 
 ### Incoming message → workflow
 
-For a personal message to the bot, the adapter triggers the workflow `telegram.message` with a normalized payload:
-- `conversation_key: <telegram chat_id>`
-- `user_key: <telegram from.id>`
+For a personal message to the bot, the adapter triggers workflow `telegram.message` with normalized routing fields:
+- `thread_key: telegram:chat:<chat_id>`
+- `user_key: telegram:user:<from.id>`
 - `text: <message text>`
+- `delivery_mode`: default for Telegram input while active run is `steer` (configurable)
 - `raw: <raw telegram update>` (optional, for debugging)
 
-The workflow should run the pi agent in its default **agent loop** (multiple internal turns/tool calls as needed) until it produces a final reply for Telegram.
+The workflow runs the pi agent loop. If a run is already active on the same thread, the message is queued according to `delivery_mode` (`steer` or `followUp`) instead of spawning a parallel run.
 
 ### Conversation sessions
 
-pi manages the **session contents** (on-disk JSON files). The runtime manages only the **routing**: which Telegram conversation maps to which pi `session_id`.
+pi manages the **session contents** (on-disk JSON files). The runtime manages only **routing**: which jagc `thread_key` maps to which pi `session_id`.
 
-For personal chats we use **one agent session per Telegram `chat_id`**.
+For personal Telegram chats we use **one agent session per `thread_key = telegram:chat:<chat_id>`**.
 
 ---
 
 ## Concurrency guarantees
 
-We want high concurrency across *different* conversations, but we must process messages **sequentially per `conversation_key`** to avoid overlapping writes to the same pi session.
+We want high concurrency across different threads, while preventing overlapping writes to the same pi session.
 
 Guarantees (intent):
-- For the same `conversation_key`: **strict serialization** (one agent run at a time; each run may span multiple internal turns/tool calls).
-- For different `conversation_key`s: may execute concurrently.
+- For the same `thread_key`: **at most one active run**.
+- New input on that thread while active run exists is queued by delivery mode:
+  - `steer`: deliver at next interruption point (after current tool), skipping remaining planned tools.
+  - `followUp`: deliver after the run reaches idle.
+- For different `thread_key`s: runs may execute concurrently.
 
 Implementation strategy:
-- Use **DBOS/Postgres-backed serialization**, not in-memory locks.
-- Acquire a durable **per-conversation lock** (row-level lock or advisory lock keyed by `conversation_key`) inside a DBOS transaction before running an agent step.
+- Use **DBOS/Postgres-backed coordination**, not in-memory locks.
+- Acquire a durable **per-thread lock** (row-level lock or advisory lock keyed by `thread_key`) for run state transitions and queue draining.
 
 ---
 
@@ -364,7 +416,7 @@ Implementation strategy:
 
 - Postgres stores:
   - DBOS workflow state (durability)
-  - conversation/session routing metadata (e.g. `conversation_key -> session_id`)
+  - thread/session routing metadata (e.g. `thread_key -> session_id`)
   - (recommended) audit log of tool calls / external side effects
 
 - Disk stores:
@@ -376,7 +428,7 @@ Implementation strategy:
 
 - Default to structured logs in production (JSON format).
 - Include correlation fields in every log line:
-  - `run_id`, `workflow_name`, `conversation_key` (when applicable)
+  - `run_id`, `workflow_name`, `thread_key`, `source` (when applicable)
 
 ---
 
@@ -478,7 +530,7 @@ This implies:
 We use **black-box end-to-end tests via the CLI + a real running server**.
 
 - Start the whole stack (server + Postgres) and test it only through public interfaces:
-  - HTTP (`/v1/events`, `/v1/runs/:id`)
+  - HTTP (`/v1/messages`, `/v1/runs/:id`, webhook endpoints)
   - CLI (`jagc …`)
   - Telegram ingress (simulated via CLI webhook sender)
 - This catches wiring/config regressions and matches real operator workflows.
@@ -497,9 +549,12 @@ Then verification is just:
 
 **What the integration suite must cover (minimum):**
 - health check (`/healthz`)
-- event ingest (`POST /v1/events`) + run completion (`GET /v1/runs/:id`)
+- message ingest (`POST /v1/messages`) + run completion (`GET /v1/runs/:id`)
 - webhook simulation path (post a fixture JSON to an adapter endpoint)
-- per-conversation serialization (send two events with same `conversation_key` and assert ordered processing)
+- per-thread run behavior:
+  - same thread + `steer` interrupts correctly
+  - same thread + `followUp` queues until idle
+  - different threads can run concurrently
 
 ### CLI capabilities required for verifiable testing
 
@@ -520,15 +575,12 @@ The CLI is part of the test harness. It must be able to drive the system the way
 - `jagc health`
   - checks HTTP health (`/healthz`) and exits non-zero if unhealthy
 
-- `jagc event send`
-  - sends a **normalized event** to `POST /v1/events`
-  - supports `--event-id`, `--source`, `--type`, `--conversation-key`, `--user-key`, `--text`, and `--raw @file.json`
+- `jagc message send`
+  - sends a message to `POST /v1/messages`
+  - supports `--idempotency-key`, `--source`, `--thread-key`, `--user-key`, `--text`, `--delivery-mode`, and `--raw @file.json`
 
 - `jagc message "…"`
-  - convenience wrapper for `event send` targeting the default message workflow
-
-- `jagc ask "…"`
-  - alias for `jagc message` (deprecated; may be removed once the CLI surface stabilizes)
+  - convenience wrapper for `message send` targeting the default message workflow
 
 - `jagc run get <run_id>`
   - fetches status/output from `GET /v1/runs/:run_id`
@@ -585,4 +637,5 @@ Planned repo scripts (names we should standardize on):
 - pi coding agent package in that monorepo: [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 - pi is designed as a minimal harness that is extended via **extensions, skills, prompt templates, themes**, and shared as **pi packages** installable from **npm or git**.
 - pi loads **AGENTS.md** context files and supports **system prompt replacement** (jagc workspaces place this at `SYSTEM.md` + optional `APPEND_SYSTEM.md` at repo root).
+- pi queue semantics for in-flight input are explicit in SDK/RPC/docs (`steer` interrupts at the next tool boundary; `followUp` waits for idle), and jagc thread behavior aligns with that contract.
 - DBOS Transact is positioned as an open-source **durable execution/workflows** library (including TypeScript) backed by **Postgres**.
