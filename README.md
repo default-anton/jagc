@@ -1,8 +1,8 @@
 # jagc
 
-> **jagc** = **j**ust **a** **g**ood **c**lanker. Name is a joke; runtime is serious.
+> **jagc** = **j**ust **a** **g**ood **c**lanker.
 
-Self-hosted “life automation” runtime built on:
+Self-hosted AI assistant to automate your life:
 - **pi-coding-agent** (from [`pi-mono`](https://github.com/badlogic/pi-mono), package: [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)) as the agent backbone (sessions, compaction, context files, skills/prompts/extensions, packages, SDK/RPC).
 - **DBOS Transact (TypeScript)** as the durable workflow engine (Postgres-backed workflows/queues/scheduling).
 
