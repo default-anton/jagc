@@ -104,7 +104,6 @@ JS/TS baseline (intent; we’ll pin versions once scaffolding starts):
 - **Multi-process dev (when needed):** `concurrently`
 - **Git hooks (optional):** `husky`
 
-
 ---
 
 ## Repository layout (current + intended)
@@ -141,23 +140,9 @@ This repo is still being scaffolded. The default plan is a **single Node.js proj
 
 ### User config repo (workspace)
 
-User config repo (separate git repo, **repo-root files** — no `.pi/` nesting):
+The server is pointed at a user repo path as its workspace (`JAGC_WORKSPACE_DIR`).
 
-- `SYSTEM.md`                user system prompt override
-- `APPEND_SYSTEM.md`         optional additional system prompt content
-- `skills/`                  Agent Skills standard
-- `prompts/`                 prompt templates
-- `extensions/`              custom tools, hooks, gates
-- `themes/`                  optional
-- `jagc.json`                jagc workspace config (optional)
-- `settings.json`            pi workspace-local settings (optional)
-- `git/` / `npm/`            project-local pi package installs (optional)
-- `AGENTS.md`                user “policy + conventions” (loaded as context)
-- `workflows/`               TypeScript workflows (loaded by the server)
-- `tools/`                   scripts/CLIs the agent can run (optional)
-
-The server is pointed at the user repo path as its “workspace”.
-
+Canonical workspace layout, override rules, and config-file semantics live in **Workspace contract** below.
 
 ---
 
@@ -167,99 +152,70 @@ The server is pointed at the user repo path as its “workspace”.
 
 ### Prereqs
 
-- Node.js (LTS)
+- Node.js 20.x LTS (minimum)
 - Postgres
 - A pi-supported LLM provider credential (API key or provider setup)
 - Telegram Bot token (optional, if running telegram adapter)
 
 ### Environment
 
-All application config env vars are prefixed with **`JAGC_`**, except `PI_CODING_AGENT_DIR`.
-
-Example:
-
-- `JAGC_DATABASE_URL=postgres://...`
-- `JAGC_WORKSPACE_DIR=/path/to/user-config-repo`
-- `JAGC_PORT=31415`
-- Provider keys (e.g. `OPENAI_API_KEY=...`, etc.)
-- `PI_CODING_AGENT_DIR=/path/to/pi-agent-state` (optional)
-- Telegram (optional)
-  - `JAGC_TELEGRAM_BOT_TOKEN=...`
-  - `JAGC_TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
-  - (webhook) `JAGC_TELEGRAM_WEBHOOK_PATH=/telegram/webhook`
-  - (webhook) `JAGC_TELEGRAM_WEBHOOK_SECRET=...` (recommended)
+All jagc env vars are prefixed with **`JAGC_`** (exception: `PI_CODING_AGENT_DIR`).
+Use the canonical config table below as the single source of truth.
 
 ### Run
 
 1) Start Postgres
 2) Install deps
    - `pnpm install`
-3) Start server
+3) Set required env vars from the table below
+4) Start server
    - `pnpm dev`
-4) Talk to it
+5) Talk to it
    - CLI: `jagc message "..." --json`
    - Telegram: message the bot
 
 ---
 
-## Configuration reference
+## Configuration reference (canonical env table)
 
-### Required
+| Variable | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `JAGC_DATABASE_URL` | Yes | — | Postgres connection string. |
+| `JAGC_WORKSPACE_DIR` | Yes | — | Path to user workspace repo (`workflows/`, `AGENTS.md`, optional `jagc.json`, pi artifacts). |
+| `JAGC_PORT` | Yes | `31415` | Server bind port. |
+| `JAGC_API_URL` | No | `http://127.0.0.1:31415` | CLI target API URL (used by `jagc` commands; flag `--api-url` wins). |
+| `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | pi-coding-agent config/state dir (sessions, global `skills/`, `prompts/`, `extensions/`, `themes/`, `settings.json`). Persist if you want sessions across restarts. |
+| `JAGC_LOG_LEVEL` | No | `info` | Logging level (`debug|info|warn|error`). |
+| `JAGC_LOG_FORMAT` | No | `pretty` (dev), `json` (prod) | Log output format. |
+| `JAGC_TELEGRAM_BOT_TOKEN` | No | — | Required only when Telegram adapter is enabled. |
+| `JAGC_TELEGRAM_INGEST_MODE` | No | `polling` | Telegram ingest mode (`polling|webhook`). |
+| `JAGC_TELEGRAM_WEBHOOK_PATH` | No | `/telegram/webhook` | Telegram webhook route (webhook mode only). |
+| `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | — | Telegram webhook secret token (recommended for webhook mode). |
+| Provider credentials (for example `OPENAI_API_KEY`) | Depends | — | Passed through to pi/provider SDKs; jagc does not interpret provider-specific keys. |
 
-- `JAGC_DATABASE_URL`
-  - Postgres connection string.
-- `JAGC_WORKSPACE_DIR`
-  - Path to the user config repo (contains `workflows/`, `AGENTS.md`, optional jagc config like `jagc.json`, and optional pi artifacts such as `SYSTEM.md`, `skills/`, `extensions/`, etc.).
-- `JAGC_PORT`
-  - Server bind port.
-
-### Optional
-
-- `PI_CODING_AGENT_DIR`
-  - Overrides pi-coding-agent’s config/state directory (default: `~/.pi/agent`).
-  - This is where **sessions**, global `skills/`, `prompts/`, `extensions/`, `themes/`, and `settings.json` live.
-  - **Must be persisted** (e.g. Docker volume) if you want sessions to survive restarts.
-
-- Workspace config file: `$JAGC_WORKSPACE_DIR/jagc.json` (planned)
-  - jagc-specific, non-secret configuration that lives with the workspace repo.
-  - Precedence intent: CLI flags > env vars > `jagc.json` > built-in defaults.
-
-- Logging (recommended to implement early)
-  - `JAGC_LOG_LEVEL=debug|info|warn|error` (default: `info`)
-  - `JAGC_LOG_FORMAT=pretty|json` (default: `pretty` in dev, `json` in prod)
-
-### Telegram
-
-- `JAGC_TELEGRAM_BOT_TOKEN`
-- `JAGC_TELEGRAM_INGEST_MODE=polling|webhook` (default: `polling`)
-- `JAGC_TELEGRAM_WEBHOOK_PATH` (default: `/telegram/webhook`)
-- `JAGC_TELEGRAM_WEBHOOK_SECRET` (optional; recommended)
-
-### Provider credentials
-
-LLM provider credentials are **passed through** to pi/provider SDKs; jagc does not interpret them. Example:
-- `OPENAI_API_KEY=...`
+Config precedence (intent): CLI flags > env vars > `$JAGC_WORKSPACE_DIR/jagc.json` > built-in defaults.
 
 ---
 
 ## Workspace contract (JAGC_WORKSPACE_DIR)
 
-The workspace is a **trusted** local directory (usually a git repo) that contains user overrides and automation logic.
+The workspace is a **trusted** local directory (usually a git repo) that contains user overrides and automation logic (repo-root files/directories; no `.pi/` nesting).
 
-### Minimal workspace
+### Canonical workspace layout
 
 ```text
 $JAGC_WORKSPACE_DIR/
-  workflows/
-  AGENTS.md           (recommended)
-  SYSTEM.md           (optional)
-  APPEND_SYSTEM.md    (optional)
-  skills/             (optional)
-  prompts/            (optional)
-  extensions/         (optional)
-  themes/             (optional)
-  jagc.json           (optional)
-  settings.json       (optional, pi workspace-local settings)
+  workflows/          # required: TypeScript workflows loaded by the server
+  AGENTS.md           # recommended: policy + conventions loaded as context
+  SYSTEM.md           # optional: replace system prompt
+  APPEND_SYSTEM.md    # optional: append to system prompt
+  skills/             # optional: Agent Skills artifacts
+  prompts/            # optional: prompt templates
+  extensions/         # optional: custom tools/hooks/gates
+  themes/             # optional: themes
+  tools/              # optional: scripts/CLIs the agent can run
+  jagc.json           # optional: jagc workspace config
+  settings.json       # optional: pi workspace-local settings
 ```
 
 ### Override rules (intent)
@@ -418,7 +374,7 @@ Implementation strategy:
 
 ## Logging & observability (recommended defaults)
 
-- Default to structured logs in production (`JAGC_LOG_FORMAT=json`).
+- Default to structured logs in production (JSON format).
 - Include correlation fields in every log line:
   - `run_id`, `workflow_name`, `conversation_key` (when applicable)
 
@@ -480,6 +436,9 @@ They currently assume conventions like:
 - workspace in `/var/lib/jagc/workspace`
 - env file in `/etc/jagc/jagc.env`
 
+Operational default: prefer **explicit/manual restarts** after workspace changes.
+`deploy/systemd/jagc.path` is experimental/opt-in and intentionally scoped to workflow code changes only.
+
 These are **not stable** yet; treat them as examples.
 
 ---
@@ -514,18 +473,16 @@ This implies:
 - the CLI can **wait for runs**, fetch results, and surface logs in a scriptable way
 - we support **“real stack” local runs** (no mocks) and **deterministic CI runs** (mocks/fixtures)
 
-### Integration test options
+### Integration testing approach (default)
 
-**Decision (default): we will implement Option A first** (black-box end-to-end via the CLI + a real running server). Options B/C remain valuable supplements once the core is stable.
-
-#### Option A (default): Black-box end-to-end tests via the CLI + a real running server
+We use **black-box end-to-end tests via the CLI + a real running server**.
 
 - Start the whole stack (server + Postgres) and test it only through public interfaces:
   - HTTP (`/v1/events`, `/v1/runs/:id`)
   - CLI (`jagc …`)
   - Telegram ingress (simulated via CLI webhook sender)
-- Best at catching wiring/config regressions.
-- Works great for local verification and for running in CI with a mock/deterministic LLM provider.
+- This catches wiring/config regressions and matches real operator workflows.
+- Works for local verification and CI (with a mock/deterministic LLM provider).
 
 **Dev UX target:** one command starts everything “for real”:
 
@@ -544,24 +501,6 @@ Then verification is just:
 - webhook simulation path (post a fixture JSON to an adapter endpoint)
 - per-conversation serialization (send two events with same `conversation_key` and assert ordered processing)
 
-#### Option B: Integration tests in-process (Vitest) + ephemeral Postgres (Testcontainers)
-
-- Run tests against a real Postgres, provisioned per test run.
-- Call the HTTP server in-process (random port) and assert on responses.
-- Faster feedback than full multi-process tests; excellent for CI.
-
-Tradeoff: can miss some “real process” issues (env wiring, logging, signal handling) unless paired with Option A smoke tests.
-
-#### Option C: Fixture/replay tests for adapters + normalized events
-
-- Keep a small library of real-ish fixtures:
-  - Telegram update JSON payloads
-  - Webhook payloads from other providers
-  - Normalized event JSON inputs
-- CI replays fixtures through the same normalization + workflow dispatch path and snapshots outputs.
-
-Tradeoff: fixtures drift if not curated; best used as a supplement to A/B.
-
 ### CLI capabilities required for verifiable testing
 
 The CLI is part of the test harness. It must be able to drive the system the way external systems do.
@@ -573,8 +512,8 @@ The CLI is part of the test harness. It must be able to drive the system the way
 - stderr for logs/diagnostics, stdout for primary output
 - `--no-input` disables prompts (required for CI)
 - server target is configurable (flags beat env):
-  - `--api-url http://127.0.0.1:31415` (default)
-  - `JAGC_API_URL=http://127.0.0.1:31415`
+  - `--api-url <url>`
+  - `JAGC_API_URL=<url>` (see Configuration reference table for default)
 
 #### Proposed command surface (minimal but complete)
 

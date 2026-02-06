@@ -1,8 +1,10 @@
 [Unit]
-Description=Restart jagc when workspace changes
+Description=EXPERIMENTAL: restart jagc when workspace workflows change
 
+# Safer default: do NOT enable this unit in production.
+# Prefer explicit/manual restarts after reviewing workspace changes.
+# If you opt in, scope restarts to workflow code changes only.
 [Path]
-PathModified=/var/lib/jagc/workspace
 PathModified=/var/lib/jagc/workspace/workflows
 Unit=jagc-restart.service
 
