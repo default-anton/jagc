@@ -15,6 +15,19 @@ For detailed architecture drafts, deferred APIs, deployment notes, and post-MVP 
 - **Pre-alpha.** Expect breaking changes.
 - **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
 
+## Locked v0 technology stack
+
+Source of truth: **[`AGENTS.md`](AGENTS.md)**.
+
+- Runtime: TypeScript (ESM) on Node.js 20 + pnpm
+- Server/API: Fastify + Zod + Pino
+- CLI: Commander
+- Agent/runtime: pi-coding-agent
+- Durable execution: DBOS Transact + Postgres
+- Telegram: grammY (polling first)
+- Quality/tooling: Biome + Vitest
+- Build: tsdown
+
 ## MVP (v0)
 
 Ship this first:
@@ -84,6 +97,8 @@ $JAGC_WORKSPACE_DIR/
 | `JAGC_API_URL` | No | CLI API target (default `http://127.0.0.1:31415`) |
 | `PI_CODING_AGENT_DIR` | No | pi config/state dir (default `~/.pi/agent`) |
 | `JAGC_TELEGRAM_BOT_TOKEN` | No | Required only when Telegram adapter is enabled |
+| `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | Required when Telegram webhook mode is enabled |
+| `JAGC_WEBHOOK_BEARER_TOKEN` | No | Required when generic `POST /v1/webhooks/:source` ingress is enabled |
 
 ## Quick start (dev, intended)
 
@@ -100,6 +115,10 @@ $JAGC_WORKSPACE_DIR/
 
 - Workspace code is **trusted** and runs with server permissions.
 - Third-party pi packages are **trusted code**; review before installing.
+- Local CLI usage requires no auth for v0.
+- Generic webhook ingress (`POST /v1/webhooks/:source`) requires bearer-token auth (`Authorization: Bearer ...`).
+- Telegram webhook mode requires `X-Telegram-Bot-Api-Secret-Token` verification.
+- Hardening path after v0: add HMAC-signed payload verification + replay protection (timestamp/nonce window).
 - Run as unprivileged user; keep secrets out of repos.
 
 ## License

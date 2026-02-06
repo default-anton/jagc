@@ -92,19 +92,21 @@ A small server + adapters:
 
 ---
 
-## Tooling (decisions)
+## Tooling (locked v0 stack)
 
-- **Node.js:** 20.x LTS (minimum) — aligns with modern TS tooling.
-- **Package manager:** `pnpm`
-- **Language:** TypeScript (ESM; `type: "module"`)
-- **Database:** Postgres (DBOS-backed durability)
+Source of truth: **[`AGENTS.md`](../AGENTS.md)**.
 
-JS/TS baseline (intent; we’ll pin versions once scaffolding starts):
-
-- **TS execution (dev/CLI scripting):** `tsx`
-- **Lint/format:** **Biome** (`@biomejs/biome`)
-- **Multi-process dev (when needed):** `concurrently`
-- **Git hooks (optional):** `husky`
+- Runtime: TypeScript (ESM) on Node.js 20 + `pnpm`
+- Durable execution + DB: DBOS Transact + Postgres
+- HTTP server: Fastify
+- CLI: Commander
+- Validation: Zod
+- Logging: Pino (`pretty` dev, `json` prod)
+- Telegram adapter: grammY (polling first)
+- Lint/format: Biome
+- Tests: Vitest
+- Build: `tsdown`
+- Dev TS runner/scripts: `tsx`
 
 ---
 
@@ -192,7 +194,8 @@ Use the canonical config table below as the single source of truth.
 | `JAGC_TELEGRAM_BOT_TOKEN` | No | — | Required only when Telegram adapter is enabled. |
 | `JAGC_TELEGRAM_INGEST_MODE` | No | `polling` | Telegram ingest mode (`polling|webhook`). |
 | `JAGC_TELEGRAM_WEBHOOK_PATH` | No | `/telegram/webhook` | Telegram webhook route (webhook mode only). |
-| `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | — | Telegram webhook secret token (recommended for webhook mode). |
+| `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | — | Telegram webhook secret token (required for Telegram webhook mode). |
+| `JAGC_WEBHOOK_BEARER_TOKEN` | No | — | Shared bearer token required by generic ingress `POST /v1/webhooks/:source` when enabled. |
 | Provider credentials (for example `OPENAI_API_KEY`) | Depends | — | Passed through to pi/provider SDKs; jagc does not interpret provider-specific keys. |
 
 Config precedence (intent): CLI flags > env vars > `$JAGC_WORKSPACE_DIR/jagc.json` > built-in defaults.
@@ -274,6 +277,7 @@ This is a **draft** API contract we should implement for the MVP.
   - Returns `{ run_id }` (for duplicate idempotent submits, returns the existing `run_id`).
 - `POST /v1/webhooks/:source`
   - Raw webhook ingest endpoint for third-party callback payloads.
+  - Requires bearer-token auth via `Authorization: Bearer <token>` (v0 baseline).
   - Normalizes to internal ingress envelope, then dispatches workflow.
 - `GET /v1/runs/:run_id`
   - Returns status and (when complete) output.
@@ -283,6 +287,17 @@ This is a **draft** API contract we should implement for the MVP.
 ```json
 { "error": { "code": "...", "message": "..." } }
 ```
+
+### Webhook authentication policy
+
+v0 baseline:
+- Local CLI usage does not require auth.
+- Generic `POST /v1/webhooks/:source` requires `Authorization: Bearer <token>`.
+- Telegram webhook mode requires `X-Telegram-Bot-Api-Secret-Token` verification.
+
+Post-v0 hardening path:
+- Add HMAC request signing per source (for providers that support signatures).
+- Enforce replay protection with timestamp + nonce windows.
 
 ### Ingress envelope (internal)
 
@@ -384,7 +399,7 @@ For a personal message to the bot, the adapter triggers workflow `telegram.messa
 - `thread_key: telegram:chat:<chat_id>`
 - `user_key: telegram:user:<from.id>`
 - `text: <message text>`
-- `delivery_mode`: default for Telegram input while active run is `steer` (configurable)
+- `delivery_mode`: default for Telegram input while active run is `followUp` (`steer` explicit opt-in)
 - `raw: <raw telegram update>` (optional, for debugging)
 
 The workflow runs the pi agent loop. If a run is already active on the same thread, the message is queued according to `delivery_mode` (`steer` or `followUp`) instead of spawning a parallel run.
@@ -481,14 +496,11 @@ Override behavior (intent): jagc may ship built-in pi artifacts for a good defau
 
 ## Deployment (draft)
 
-Draft assets exist under:
-- `deploy/systemd/`
-- `deploy/launchd/`
+v0 canonical target is **single-host macOS** using `.env` configuration and launchd-style process management.
 
-They currently assume conventions like:
-- code in `/opt/jagc`
-- workspace in `/var/lib/jagc/workspace`
-- env file in `/etc/jagc/jagc.env`
+Draft assets exist under:
+- `deploy/launchd/` (v0-first direction)
+- `deploy/systemd/` (kept as draft for later Linux target support)
 
 Operational default: prefer **explicit/manual restarts** after workspace changes.
 `deploy/systemd/jagc.path` is experimental/opt-in and intentionally scoped to workflow code changes only.
