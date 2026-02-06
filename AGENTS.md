@@ -2,3 +2,4 @@
 
 - Always read README.md for context before doing anything else.
 - Run `mise install` at repo root when required tools are missing or after `.tool-versions` changes.
+- For `mise install` troubleshooting, read `docs/tooling.md`.
