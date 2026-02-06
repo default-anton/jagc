@@ -87,11 +87,12 @@ $JAGC_WORKSPACE_DIR/
 
 ## Quick start (dev, intended)
 
-1. Start Postgres
-2. `pnpm install`
-3. Set required env vars
-4. `pnpm dev`
-5. Verify:
+1. `mise install` (rerun when required tools are missing or `.tool-versions` changes)
+2. Start Postgres
+3. `pnpm install`
+4. Set required env vars
+5. `pnpm dev`
+6. Verify:
    - `jagc health`
    - `jagc message "ping" --json`
 
