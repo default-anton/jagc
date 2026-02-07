@@ -3,6 +3,12 @@ import { describe, expect, test } from 'vitest';
 import { type SessionEvent, ThreadRunController, type TurnSession } from '../src/runtime/thread-run-controller.js';
 import type { RunRecord } from '../src/shared/run-types.js';
 
+type MessageStartEvent = Extract<SessionEvent, { type: 'message_start' }>;
+type MessageEndEvent = Extract<SessionEvent, { type: 'message_end' }>;
+type AgentEndEvent = Extract<SessionEvent, { type: 'agent_end' }>;
+type UserMessage = Extract<MessageStartEvent['message'], { role: 'user' }>;
+type AssistantMessage = Extract<MessageEndEvent['message'], { role: 'assistant' }>;
+
 class FakeSession implements TurnSession {
   private listener: ((event: SessionEvent) => void) | null = null;
 
@@ -60,7 +66,7 @@ describe('ThreadRunController', () => {
     });
 
     session.emit(assistantEnd('RUN2', 'openai', 'gpt-test'));
-    session.emit({ type: 'agent_end' });
+    session.emit(agentEnd());
 
     await expect(run2Promise).resolves.toMatchObject({
       text: 'RUN2',
@@ -93,7 +99,7 @@ describe('ThreadRunController', () => {
     });
 
     session.emit(assistantEnd('RUN2', 'openai', 'gpt-test'));
-    session.emit({ type: 'agent_end' });
+    session.emit(agentEnd());
 
     await expect(run2Promise).resolves.toMatchObject({
       text: 'RUN2',
@@ -114,7 +120,7 @@ describe('ThreadRunController', () => {
 
     session.emit(userStart('first'));
     session.emit(assistantEnd('RUN1', 'openai', 'gpt-test'));
-    session.emit({ type: 'agent_end' });
+    session.emit(agentEnd());
 
     await expect(run1Promise).resolves.toMatchObject({ text: 'RUN1' });
     await expect(run2Promise).rejects.toThrow('agent ended before message delivery');
@@ -123,7 +129,7 @@ describe('ThreadRunController', () => {
   });
 });
 
-function runRecord(runId: string, inputText: string, deliveryMode: 'steer' | 'followUp'): RunRecord {
+function runRecord(runId: string, inputText: string, deliveryMode: RunRecord['deliveryMode']): RunRecord {
   const now = new Date().toISOString();
 
   return {
@@ -141,26 +147,54 @@ function runRecord(runId: string, inputText: string, deliveryMode: 'steer' | 'fo
   };
 }
 
-function userStart(text: string) {
+function userStart(text: string): MessageStartEvent {
+  const message: UserMessage = {
+    role: 'user',
+    content: text,
+    timestamp: Date.now(),
+  };
+
   return {
     type: 'message_start',
-    message: {
-      role: 'user',
-      content: [{ type: 'text', text }],
-    },
+    message,
   };
 }
 
-function assistantEnd(text: string, provider: string, model: string) {
+function assistantEnd(text: string, provider: AssistantMessage['provider'], model: string): MessageEndEvent {
+  const message: AssistantMessage = {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    api: {} as AssistantMessage['api'],
+    provider,
+    model,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 0,
+      },
+    },
+    stopReason: 'stop',
+    timestamp: Date.now(),
+  };
+
   return {
     type: 'message_end',
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text }],
-      provider,
-      model,
-      stopReason: 'stop',
-    },
+    message,
+  };
+}
+
+function agentEnd(): AgentEndEvent {
+  return {
+    type: 'agent_end',
+    messages: [],
   };
 }
 

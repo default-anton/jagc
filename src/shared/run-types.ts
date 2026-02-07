@@ -1,7 +1,12 @@
+import type { PromptOptions } from '@mariozechner/pi-coding-agent';
+
 export const runStatuses = ['running', 'succeeded', 'failed'] as const;
+export const deliveryModes = ['steer', 'followUp'] as const satisfies readonly NonNullable<
+  PromptOptions['streamingBehavior']
+>[];
 
 export type RunStatus = (typeof runStatuses)[number];
-export type DeliveryMode = 'steer' | 'followUp';
+export type DeliveryMode = (typeof deliveryModes)[number];
 export type RunOutput = Record<string, unknown>;
 
 export interface RunRecord {

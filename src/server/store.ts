@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
-import type { MessageIngest, RunOutput, RunRecord } from '../shared/run-types.js';
+import type { DeliveryMode, MessageIngest, RunOutput, RunRecord } from '../shared/run-types.js';
 
 interface RunRow {
   run_id: string;
   source: string;
   thread_key: string;
   user_key: string | null;
-  delivery_mode: 'steer' | 'followUp';
+  delivery_mode: DeliveryMode;
   status: 'running' | 'succeeded' | 'failed';
   input_text: string;
   output: RunOutput | null;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { deliveryModes } from './run-types.js';
 
-export const deliveryModeSchema = z.enum(['steer', 'followUp']);
+export const deliveryModeSchema = z.enum(deliveryModes);
 
 export const postMessageRequestSchema = z.object({
   source: z.string().trim().min(1).default('cli'),

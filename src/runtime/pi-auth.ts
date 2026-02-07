@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { AuthStorage, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import { type AuthCredential, AuthStorage, ModelRegistry } from '@mariozechner/pi-coding-agent';
 
 const providerEnvVarHints: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -24,7 +24,7 @@ const providerEnvVarHints: Record<string, string> = {
 export interface ProviderAuthStatus {
   provider: string;
   has_auth: boolean;
-  credential_type: 'api_key' | 'oauth' | null;
+  credential_type: AuthCredential['type'] | null;
   oauth_supported: boolean;
   env_var_hint: string | null;
   total_models: number;

@@ -1,26 +1,13 @@
+import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 
-export type SessionEvent =
-  | {
-      type: 'message_start' | 'message_end';
-      message: unknown;
-    }
-  | {
-      type: 'agent_end';
-    }
-  | {
-      type: string;
-      [key: string]: unknown;
-    };
+export type SessionEvent = AgentSessionEvent;
+type SessionMessage = Extract<SessionEvent, { type: 'message_start' | 'message_end' }>['message'];
+type UserSessionMessage = Extract<SessionMessage, { role: 'user' }>;
+type AssistantSessionMessage = Extract<SessionMessage, { role: 'assistant' }>;
+type SessionTextContent = UserSessionMessage['content'] | AssistantSessionMessage['content'];
 
-type SessionEventListener = (event: SessionEvent) => void;
-
-export interface TurnSession {
-  prompt(text: string, options?: { streamingBehavior?: 'steer' | 'followUp' }): Promise<void>;
-  followUp(text: string): Promise<void>;
-  steer(text: string): Promise<void>;
-  subscribe(listener: SessionEventListener): () => void;
-}
+export type TurnSession = Pick<AgentSession, 'prompt' | 'followUp' | 'steer' | 'subscribe'>;
 
 interface PendingRun {
   run: RunRecord;
@@ -37,7 +24,7 @@ interface AssistantSnapshot {
   text: string;
   provider: string | null;
   model: string | null;
-  stopReason: string | null;
+  stopReason: AssistantSessionMessage['stopReason'] | null;
   errorMessage: string | null;
 }
 
@@ -104,14 +91,14 @@ export class ThreadRunController {
 
   private onSessionEvent(event: SessionEvent): void {
     if (event.type === 'message_start') {
-      if (messageRole(event.message) === 'user') {
+      if (event.message.role === 'user') {
         this.onUserMessageStart(event.message);
       }
       return;
     }
 
     if (event.type === 'message_end') {
-      if (messageRole(event.message) === 'assistant' && this.activeRun) {
+      if (event.message.role === 'assistant' && this.activeRun) {
         this.activeRun.lastAssistant = assistantSnapshot(event.message);
       }
       return;
@@ -131,7 +118,7 @@ export class ThreadRunController {
     }
   }
 
-  private onUserMessageStart(message: unknown): void {
+  private onUserMessageStart(message: UserSessionMessage): void {
     const next = this.pendingRuns.find((pending) => !pending.completed && !pending.delivered);
 
     if (!next) {
@@ -245,96 +232,38 @@ function removePendingRun(pendingRuns: PendingRun[], pending: PendingRun): void 
   }
 }
 
-function messageRole(message: unknown): string | null {
-  if (!message || typeof message !== 'object') {
-    return null;
+function userMessageText(message: UserSessionMessage): string {
+  if (typeof message.content === 'string') {
+    return message.content;
   }
 
-  if (!('role' in message) || typeof message.role !== 'string') {
-    return null;
-  }
-
-  return message.role;
+  return textContentToString(message.content);
 }
 
-function userMessageText(message: unknown): string {
-  if (!message || typeof message !== 'object' || !('content' in message)) {
-    return '';
-  }
+function assistantSnapshot(message: AssistantSessionMessage): AssistantSnapshot {
+  return {
+    text: textContentToString(message.content),
+    provider: message.provider,
+    model: message.model,
+    stopReason: message.stopReason,
+    errorMessage: message.errorMessage ?? null,
+  };
+}
 
-  const content = message.content;
+function textContentToString(content: SessionTextContent): string {
   if (typeof content === 'string') {
     return content;
   }
 
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
   return content
     .flatMap((part) => {
-      if (!part || typeof part !== 'object') {
-        return [];
-      }
-
-      if (!('type' in part) || part.type !== 'text') {
-        return [];
-      }
-
-      if (!('text' in part) || typeof part.text !== 'string') {
+      if (part.type !== 'text') {
         return [];
       }
 
       return [part.text];
     })
     .join('\n');
-}
-
-function assistantSnapshot(message: unknown): AssistantSnapshot {
-  if (!message || typeof message !== 'object') {
-    return {
-      text: '',
-      provider: null,
-      model: null,
-      stopReason: null,
-      errorMessage: null,
-    };
-  }
-
-  const content = 'content' in message ? message.content : null;
-  const text = Array.isArray(content)
-    ? content
-        .flatMap((part) => {
-          if (!part || typeof part !== 'object') {
-            return [];
-          }
-
-          if (!('type' in part) || part.type !== 'text') {
-            return [];
-          }
-
-          if (!('text' in part) || typeof part.text !== 'string') {
-            return [];
-          }
-
-          return [part.text];
-        })
-        .join('\n')
-    : '';
-
-  const provider = 'provider' in message && typeof message.provider === 'string' ? message.provider : null;
-  const model = 'model' in message && typeof message.model === 'string' ? message.model : null;
-  const stopReason = 'stopReason' in message && typeof message.stopReason === 'string' ? message.stopReason : null;
-  const errorMessage =
-    'errorMessage' in message && typeof message.errorMessage === 'string' ? message.errorMessage : null;
-
-  return {
-    text,
-    provider,
-    model,
-    stopReason,
-    errorMessage,
-  };
 }
 
 function toError(error: unknown, fallback: string): Error {
