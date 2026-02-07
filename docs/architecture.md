@@ -14,26 +14,6 @@ Current implemented vertical slice:
 - Durable run scheduling/recovery via DBOS
 - Postgres persistence for runs, idempotency keys, and `thread_key -> session` mapping
 
-## High-level component map
-
-- `src/server/main.ts`
-  - Process composition root.
-  - Loads config, bootstraps workspace agent dir, runs SQL migrations, wires services, starts HTTP server.
-- `src/server/app.ts`
-  - Fastify routes and request/response validation.
-- `src/server/service.ts`
-  - Orchestration layer for ingest, scheduling, execution, transitions, and recovery passes.
-- `src/server/scheduler.ts`
-  - DBOS integration. Enqueues and recovers durable run workflows.
-- `src/server/store.ts`
-  - Postgres and in-memory run storage implementations.
-- `src/runtime/pi-executor.ts`
-  - pi SDK execution and per-thread session reuse.
-- `src/shared/api-contracts.ts`
-  - Shared Zod API schemas used by both server and CLI client.
-- `migrations/*.sql`
-  - Schema migrations (`runs`, `message_ingest`, `thread_sessions`).
-
 ## Request and execution flow
 
 ### 1) Ingest (`POST /v1/messages`)
