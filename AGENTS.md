@@ -71,7 +71,7 @@
 - Load workspace/global context and customizations via `DefaultResourceLoader` + `SettingsManager` (AGENTS/SYSTEM/APPEND_SYSTEM, skills, prompts, extensions, themes).
 - Drive run lifecycle and structured output via `session.subscribe(...)` events (`agent_start`, `message_update`, `tool_execution_*`, `agent_end`).
 
-### Pi docs reviewed (absolute paths)
+### Pi docs (absolute paths)
 
 - `/Users/akuzmenko/.local/share/mise/installs/npm-mariozechner-pi-coding-agent/0.52.7/lib/node_modules/@mariozechner/pi-coding-agent/README.md`
 - `/Users/akuzmenko/.local/share/mise/installs/npm-mariozechner-pi-coding-agent/0.52.7/lib/node_modules/@mariozechner/pi-coding-agent/docs/sdk.md`
