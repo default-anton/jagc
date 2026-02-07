@@ -3,14 +3,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { type RunnerHandle, run } from '@grammyjs/runner';
 import { Bot, type Context } from 'grammy';
 import type { ProviderCatalogEntry } from '../runtime/pi-auth.js';
-import {
-  type SupportedThinkingLevel,
-  supportedThinkingLevels,
-  type ThreadControlService,
-  type ThreadRuntimeState,
-} from '../runtime/pi-executor.js';
+import type { ThreadControlService } from '../runtime/pi-executor.js';
 import type { RunService } from '../server/service.js';
 import type { RunRecord } from '../shared/run-types.js';
+import { parseTelegramCallbackData } from './telegram-controls-callbacks.js';
+import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
 
 const defaultWaitTimeoutMs = 180_000;
 const defaultPollIntervalMs = 500;
@@ -34,12 +31,17 @@ interface ParsedTelegramCommand {
 
 export class TelegramPollingAdapter {
   private readonly bot: Bot;
+  private readonly runtimeControls: TelegramRuntimeControls;
   private runner: RunnerHandle | null = null;
   private readonly waitTimeoutMs: number;
   private readonly pollIntervalMs: number;
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
     this.bot = new Bot(options.botToken);
+    this.runtimeControls = new TelegramRuntimeControls({
+      authService: options.authService,
+      threadControlService: options.threadControlService,
+    });
     this.waitTimeoutMs = options.waitTimeoutMs ?? defaultWaitTimeoutMs;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
 
@@ -55,6 +57,10 @@ export class TelegramPollingAdapter {
     this.bot.on('message:text', async (ctx) => {
       await this.handleTextMessage(ctx);
     });
+
+    this.bot.on('callback_query:data', async (ctx) => {
+      await this.handleCallbackQuery(ctx);
+    });
   }
 
   async start(): Promise<void> {
@@ -66,7 +72,7 @@ export class TelegramPollingAdapter {
     this.runner = run(this.bot, {
       runner: {
         fetch: {
-          allowed_updates: ['message'],
+          allowed_updates: ['message', 'callback_query'],
           timeout: 30,
         },
       },
@@ -122,12 +128,16 @@ export class TelegramPollingAdapter {
         await ctx.reply(helpText());
         return;
       }
+      case 'settings': {
+        await this.runtimeControls.handleSettingsCommand(ctx);
+        return;
+      }
       case 'model': {
-        await this.handleModelCommand(ctx, command.args);
+        await this.runtimeControls.handleModelCommand(ctx, command.args);
         return;
       }
       case 'thinking': {
-        await this.handleThinkingCommand(ctx, command.args);
+        await this.runtimeControls.handleThinkingCommand(ctx, command.args);
         return;
       }
       case 'steer': {
@@ -137,6 +147,69 @@ export class TelegramPollingAdapter {
       default: {
         await ctx.reply(`Unknown command: /${command.command}`);
       }
+    }
+  }
+
+  private async handleCallbackQuery(ctx: Context): Promise<void> {
+    if (!ctx.chat || ctx.chat.type !== 'private') {
+      await ctx.answerCallbackQuery({ text: 'This action is supported in personal chats only.' });
+      return;
+    }
+
+    const data = ctx.callbackQuery?.data;
+    if (!data) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const action = parseTelegramCallbackData(data);
+    if (!action) {
+      console.info(
+        JSON.stringify({
+          event: 'telegram_callback_query_ignored',
+          reason: 'invalid_callback_data',
+          chat_id: ctx.chat.id,
+          callback_data: data,
+        }),
+      );
+      await ctx.answerCallbackQuery({ text: 'This menu is outdated. Use /settings to refresh.' });
+      return;
+    }
+
+    const callbackLogContext = {
+      chat_id: ctx.chat.id,
+      thread_key: telegramThreadKey(ctx.chat.id),
+      callback_data: data,
+      action_kind: action.kind,
+    };
+
+    try {
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: 'telegram_callback_query_ack_failed',
+          ...callbackLogContext,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+
+    try {
+      await this.runtimeControls.handleCallbackAction(ctx, action);
+      console.info(JSON.stringify({ event: 'telegram_callback_query_handled', ...callbackLogContext }));
+    } catch (error) {
+      const message = userFacingError(error);
+
+      console.error(
+        JSON.stringify({
+          event: 'telegram_callback_query_failed',
+          ...callbackLogContext,
+          message,
+        }),
+      );
+
+      await ctx.reply(`❌ ${message}`);
     }
   }
 
@@ -166,94 +239,6 @@ export class TelegramPollingAdapter {
     }
 
     await this.replyLong(ctx, formatRunResult(completedRun));
-  }
-
-  private async handleModelCommand(ctx: Context, args: string): Promise<void> {
-    const threadControlService = this.options.threadControlService;
-    if (!threadControlService) {
-      await ctx.reply('Model controls are unavailable when JAGC_RUNNER is not pi.');
-      return;
-    }
-
-    const threadKey = telegramThreadKey(ctx.chat?.id);
-    const trimmed = args.trim();
-
-    if (!trimmed || trimmed === 'get') {
-      const state = await threadControlService.getThreadRuntimeState(threadKey);
-      await ctx.reply(formatModelState(state));
-      return;
-    }
-
-    if (trimmed === 'list' || trimmed.startsWith('list ')) {
-      const authService = this.options.authService;
-      if (!authService) {
-        await ctx.reply('Model catalog is unavailable.');
-        return;
-      }
-
-      const filter = trimmed.slice('list'.length).trim();
-      const providers = authService
-        .getProviderCatalog()
-        .filter((provider) => (filter ? provider.provider === filter : true));
-
-      if (providers.length === 0) {
-        await ctx.reply(filter ? `No provider named "${filter}".` : 'No providers available.');
-        return;
-      }
-
-      const lines: string[] = [];
-      for (const provider of providers) {
-        lines.push(`${provider.provider} (${provider.available_models}/${provider.total_models})`);
-        for (const model of provider.models) {
-          const marker = model.available ? '✅' : '◻️';
-          const reasoning = model.reasoning ? ' 🧠' : '';
-          lines.push(`  ${marker} ${model.model_id}${reasoning}`);
-        }
-      }
-
-      await this.replyLong(ctx, lines.join('\n'));
-      return;
-    }
-
-    const parsed = parseProviderModel(trimmed);
-    const state = await threadControlService.setThreadModel(threadKey, parsed.provider, parsed.modelId);
-    if (!state.model) {
-      await ctx.reply('Model cleared for this thread.');
-      return;
-    }
-
-    await ctx.reply(`Model set to ${state.model.provider}/${state.model.modelId}`);
-  }
-
-  private async handleThinkingCommand(ctx: Context, args: string): Promise<void> {
-    const threadControlService = this.options.threadControlService;
-    if (!threadControlService) {
-      await ctx.reply('Thinking controls are unavailable when JAGC_RUNNER is not pi.');
-      return;
-    }
-
-    const threadKey = telegramThreadKey(ctx.chat?.id);
-    const trimmed = args.trim();
-
-    if (!trimmed || trimmed === 'get') {
-      const state = await threadControlService.getThreadRuntimeState(threadKey);
-      await ctx.reply(formatThinkingState(state));
-      return;
-    }
-
-    if (trimmed === 'list') {
-      const state = await threadControlService.getThreadRuntimeState(threadKey);
-      await ctx.reply(`Thinking levels: ${state.availableThinkingLevels.join(', ')}`);
-      return;
-    }
-
-    if (!isSupportedThinkingLevel(trimmed)) {
-      await ctx.reply(`Invalid thinking level. Use one of: ${supportedThinkingLevels.join(', ')}`);
-      return;
-    }
-
-    const state = await threadControlService.setThreadThinkingLevel(threadKey, trimmed);
-    await ctx.reply(`Thinking level set to ${state.thinkingLevel}`);
   }
 
   private async waitForCompletion(runId: string): Promise<RunRecord> {
@@ -296,19 +281,6 @@ export function parseTelegramCommand(text: string): ParsedTelegramCommand | null
   };
 }
 
-function parseProviderModel(value: string): { provider: string; modelId: string } {
-  const separatorIndex = value.indexOf('/');
-
-  if (separatorIndex <= 0 || separatorIndex === value.length - 1) {
-    throw new Error('Expected model in provider/model format, e.g. openai/gpt-5');
-  }
-
-  return {
-    provider: value.slice(0, separatorIndex),
-    modelId: value.slice(separatorIndex + 1),
-  };
-}
-
 function formatRunResult(run: RunRecord): string {
   if (run.status === 'failed') {
     return `❌ ${run.errorMessage ?? 'run failed'}`;
@@ -326,31 +298,12 @@ function formatRunResult(run: RunRecord): string {
   return `Run output:\n${JSON.stringify(run.output, null, 2)}`;
 }
 
-function formatModelState(state: ThreadRuntimeState): string {
-  const model = state.model ? `${state.model.provider}/${state.model.modelId}` : '(none)';
-  const available = state.availableThinkingLevels.join(', ');
-
-  return [
-    `Model: ${model}`,
-    `Thinking: ${state.thinkingLevel}`,
-    `Available thinking levels: ${available}`,
-    'Usage: /model list [provider] | /model <provider/model>',
-  ].join('\n');
-}
-
-function formatThinkingState(state: ThreadRuntimeState): string {
-  return [`Thinking: ${state.thinkingLevel}`, `Levels: ${state.availableThinkingLevels.join(', ')}`].join('\n');
-}
-
 function helpText(): string {
   return [
     'jagc Telegram commands:',
-    '/model — show current model',
-    '/model list [provider] — list providers and models',
-    '/model <provider/model> — set model for this chat thread',
-    '/thinking — show current thinking level',
-    '/thinking list — list available thinking levels',
-    '/thinking <level> — set thinking level for this chat thread',
+    '/settings — open runtime settings',
+    '/model — open model picker',
+    '/thinking — open thinking picker',
     '/steer <message> — send an interrupting message (explicit steer)',
   ].join('\n');
 }
@@ -394,6 +347,10 @@ function telegramUserKey(userId: number | undefined): string | undefined {
   return `telegram:user:${userId}`;
 }
 
-function isSupportedThinkingLevel(value: string): value is SupportedThinkingLevel {
-  return supportedThinkingLevels.includes(value as SupportedThinkingLevel);
+function userFacingError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.slice(0, 180);
+  }
+
+  return 'Action failed. Please try again.';
 }
