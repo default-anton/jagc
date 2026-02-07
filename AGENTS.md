@@ -22,7 +22,8 @@
 - `src/server/app.ts` — HTTP routes (`/healthz`, `/v1/messages`, `/v1/runs/:run_id`, `/v1/auth/providers`, `/v1/models`, `/v1/threads/:thread_key/{runtime,model,thinking}`).
 - `src/server/{service,scheduler,store,executor}.ts` — run lifecycle, DBOS queueing, persistence, runner wiring.
 - `src/runtime/{pi-executor,thread-run-controller,pi-auth,agent-dir-bootstrap}.ts` — pi SDK sessions, same-thread control, auth/workspace bootstrap.
-- `src/adapters/telegram-polling.ts` — Telegram polling adapter and command handling (`/model`, `/thinking`, `/steer`).
+- `src/adapters/telegram-polling.ts` — Telegram polling adapter, text ingress, and callback-query routing.
+- `src/adapters/telegram-runtime-controls.ts` + `src/adapters/telegram-controls-callbacks.ts` — button-based runtime UX (`/settings`, `/model`, `/thinking`) and callback payload parsing.
 - `src/cli/main.ts` + `src/cli/client.ts` — CLI commands and server client (`auth providers`, `model list|get|set`, `thinking get|set`).
 - `src/shared/{api-contracts,config,run-types}.ts` — shared contracts/types/config parsing.
 - `migrations/*.sql` — Postgres schema and durable run tables.
@@ -40,7 +41,7 @@
 - Build toward single-host production deployment from day one (keep local dev simple).
 - No auth required for local CLI usage; webhook ingress must use token-based authentication.
 - Provider/model/thinking selection is delegated to pi settings (do not duplicate in jagc DB).
-- Telegram UX must include model/thinking controls (starting with `/model` and `/thinking`).
+- Telegram UX must include button-based model/thinking controls via `/settings`, `/model`, and `/thinking`.
 - v0 deployment target starts with macOS single-host using `.env` configuration.
 
 ## v0 locked implementation baseline
@@ -117,9 +118,9 @@ Status legend: `[x] done`, `[~] partial`, `[ ] pending`.
 4. [x] Telegram polling adapter
    - grammY polling adapter implemented for personal chats.
    - Telegram thread mapping: `thread_key = telegram:chat:<chat_id>`.
-   - Telegram UX controls implemented: `/model`, `/thinking` (`/steer` explicit opt-in).
+   - Telegram UX controls implemented as button-based pickers: `/settings`, `/model`, `/thinking` (`/steer` explicit opt-in).
 5. [~] Feedback loop + release gate
    - Fast smoke script implemented: `pnpm smoke` and `JAGC_RUNNER=pi pnpm smoke`.
    - CI merge gating not wired yet (local gate command exists: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`).
 
-Definition of done for v0: CLI and Telegram both work end-to-end. `jagc message "ping" --json` returns a valid `run_id`, waiting yields terminal status plus output, same-thread queue behavior is correct, Telegram polling replies in personal chats, and `/model` + `/thinking` controls work in Telegram and CLI.
+Definition of done for v0: CLI and Telegram both work end-to-end. `jagc message "ping" --json` returns a valid `run_id`, waiting yields terminal status plus output, same-thread queue behavior is correct, Telegram polling replies in personal chats, and button-based `/settings` + `/model` + `/thinking` controls work in Telegram (with model/thinking controls also available in CLI).

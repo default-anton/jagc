@@ -25,7 +25,7 @@ Current implemented vertical slice:
   - `jagc model list|get|set`
   - `jagc thinking get|set`
 - Runtime executors: `echo` (deterministic) and `pi` (real agent)
-- Telegram polling adapter (personal chats) with `/model` and `/thinking` commands
+- Telegram polling adapter (personal chats) with button-based runtime controls (`/settings`, `/model`, `/thinking`)
 - Durable run scheduling/recovery via DBOS
 - Postgres persistence for runs, idempotency keys, and `thread_key -> session` mapping
 
@@ -50,8 +50,10 @@ Current implemented vertical slice:
   - `delivery_mode = followUp` by default (`/steer` is explicit opt-in).
 - Adapter waits for terminal run status and replies back to chat with final output/error.
 - Adapter-level controls:
-  - `/model`, `/model list [provider]`, `/model <provider/model>`
-  - `/thinking`, `/thinking list`, `/thinking <level>`
+  - `/settings` opens runtime settings menu
+  - `/model` opens model picker (button-based)
+  - `/thinking` opens thinking picker (button-based)
+  - text arguments for `/model` and `/thinking` are intentionally not supported
 
 ### 2) Durable execution
 

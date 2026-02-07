@@ -19,7 +19,7 @@ For deferred APIs, deployment notes, and post-MVP plans, see **[`docs/future.md`
 - Default executor runs through pi SDK sessions with DBOS-backed durable run scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Strict global one-active-run-per-thread is enforced via DBOS partitioned queueing keyed by `thread_key`.
-- Telegram polling adapter is implemented (personal chats), including `/model` and `/thinking` controls.
+- Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/model`, and `/thinking`.
 - `JAGC_RUNNER=echo` is available for deterministic smoke tests.
 - **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
 
