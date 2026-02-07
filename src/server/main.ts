@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 
 import { bootstrapAgentDir } from '../runtime/agent-dir-bootstrap.js';
 import { PiAuthService } from '../runtime/pi-auth.js';
-import { PiRunExecutor } from '../runtime/pi-executor.js';
+import { PiRunExecutor, type ThreadControlService } from '../runtime/pi-executor.js';
 import { loadConfig } from '../shared/config.js';
 import { createApp } from './app.js';
 import { EchoRunExecutor, type RunExecutor } from './executor.js';
@@ -35,12 +35,17 @@ async function main(): Promise<void> {
   const runStore = new PostgresRunStore(pool);
 
   let runExecutor: RunExecutor;
+  let threadControlService: ThreadControlService | undefined;
+
   if (config.JAGC_RUNNER === 'echo') {
     runExecutor = new EchoRunExecutor();
   } else {
-    runExecutor = new PiRunExecutor(runStore, {
+    const piRunExecutor = new PiRunExecutor(runStore, {
       workspaceDir: config.JAGC_WORKSPACE_DIR,
     });
+
+    runExecutor = piRunExecutor;
+    threadControlService = piRunExecutor;
   }
 
   let runService: RunService | undefined;
@@ -63,6 +68,7 @@ async function main(): Promise<void> {
   const app = createApp({
     runService,
     authService,
+    threadControlService,
     logger: {
       level: config.JAGC_LOG_LEVEL,
     },

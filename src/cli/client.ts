@@ -3,13 +3,21 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type AuthProvidersResponse,
   authProvidersResponseSchema,
+  type ModelCatalogResponse,
+  modelCatalogResponseSchema,
   type PostMessageRequest,
   type RunResponse,
   runResponseSchema,
+  type SetThreadModelRequest,
+  type SetThreadThinkingRequest,
+  type ThreadRuntimeStateResponse,
+  threadRuntimeStateSchema,
 } from '../shared/api-contracts.js';
 
 export type ApiRunResponse = RunResponse;
 export type ApiAuthProvidersResponse = AuthProvidersResponse;
+export type ApiModelCatalogResponse = ModelCatalogResponse;
+export type ApiThreadRuntimeStateResponse = ThreadRuntimeStateResponse;
 export type MessageRequest = PostMessageRequest;
 
 export async function sendMessage(apiUrl: string, payload: MessageRequest): Promise<ApiRunResponse> {
@@ -81,6 +89,58 @@ export async function getAuthProviders(apiUrl: string): Promise<ApiAuthProviders
   return authProvidersResponseSchema.parse(responseBody);
 }
 
+export async function getModelCatalog(apiUrl: string): Promise<ApiModelCatalogResponse> {
+  const response = await fetch(`${apiUrl}/v1/models`);
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return modelCatalogResponseSchema.parse(responseBody);
+}
+
+export async function getThreadRuntime(apiUrl: string, threadKey: string): Promise<ApiThreadRuntimeStateResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/runtime`);
+  return parseThreadRuntimeResponse(response);
+}
+
+export async function setThreadModel(
+  apiUrl: string,
+  threadKey: string,
+  payload: SetThreadModelRequest,
+): Promise<ApiThreadRuntimeStateResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/model`, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseThreadRuntimeResponse(response);
+}
+
+export async function setThreadThinkingLevel(
+  apiUrl: string,
+  threadKey: string,
+  payload: SetThreadThinkingRequest,
+): Promise<ApiThreadRuntimeStateResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/thinking`, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseThreadRuntimeResponse(response);
+}
+
 async function parseRunResponse(response: Response): Promise<ApiRunResponse> {
   const responseBody = await parseJsonResponse(response);
 
@@ -93,6 +153,20 @@ async function parseRunResponse(response: Response): Promise<ApiRunResponse> {
   }
 
   return runResponseSchema.parse(responseBody);
+}
+
+async function parseThreadRuntimeResponse(response: Response): Promise<ApiThreadRuntimeStateResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return threadRuntimeStateSchema.parse(responseBody);
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {

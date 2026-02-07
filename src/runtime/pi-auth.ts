@@ -21,6 +21,14 @@ const providerEnvVarHints: Record<string, string> = {
   'azure-openai': 'AZURE_OPENAI_API_KEY',
 };
 
+export interface ProviderModelStatus {
+  provider: string;
+  model_id: string;
+  name: string;
+  reasoning: boolean;
+  available: boolean;
+}
+
 export interface ProviderAuthStatus {
   provider: string;
   has_auth: boolean;
@@ -29,6 +37,10 @@ export interface ProviderAuthStatus {
   env_var_hint: string | null;
   total_models: number;
   available_models: number;
+}
+
+export interface ProviderCatalogEntry extends ProviderAuthStatus {
+  models: ProviderModelStatus[];
 }
 
 export class PiAuthService {
@@ -41,6 +53,10 @@ export class PiAuthService {
   }
 
   getProviderStatuses(): ProviderAuthStatus[] {
+    return this.getProviderCatalog().map(({ models, ...provider }) => provider);
+  }
+
+  getProviderCatalog(): ProviderCatalogEntry[] {
     this.authStorage.reload();
     this.modelRegistry.refresh();
 
@@ -49,16 +65,27 @@ export class PiAuthService {
     const authProviders = Object.keys(this.authStorage.getAll());
 
     const providers = new Set<string>([...allModels.map((model) => model.provider), ...authProviders]);
-
     const oauthProviders = new Set(this.authStorage.getOAuthProviders().map((provider) => provider.id));
 
     const allModelCounts = countByProvider(allModels.map((model) => model.provider));
     const availableModelCounts = countByProvider(availableModels.map((model) => model.provider));
+    const availableModelKeys = new Set(availableModels.map((model) => `${model.provider}/${model.id}`));
 
     return [...providers]
       .sort((left, right) => left.localeCompare(right))
       .map((provider) => {
         const credential = this.authStorage.get(provider);
+
+        const models = allModels
+          .filter((model) => model.provider === provider)
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map((model) => ({
+            provider,
+            model_id: model.id,
+            name: model.name,
+            reasoning: model.reasoning,
+            available: availableModelKeys.has(`${model.provider}/${model.id}`),
+          }));
 
         return {
           provider,
@@ -68,6 +95,7 @@ export class PiAuthService {
           env_var_hint: providerEnvVarHints[provider] ?? null,
           total_models: allModelCounts.get(provider) ?? 0,
           available_models: availableModelCounts.get(provider) ?? 0,
+          models,
         };
       });
   }

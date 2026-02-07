@@ -22,6 +22,111 @@ class FailingExecutor implements RunExecutor {
   }
 }
 
+class FakeAuthService {
+  getProviderStatuses() {
+    return [
+      {
+        provider: 'openai',
+        has_auth: true,
+        credential_type: 'api_key' as const,
+        oauth_supported: false,
+        env_var_hint: 'OPENAI_API_KEY',
+        total_models: 2,
+        available_models: 2,
+      },
+    ];
+  }
+
+  getProviderCatalog() {
+    return [
+      {
+        provider: 'openai',
+        has_auth: true,
+        credential_type: 'api_key' as const,
+        oauth_supported: false,
+        env_var_hint: 'OPENAI_API_KEY',
+        total_models: 2,
+        available_models: 2,
+        models: [
+          {
+            provider: 'openai',
+            model_id: 'gpt-4.1',
+            name: 'GPT-4.1',
+            reasoning: true,
+            available: true,
+          },
+          {
+            provider: 'openai',
+            model_id: 'gpt-4o-mini',
+            name: 'GPT-4o mini',
+            reasoning: false,
+            available: true,
+          },
+        ],
+      },
+    ];
+  }
+}
+
+type FakeThreadState = {
+  threadKey: string;
+  model: { provider: string; modelId: string; name: string | null } | null;
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  supportsThinking: boolean;
+  availableThinkingLevels: ('off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh')[];
+};
+
+class FakeThreadControlService {
+  private readonly byThread = new Map<string, FakeThreadState>();
+
+  async getThreadRuntimeState(threadKey: string) {
+    return this.ensure(threadKey);
+  }
+
+  async setThreadModel(threadKey: string, provider: string, modelId: string) {
+    const state = this.ensure(threadKey);
+    state.model = {
+      provider,
+      modelId,
+      name: modelId,
+    };
+
+    return state;
+  }
+
+  async setThreadThinkingLevel(
+    threadKey: string,
+    thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+  ) {
+    const state = this.ensure(threadKey);
+    state.thinkingLevel = thinkingLevel;
+
+    return state;
+  }
+
+  private ensure(threadKey: string) {
+    const existing = this.byThread.get(threadKey);
+    if (existing) {
+      return existing;
+    }
+
+    const state: FakeThreadState = {
+      threadKey,
+      model: {
+        provider: 'openai',
+        modelId: 'gpt-4o-mini',
+        name: 'GPT-4o mini',
+      },
+      thinkingLevel: 'medium',
+      supportsThinking: true,
+      availableThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+    };
+
+    this.byThread.set(threadKey, state);
+    return state;
+  }
+}
+
 describe('server API', () => {
   test('GET /healthz returns ok', async () => {
     const { app } = await createTestApp(new TestExecutor());
@@ -178,9 +283,115 @@ describe('server API', () => {
 
     await app.close();
   });
+
+  test('GET /v1/models returns provider catalogs', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/models',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      providers: [
+        {
+          provider: 'openai',
+          models: [{ model_id: 'gpt-4.1' }, { model_id: 'gpt-4o-mini' }],
+        },
+      ],
+    });
+
+    await app.close();
+  });
+
+  test('thread model and thinking endpoints return 501 without thread control service', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+    });
+
+    const runtimeResponse = await app.inject({
+      method: 'GET',
+      url: '/v1/threads/cli%3Adefault/runtime',
+    });
+
+    expect(runtimeResponse.statusCode).toBe(501);
+
+    const modelResponse = await app.inject({
+      method: 'PUT',
+      url: '/v1/threads/cli%3Adefault/model',
+      payload: {
+        provider: 'openai',
+        model_id: 'gpt-4.1',
+      },
+    });
+
+    expect(modelResponse.statusCode).toBe(501);
+
+    await app.close();
+  });
+
+  test('thread model and thinking endpoints update runtime state', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+      threadControlService: new FakeThreadControlService(),
+    });
+
+    const getInitial = await app.inject({
+      method: 'GET',
+      url: '/v1/threads/cli%3Adefault/runtime',
+    });
+
+    expect(getInitial.statusCode).toBe(200);
+    expect(getInitial.json()).toMatchObject({
+      thread_key: 'cli:default',
+      model: { provider: 'openai', model_id: 'gpt-4o-mini' },
+      thinking_level: 'medium',
+    });
+
+    const setModelResponse = await app.inject({
+      method: 'PUT',
+      url: '/v1/threads/cli%3Adefault/model',
+      payload: {
+        provider: 'openai',
+        model_id: 'gpt-4.1',
+      },
+    });
+
+    expect(setModelResponse.statusCode).toBe(200);
+    expect(setModelResponse.json()).toMatchObject({
+      model: {
+        provider: 'openai',
+        model_id: 'gpt-4.1',
+      },
+    });
+
+    const setThinkingResponse = await app.inject({
+      method: 'PUT',
+      url: '/v1/threads/cli%3Adefault/thinking',
+      payload: {
+        thinking_level: 'high',
+      },
+    });
+
+    expect(setThinkingResponse.statusCode).toBe(200);
+    expect(setThinkingResponse.json()).toMatchObject({
+      thinking_level: 'high',
+    });
+
+    await app.close();
+  });
 });
 
-async function createTestApp(runExecutor: RunExecutor) {
+async function createTestApp(
+  runExecutor: RunExecutor,
+  options: {
+    authService?: FakeAuthService;
+    threadControlService?: FakeThreadControlService;
+  } = {},
+) {
   const runStore = new InMemoryRunStore();
 
   let runService!: RunService;
@@ -198,7 +409,11 @@ async function createTestApp(runExecutor: RunExecutor) {
   runService = new RunService(runStore, runExecutor, runScheduler);
   await runService.init();
 
-  const app = createApp({ runService });
+  const app = createApp({
+    runService,
+    authService: options.authService,
+    threadControlService: options.threadControlService,
+  });
   app.addHook('onClose', async () => {
     await runService.shutdown();
   });
