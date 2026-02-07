@@ -1,6 +1,8 @@
 # jagc (future + deferred details)
 
 > Moved from `README.md` to keep the root README MVP-focused. Content below is preserved draft design and roadmap material.
+>
+> For current implementation architecture, see [`docs/architecture.md`](./architecture.md).
 
 > **jagc** = **j**ust **a** **g**ood **c**lanker.
 
@@ -11,6 +13,7 @@ Self-hosted AI assistant to automate your life:
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
+- Current vertical slice ships: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, CLI `message` + `run wait`, DBOS-backed durable scheduling/recovery, and persisted `thread_key -> session` mapping.
 - **Contracts we intend to stabilize early:**
   - Workspace layout + override rules (see **Workspace contract**)
   - Ingress envelope + idempotency semantics (internal), and thread/run behavior (see **Ingress envelope (internal)** and **Threads, runs, and queued messages**)
@@ -57,6 +60,7 @@ This is the first slice we should ship before expanding scope:
   - `run_id`
   - `status` (`succeeded|failed|running`)
   - `output` (when succeeded)
+  - `error.message` (when failed)
 - If two messages arrive for the same thread while a run is active, delivery obeys mode (`steer` interrupts after current tool; `followUp` queues for after completion).
 - Different threads can execute concurrently.
 
@@ -163,7 +167,7 @@ Canonical workspace layout, override rules, and config-file semantics live in **
 
 ### Environment
 
-All jagc env vars are prefixed with **`JAGC_`** (exception: `PI_CODING_AGENT_DIR`).
+All jagc env vars are prefixed with **`JAGC_`**.
 Use the canonical config table below as the single source of truth.
 
 ### Run
@@ -185,10 +189,9 @@ Use the canonical config table below as the single source of truth.
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `JAGC_DATABASE_URL` | Yes | — | Postgres connection string. |
-| `JAGC_WORKSPACE_DIR` | Yes | — | Path to user workspace repo (`workflows/`, `AGENTS.md`, optional `jagc.json`, pi artifacts). |
+| `JAGC_WORKSPACE_DIR` | No | `~/.jagc` | Workspace + pi config/state dir (`workflows/`, `AGENTS.md`, `settings.json`, `auth.json`, `skills/`, `prompts/`, `extensions/`, `themes/`, sessions). On first run, jagc can copy `~/.pi/agent/{settings.json,auth.json}` when destination files are missing. |
 | `JAGC_PORT` | Yes | `31415` | Server bind port. |
 | `JAGC_API_URL` | No | `http://127.0.0.1:31415` | CLI target API URL (used by `jagc` commands; flag `--api-url` wins). |
-| `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | pi-coding-agent config/state dir (sessions, global `skills/`, `prompts/`, `extensions/`, `themes/`, `settings.json`). Persist if you want sessions across restarts. |
 | `JAGC_LOG_LEVEL` | No | `info` | Logging level (`debug|info|warn|error`). |
 | `JAGC_LOG_FORMAT` | No | `pretty` (dev), `json` (prod) | Log output format. |
 | `JAGC_TELEGRAM_BOT_TOKEN` | No | — | Required only when Telegram adapter is enabled. |
@@ -437,7 +440,7 @@ Implementation strategy:
   - (recommended) audit log of tool calls / external side effects
 
 - Disk stores:
-  - pi session state under `PI_CODING_AGENT_DIR` (or default `~/.pi/agent`)
+  - pi session state under `JAGC_WORKSPACE_DIR` (default `~/.jagc`)
 
 ---
 
@@ -481,7 +484,7 @@ pi list
 pi update
 ```
 
-**Scope:** by default, `pi install/remove` write to global settings (`~/.pi/agent/settings.json`, or `PI_CODING_AGENT_DIR/settings.json` if set).
+**Scope:** by default, `pi install/remove` write to workspace settings under `JAGC_WORKSPACE_DIR/settings.json` (default `~/.jagc/settings.json`).
 Use `-l` to write to workspace-local settings (`settings.json` in the workspace root, per pi convention) instead:
 
 ```bash

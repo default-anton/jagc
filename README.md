@@ -8,11 +8,17 @@ Self-hosted AI assistant to automate your life:
 
 This README is intentionally short and MVP-focused.
 
-For detailed architecture drafts, deferred APIs, deployment notes, and post-MVP plans, see **[`docs/future.md`](docs/future.md)**.
+For current implemented architecture, see **[`docs/architecture.md`](docs/architecture.md)**.
+For deferred APIs, deployment notes, and post-MVP plans, see **[`docs/future.md`](docs/future.md)**.
 
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
+- Initial v0 scaffold is in place: server endpoints (`/healthz`, `/v1/messages`, `/v1/runs/:run_id`) and CLI commands (`message`, `run wait`, `health`, `auth providers`).
+- Default executor runs through pi SDK sessions with DBOS-backed durable run scheduling/recovery.
+- Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
+- Strict global one-active-run-per-thread is enforced via DBOS partitioned queueing keyed by `thread_key`.
+- `JAGC_RUNNER=echo` is available for deterministic smoke tests.
 - **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
 
 ## Locked v0 technology stack
@@ -51,6 +57,7 @@ Ship this first:
   - `run_id`
   - `status` (`succeeded|failed|running`)
   - `output` (when succeeded)
+  - `error.message` (when failed)
 - If two messages arrive for the same thread while a run is active:
   - `steer` interrupts at the next tool boundary
   - `followUp` waits for idle
@@ -92,24 +99,30 @@ $JAGC_WORKSPACE_DIR/
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `JAGC_DATABASE_URL` | Yes | Postgres connection string |
-| `JAGC_WORKSPACE_DIR` | Yes | Path to user workspace repo |
-| `JAGC_PORT` | No | Defaults to `31415` |
+| `JAGC_WORKSPACE_DIR` | No | Workspace + pi agent directory (default `~/.jagc`) |
+| `JAGC_HOST` | No | Server bind host (default `127.0.0.1`) |
+| `JAGC_PORT` | No | Server bind port (default `31415`) |
 | `JAGC_API_URL` | No | CLI API target (default `http://127.0.0.1:31415`) |
-| `PI_CODING_AGENT_DIR` | No | pi config/state dir (default `~/.pi/agent`) |
+| `JAGC_RUNNER` | No | `pi` (default) or `echo` for deterministic local/smoke runs |
 | `JAGC_TELEGRAM_BOT_TOKEN` | No | Required only when Telegram adapter is enabled |
 | `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | Required when Telegram webhook mode is enabled |
 | `JAGC_WEBHOOK_BEARER_TOKEN` | No | Required when generic `POST /v1/webhooks/:source` ingress is enabled |
 
+Auth bootstrap and provider credential details: [`docs/auth.md`](docs/auth.md).
+
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources, and does a one-time bootstrap copy of `~/.pi/agent/{settings.json,auth.json}` if destination files are missing.
+
 ## Quick start (dev, intended)
 
 1. `mise install` (rerun when required tools are missing or `.tool-versions` changes)
-2. Start Postgres
+2. Start Postgres (`pnpm db:start && pnpm db:createdb`)
 3. `pnpm install`
-4. Set required env vars
-5. `pnpm dev`
+4. Set required env vars (see `.env.example`)
+5. `pnpm dev` (applies SQL migrations from `migrations/` on startup)
 6. Verify:
-   - `jagc health`
-   - `jagc message "ping" --json`
+   - `pnpm smoke`
+   - or manually: `pnpm dev:cli health --json` then `pnpm dev:cli message "ping" --json`
+   - inspect model/provider auth state: `pnpm dev:cli auth providers --json`
 
 ## Security baseline
 

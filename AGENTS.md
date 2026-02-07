@@ -4,6 +4,16 @@
 - Run `mise install` at repo root when required tools are missing or after `.tool-versions` changes.
 - For `mise install` troubleshooting, read `docs/tooling.md`.
 
+## Dev feedback loop commands (use these, not ad-hoc)
+
+- Start local Postgres: `pnpm db:start`
+- Ensure dev DB exists: `pnpm db:createdb`
+- Check Postgres readiness: `pnpm db:status`
+- Stop local Postgres: `pnpm db:stop`
+- Run fast end-to-end smoke (echo runner): `pnpm smoke`
+- Run smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
+- Run quality gate before handoff: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
+
 ## v0 locked product decisions
 
 - First version includes Telegram support (polling mode) in addition to server + CLI.
@@ -71,20 +81,24 @@
 
 Ship a runnable vertical slice first, then harden.
 
-1. Server skeleton + durability
-   - Implement `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`.
-   - Persist run state transitions (`running|succeeded|failed`) with idempotent message ingest.
-2. CLI happy path
-   - Implement `jagc message "..." --json` and `jagc run wait <run_id> --json`.
-   - Ensure stable JSON output fields: `run_id`, `status`, `output`.
-3. Threading/concurrency semantics
-   - Enforce one active run per thread key.
-   - Implement queued behavior: `steer` interrupts at next tool boundary, `followUp` waits for idle.
-4. Telegram polling adapter
-   - Personal chats only for MVP.
-   - Map chat IDs to thread keys and reuse server concurrency semantics.
-5. Feedback loop + release gate
-   - Add a fast smoke script that validates the MVP acceptance flow end-to-end.
-   - Gate merge on: relevant tests + lint/typecheck + smoke passing.
+Status legend: `[x] done`, `[~] partial`, `[ ] pending`.
+
+1. [x] Server skeleton + durability
+   - `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id` implemented.
+   - Run state transitions (`running|succeeded|failed`) + idempotent ingest implemented.
+2. [x] CLI happy path
+   - `jagc message "..." --json` and `jagc run wait <run_id> --json` implemented.
+   - Stable JSON fields `run_id`, `status`, `output`, `error` implemented.
+3. [x] Threading/concurrency semantics
+   - Per-thread pi session reuse + queued delivery via `streamingBehavior` implemented.
+   - Same-thread run completion is attributed via pi session event boundaries (not prompt promise timing).
+   - DBOS-backed durable run scheduling/recovery implemented.
+   - Durable `thread_key -> session` mapping is persisted in Postgres (`thread_sessions`).
+   - Strict global one-active-run-per-thread guard is enforced via DBOS partitioned queueing (`jagc_runs`, `queuePartitionKey=thread_key`, per-partition concurrency=1).
+4. [ ] Telegram polling adapter
+   - Not implemented yet.
+5. [~] Feedback loop + release gate
+   - Fast smoke script implemented: `pnpm smoke` and `JAGC_RUNNER=pi pnpm smoke`.
+   - CI merge gating not wired yet (local gate command exists: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`).
 
 Definition of done for v0: `jagc message "ping" --json` returns a valid `run_id`, and waiting that run yields terminal status plus output, with correct same-thread queue behavior.
