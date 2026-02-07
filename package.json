@@ -1,0 +1,45 @@
+{
+  "name": "jagc",
+  "version": "0.0.0",
+  "private": true,
+  "description": "just a good clanker",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "jagc": "dist/cli/main.mjs"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server/main.ts",
+    "dev:cli": "tsx src/cli/main.ts",
+    "db:start": "scripts/dev-postgres.sh start",
+    "db:stop": "scripts/dev-postgres.sh stop",
+    "db:status": "scripts/dev-postgres.sh status",
+    "db:createdb": "scripts/dev-postgres.sh createdb",
+    "smoke": "scripts/smoke.sh",
+    "build": "tsdown src/server/main.ts src/cli/main.ts --format esm --out-dir dist",
+    "start": "node dist/server/main.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write ."
+  },
+  "dependencies": {
+    "@dbos-inc/dbos-sdk": "^4.8.8",
+    "@mariozechner/pi-coding-agent": "^0.52.7",
+    "commander": "^14.0.3",
+    "fastify": "^5.7.4",
+    "pg": "^8.18.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@types/node": "^25.2.1",
+    "@types/pg": "^8.16.0",
+    "tsdown": "^0.20.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
