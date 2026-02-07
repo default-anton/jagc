@@ -28,6 +28,7 @@ describe('loadConfig', () => {
     expect(config.JAGC_WORKSPACE_DIR).toBe(join(homedir(), 'workspace'));
     expect(config.JAGC_HOST).toBe('0.0.0.0');
     expect(config.JAGC_RUNNER).toBe('echo');
+    expect(config.JAGC_TELEGRAM_BOT_TOKEN).toBeUndefined();
     expect(Object.hasOwn(config, 'PI_CODING_AGENT_DIR')).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ const envSchema = z.object({
   JAGC_HOST: z.string().min(1).default('127.0.0.1'),
   JAGC_PORT: z.coerce.number().int().positive().default(31415),
   JAGC_LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  JAGC_TELEGRAM_BOT_TOKEN: z.string().trim().min(1).optional(),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

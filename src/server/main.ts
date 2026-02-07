@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 
+import { TelegramPollingAdapter } from '../adapters/telegram-polling.js';
 import { bootstrapAgentDir } from '../runtime/agent-dir-bootstrap.js';
 import { PiAuthService } from '../runtime/pi-auth.js';
 import { PiRunExecutor, type ThreadControlService } from '../runtime/pi-executor.js';
@@ -74,7 +75,18 @@ async function main(): Promise<void> {
     },
   });
 
+  let telegramAdapter: TelegramPollingAdapter | undefined;
+  if (config.JAGC_TELEGRAM_BOT_TOKEN) {
+    telegramAdapter = new TelegramPollingAdapter({
+      botToken: config.JAGC_TELEGRAM_BOT_TOKEN,
+      runService,
+      authService,
+      threadControlService,
+    });
+  }
+
   const close = async () => {
+    await telegramAdapter?.stop();
     await app.close();
     await runService.shutdown();
     await pool.end();
@@ -92,6 +104,10 @@ async function main(): Promise<void> {
     port: config.JAGC_PORT,
     host: config.JAGC_HOST,
   });
+
+  if (telegramAdapter) {
+    await telegramAdapter.start();
+  }
 }
 
 main().catch((error) => {
