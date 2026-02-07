@@ -14,6 +14,23 @@
 - Run smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
 - Run quality gate before handoff: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
 
+## Repo map (agent quick orientation)
+
+- `README.md` — MVP contract, quick start, env/config defaults.
+- `package.json` — canonical scripts: `dev`, `dev:cli`, `db:*`, `smoke`, `typecheck/lint/test/build`.
+- `src/server/main.ts` — server entrypoint (config, migrations, Fastify boot).
+- `src/server/app.ts` — HTTP routes (`/healthz`, `/v1/messages`, `/v1/runs/:run_id`).
+- `src/server/{service,scheduler,store,executor}.ts` — run lifecycle, DBOS queueing, persistence, runner wiring.
+- `src/runtime/{pi-executor,thread-run-controller,pi-auth,agent-dir-bootstrap}.ts` — pi SDK sessions, same-thread control, auth/workspace bootstrap.
+- `src/cli/main.ts` + `src/cli/client.ts` — CLI commands and server client.
+- `src/shared/{api-contracts,config,run-types}.ts` — shared contracts/types/config parsing.
+- `migrations/*.sql` — Postgres schema and durable run tables.
+- `tests/*.test.ts` — subsystem coverage (API, store, config, threading, bootstrap).
+- `scripts/dev-postgres.sh` + `scripts/smoke.sh` — sanctioned local feedback loop scripts.
+- `docs/architecture.md` = implemented design, `docs/future.md` = deferred scope, `docs/auth.md` = auth/provider setup.
+- `deploy/` — draft launchd/systemd assets (not supported install path yet).
+- `dist/` — build output; never hand-edit.
+
 ## v0 locked product decisions
 
 - First version includes Telegram support (polling mode) in addition to server + CLI.
