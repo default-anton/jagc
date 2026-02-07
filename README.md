@@ -14,10 +14,12 @@ For deferred APIs, deployment notes, and post-MVP plans, see **[`docs/future.md`
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
-- Initial v0 scaffold is in place: server endpoints (`/healthz`, `/v1/messages`, `/v1/runs/:run_id`) and CLI commands (`message`, `run wait`, `health`, `auth providers`).
+- Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, `/v1/auth/providers`, `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking}`).
+- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `model list/get/set`, and `thinking get/set`.
 - Default executor runs through pi SDK sessions with DBOS-backed durable run scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Strict global one-active-run-per-thread is enforced via DBOS partitioned queueing keyed by `thread_key`.
+- Telegram polling adapter is implemented (personal chats), including `/model` and `/thinking` controls.
 - `JAGC_RUNNER=echo` is available for deterministic smoke tests.
 - **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
 
@@ -122,7 +124,23 @@ By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and p
 6. Verify:
    - `pnpm smoke`
    - or manually: `pnpm dev:cli health --json` then `pnpm dev:cli message "ping" --json`
-   - inspect model/provider auth state: `pnpm dev:cli auth providers --json`
+   - inspect provider/model catalog: `pnpm dev:cli model list --json`
+   - inspect thread runtime controls: `pnpm dev:cli model get --thread-key cli:default --json` and `pnpm dev:cli thinking get --thread-key cli:default --json`
+
+### CLI runtime controls (v0)
+
+```bash
+# provider/model catalog
+jagc model list --json
+
+# read current thread model + thinking
+jagc model get --thread-key cli:default --json
+jagc thinking get --thread-key cli:default --json
+
+# set model + thinking for a thread
+jagc model set openai/gpt-5 --thread-key cli:default --json
+jagc thinking set medium --thread-key cli:default --json
+```
 
 ## Security baseline
 

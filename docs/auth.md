@@ -44,18 +44,21 @@ For deployment, inject these into your service manager instead of interactive sh
 
 ## Discover what is missing
 
-Use the auth status endpoint via CLI:
+Use the auth/runtime status endpoints via CLI:
 
 ```bash
 jagc auth providers --json
+jagc model list --json
+jagc model get --thread-key cli:default --json
+jagc thinking get --thread-key cli:default --json
 ```
 
-This reports, per provider:
+This reports:
 
-- whether auth is configured (`has_auth`)
-- credential type (`api_key` or `oauth` when in `auth.json`)
-- env var hint (`env_var_hint`) when applicable
-- available model count vs total model count
+- per provider auth state (`has_auth`, credential type, env var hint)
+- model catalog grouped by provider
+- current thread model selection
+- current thread thinking level and available thinking levels
 
 ## OAuth in remote homelab deployments
 

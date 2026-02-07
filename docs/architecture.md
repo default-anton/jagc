@@ -8,9 +8,24 @@ For future/deferred ideas, see [`docs/future.md`](./future.md).
 
 Current implemented vertical slice:
 
-- HTTP API: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `GET /v1/auth/providers`
-- CLI: `jagc health`, `jagc message`, `jagc run wait`, `jagc auth providers`
+- HTTP API:
+  - `GET /healthz`
+  - `POST /v1/messages`
+  - `GET /v1/runs/:run_id`
+  - `GET /v1/auth/providers`
+  - `GET /v1/models`
+  - `GET /v1/threads/:thread_key/runtime`
+  - `PUT /v1/threads/:thread_key/model`
+  - `PUT /v1/threads/:thread_key/thinking`
+- CLI:
+  - `jagc health`
+  - `jagc message`
+  - `jagc run wait`
+  - `jagc auth providers`
+  - `jagc model list|get|set`
+  - `jagc thinking get|set`
 - Runtime executors: `echo` (deterministic) and `pi` (real agent)
+- Telegram polling adapter (personal chats) with `/model` and `/thinking` commands
 - Durable run scheduling/recovery via DBOS
 - Postgres persistence for runs, idempotency keys, and `thread_key -> session` mapping
 
@@ -24,6 +39,19 @@ Current implemented vertical slice:
 4. `RunStore.createRun(...)` inserts a `running` run (or returns existing run when deduplicated).
 5. Non-deduplicated runs are durably enqueued with DBOS (`workflowID = run_id`).
 6. API responds `202` with run envelope (`run_id`, `status`, `output`, `error`).
+
+### 1b) Telegram polling ingest
+
+- `TelegramPollingAdapter` consumes personal chat messages via grammY long polling.
+- Normal text messages are normalized to the same ingest contract and passed to `RunService.ingestMessage(...)` with:
+  - `source = telegram`
+  - `thread_key = telegram:chat:<chat_id>`
+  - `user_key = telegram:user:<from.id>`
+  - `delivery_mode = followUp` by default (`/steer` is explicit opt-in).
+- Adapter waits for terminal run status and replies back to chat with final output/error.
+- Adapter-level controls:
+  - `/model`, `/model list [provider]`, `/model <provider/model>`
+  - `/thinking`, `/thinking list`, `/thinking <level>`
 
 ### 2) Durable execution
 
@@ -84,6 +112,21 @@ Current implemented vertical slice:
 - This avoids mis-attribution when pi `prompt(..., { streamingBehavior })` resolves before queued work is actually completed.
 - Note: immediate in-flight interruption of run N by run N+1 (`steer`) across separate run records is not guaranteed under strict per-thread run serialization. It requires a future thread-owned draining loop model.
 
+## Thread runtime controls (model/thinking)
+
+For `pi` runner mode, jagc exposes model/thinking controls per `thread_key`:
+
+- `GET /v1/threads/:thread_key/runtime`
+- `PUT /v1/threads/:thread_key/model`
+- `PUT /v1/threads/:thread_key/thinking`
+
+Implementation details:
+
+- `PiRunExecutor` is the source of truth for thread session runtime state.
+- Model changes call `AgentSession.setModel(...)`, which validates auth through pi `ModelRegistry` and persists defaults via pi `SettingsManager`.
+- Thinking changes call `AgentSession.setThinkingLevel(...)` and return the clamped effective level plus available levels for the active model.
+- No model/thinking state is duplicated in jagc DB.
+
 ## API contract source of truth
 
 Shared schema file: `src/shared/api-contracts.ts`
@@ -109,6 +152,6 @@ Migration runner: `src/server/migrations.ts` (`schema_migrations` table).
 
 ## Known gaps / intentional limitations
 
-- Telegram adapter is not implemented yet.
 - No CI merge-gate wiring yet (local gate exists).
+- Telegram webhook mode is not implemented yet (polling is implemented).
 - No webhook auth/hardening implementation yet beyond documented baseline.

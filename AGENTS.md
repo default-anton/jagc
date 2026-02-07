@@ -19,10 +19,11 @@
 - `README.md` — MVP contract, quick start, env/config defaults.
 - `package.json` — canonical scripts: `dev`, `dev:cli`, `db:*`, `smoke`, `typecheck/lint/test/build`.
 - `src/server/main.ts` — server entrypoint (config, migrations, Fastify boot).
-- `src/server/app.ts` — HTTP routes (`/healthz`, `/v1/messages`, `/v1/runs/:run_id`).
+- `src/server/app.ts` — HTTP routes (`/healthz`, `/v1/messages`, `/v1/runs/:run_id`, `/v1/auth/providers`, `/v1/models`, `/v1/threads/:thread_key/{runtime,model,thinking}`).
 - `src/server/{service,scheduler,store,executor}.ts` — run lifecycle, DBOS queueing, persistence, runner wiring.
 - `src/runtime/{pi-executor,thread-run-controller,pi-auth,agent-dir-bootstrap}.ts` — pi SDK sessions, same-thread control, auth/workspace bootstrap.
-- `src/cli/main.ts` + `src/cli/client.ts` — CLI commands and server client.
+- `src/adapters/telegram-polling.ts` — Telegram polling adapter and command handling (`/model`, `/thinking`, `/steer`).
+- `src/cli/main.ts` + `src/cli/client.ts` — CLI commands and server client (`auth providers`, `model list|get|set`, `thinking get|set`).
 - `src/shared/{api-contracts,config,run-types}.ts` — shared contracts/types/config parsing.
 - `migrations/*.sql` — Postgres schema and durable run tables.
 - `tests/*.test.ts` — subsystem coverage (API, store, config, threading, bootstrap).
@@ -103,8 +104,9 @@ Status legend: `[x] done`, `[~] partial`, `[ ] pending`.
 1. [x] Server skeleton + durability
    - `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id` implemented.
    - Run state transitions (`running|succeeded|failed`) + idempotent ingest implemented.
-2. [x] CLI happy path
+2. [x] CLI happy path + runtime controls
    - `jagc message "..." --json` and `jagc run wait <run_id> --json` implemented.
+   - `jagc auth providers --json`, `jagc model list|get|set`, and `jagc thinking get|set` implemented.
    - Stable JSON fields `run_id`, `status`, `output`, `error` implemented.
 3. [x] Threading/concurrency semantics
    - Per-thread pi session reuse + queued delivery via `streamingBehavior` implemented.
@@ -112,10 +114,12 @@ Status legend: `[x] done`, `[~] partial`, `[ ] pending`.
    - DBOS-backed durable run scheduling/recovery implemented.
    - Durable `thread_key -> session` mapping is persisted in Postgres (`thread_sessions`).
    - Strict global one-active-run-per-thread guard is enforced via DBOS partitioned queueing (`jagc_runs`, `queuePartitionKey=thread_key`, per-partition concurrency=1).
-4. [ ] Telegram polling adapter
-   - Not implemented yet.
+4. [x] Telegram polling adapter
+   - grammY polling adapter implemented for personal chats.
+   - Telegram thread mapping: `thread_key = telegram:chat:<chat_id>`.
+   - Telegram UX controls implemented: `/model`, `/thinking` (`/steer` explicit opt-in).
 5. [~] Feedback loop + release gate
    - Fast smoke script implemented: `pnpm smoke` and `JAGC_RUNNER=pi pnpm smoke`.
    - CI merge gating not wired yet (local gate command exists: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`).
 
-Definition of done for v0: `jagc message "ping" --json` returns a valid `run_id`, and waiting that run yields terminal status plus output, with correct same-thread queue behavior.
+Definition of done for v0: CLI and Telegram both work end-to-end. `jagc message "ping" --json` returns a valid `run_id`, waiting yields terminal status plus output, same-thread queue behavior is correct, Telegram polling replies in personal chats, and `/model` + `/thinking` controls work in Telegram and CLI.
