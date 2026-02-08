@@ -173,6 +173,6 @@ jagc auth login openai-codex --owner-key cli:default
 
 ## Deferred scope
 
-See **[`docs/future.md`](docs/future.md)** for the post-v0 roadmap (webhook mode/hardening, CI automation, observability, operator UX, and deployment maturity).
+See **[`docs/future.md`](docs/future.md)** for the post-v0 roadmap (webhook hardening, CI automation, observability, operator UX, and deployment maturity).
 
 Pre-v0 long-form draft details were intentionally removed during docs tightening; recover them from git history if needed.

@@ -22,20 +22,16 @@ Do not add implementation detail here unless it is deferred/future-looking.
 
 ### P1 — high leverage
 
-1. **Telegram webhook mode**
-   - Add webhook ingest path with parity to polling semantics.
-   - Keep thread mapping and delivery behavior identical to polling mode.
-
-2. **Webhook hardening**
+1. **Webhook hardening**
    - Keep bearer-token baseline.
    - Add per-source signature verification where available.
    - Add replay protection (timestamp + nonce window).
 
-3. **CI merge-gate automation**
+2. **CI merge-gate automation**
    - Wire the existing local release gate command into CI:
      `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
 
-4. **Observability baseline**
+3. **Observability baseline**
    - Structured JSON logs by default in prod.
    - Core run metrics (latency, failures, queue depth/backlog).
 
