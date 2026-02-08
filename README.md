@@ -6,14 +6,15 @@ Self-hosted AI assistant to automate your life:
 - **pi-coding-agent** for agent runtime behavior (sessions, context files, skills/prompts/extensions/themes/packages)
 - **DBOS Transact (TypeScript)** for durable workflow execution (Postgres-backed)
 
-This README is intentionally short and MVP-focused.
+This README is intentionally short and v0-focused.
 
 For current implemented architecture, see **[`docs/architecture.md`](docs/architecture.md)**.
-For deferred APIs, deployment notes, and post-MVP plans, see **[`docs/future.md`](docs/future.md)**.
+For deferred APIs, deployment notes, and post-v0 plans, see **[`docs/future.md`](docs/future.md)**.
 
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
+- **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating is still manual/local-only.
 - Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking}`).
 - CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `model list/get/set`, and `thinking get/set`.
 - Default executor runs through pi SDK sessions with DBOS-backed durable run scheduling/recovery.
@@ -36,9 +37,9 @@ Source of truth: **[`AGENTS.md`](AGENTS.md)**.
 - Quality/tooling: Biome + Vitest
 - Build: tsdown
 
-## MVP (v0)
+## v0 scope (shipped)
 
-Ship this first:
+Shipped in v0:
 
 - Server:
   - `GET /healthz`
@@ -48,12 +49,12 @@ Ship this first:
   - `jagc message "..." --json`
   - `jagc run wait <run_id> --json`
 - Telegram:
-  - **Polling mode only** for MVP
+  - **Polling mode only** for v0
   - Personal chats only
   - One active run per Telegram thread (`thread_key = telegram:chat:<chat_id>`)
   - Queued input behavior aligned with pi semantics (`steer` / `followUp`)
 
-### MVP acceptance behavior
+### v0 acceptance behavior
 
 - `jagc message "ping" --json` returns JSON including:
   - `run_id`
@@ -79,7 +80,7 @@ Everything else remains flexible during pre-alpha.
 
 `JAGC_WORKSPACE_DIR` points to a trusted local repo.
 
-Canonical layout (MVP):
+Canonical layout (v0):
 
 ```text
 $JAGC_WORKSPACE_DIR/
@@ -96,7 +97,7 @@ $JAGC_WORKSPACE_DIR/
   settings.json       # optional (pi workspace settings)
 ```
 
-## Configuration (MVP minimum)
+## Configuration (v0 minimum)
 
 | Variable | Required | Notes |
 | --- | --- | --- |
@@ -114,7 +115,7 @@ Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
 By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. It creates the directory if needed, but does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
 
-## Quick start (dev, intended)
+## Quick start (dev)
 
 1. `mise install` (rerun when required tools are missing or `.tool-versions` changes)
 2. Start Postgres (`pnpm db:start && pnpm db:createdb`)
@@ -167,12 +168,8 @@ jagc auth login openai-codex --owner-key cli:default
 
 ---
 
-## Full design notes and deferred scope
+## Deferred scope
 
-All previously documented detailed content is preserved in **[`docs/future.md`](docs/future.md)**, including:
-- expanded architecture drafts
-- full CLI/API draft surface
-- Telegram webhook mode details
-- deployment drafts and runbooks
-- observability and testing expansion plans
-- post-MVP roadmap
+See **[`docs/future.md`](docs/future.md)** for the post-v0 roadmap (webhook mode/hardening, CI automation, observability, operator UX, and deployment maturity).
+
+Pre-v0 long-form draft details were intentionally removed during docs tightening; recover them from git history if needed.
