@@ -21,6 +21,9 @@ For deferred APIs, deployment notes, and post-v0 plans, see **[`docs/future.md`]
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Strict global one-active-run-per-thread is enforced via DBOS partitioned queueing keyed by `thread_key`.
 - Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/model`, `/thinking`, and `/auth`.
+- Model/thinking changes from Telegram button pickers return to the `/settings` panel with updated runtime state.
+- Outdated Telegram inline callbacks auto-recover by replacing the menu with the latest `/settings` panel.
+- Telegram callback payload limits are enforced; over-limit model/auth options are hidden with an in-chat notice.
 - `JAGC_RUNNER=echo` is available for deterministic smoke tests.
 - **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
 

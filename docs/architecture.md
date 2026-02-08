@@ -86,6 +86,10 @@ Constraint to keep in mind:
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
 - Adapter waits for terminal run status and replies with output/error.
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
+- After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.
+- The `/settings` panel does not include a dedicated refresh button; reopening `/settings` (or returning from a change) re-fetches live state.
+- Outdated/invalid callback payloads trigger stale-menu recovery: the adapter re-renders the latest `/settings` panel.
+- Telegram callback payload size is capped at 64 bytes; over-limit model/auth options are hidden and surfaced with an in-chat warning.
 
 ## OAuth broker + runtime controls
 
