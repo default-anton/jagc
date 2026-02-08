@@ -27,7 +27,6 @@
     "format": "biome check --write ."
   },
   "dependencies": {
-    "@dbos-inc/dbos-sdk": "^4.8.8",
     "@grammyjs/runner": "^2.0.3",
     "@mariozechner/pi-coding-agent": "^0.52.7",
     "commander": "^14.0.3",

@@ -8,7 +8,7 @@ import { loadConfig } from '../shared/config.js';
 import { createApp } from './app.js';
 import { EchoRunExecutor, type RunExecutor } from './executor.js';
 import { runMigrations } from './migrations.js';
-import { DbosRunScheduler } from './scheduler.js';
+import { LocalRunScheduler } from './scheduler.js';
 import { RunService } from './service.js';
 import { PostgresRunStore } from './store.js';
 
@@ -49,14 +49,13 @@ async function main(): Promise<void> {
   }
 
   let runService: RunService | undefined;
-  const runScheduler = new DbosRunScheduler({
-    databaseUrl: config.JAGC_DATABASE_URL,
-    executeRunById: async (runId) => {
+  const runScheduler = new LocalRunScheduler({
+    dispatchRunById: async (runId) => {
       if (!runService) {
         throw new Error('run service is not initialized');
       }
 
-      await runService.executeRunById(runId);
+      await runService.dispatchRunById(runId);
     },
   });
 

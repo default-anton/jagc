@@ -6,6 +6,7 @@ import type { CreateRunResult, RunStore } from './store.js';
 export class RunService {
   private recoveryTimer: NodeJS.Timeout | null = null;
   private recoveryInFlight: Promise<void> | null = null;
+  private readonly activeRunCompletions = new Map<string, Promise<void>>();
 
   constructor(
     private readonly runStore: RunStore,
@@ -34,6 +35,7 @@ export class RunService {
     }
 
     await this.runScheduler.stop();
+    await this.waitForActiveRunCompletions();
   }
 
   async ingestMessage(message: MessageIngest): Promise<CreateRunResult> {
@@ -51,15 +53,55 @@ export class RunService {
   }
 
   async executeRunById(runId: string): Promise<void> {
+    const run = await this.loadRunnableRun(runId);
+    if (!run) {
+      return;
+    }
+
+    await this.executeLoadedRun(run);
+  }
+
+  async dispatchRunById(runId: string): Promise<void> {
+    const run = await this.loadRunnableRun(runId);
+    if (!run) {
+      return;
+    }
+
+    if (this.activeRunCompletions.has(run.runId)) {
+      return;
+    }
+
+    const completion = this.executeLoadedRun(run)
+      .catch((error) => {
+        console.error(
+          JSON.stringify({
+            event: 'run_dispatch_execute_failed',
+            run_id: run.runId,
+            message: toErrorMessage(error),
+          }),
+        );
+      })
+      .finally(() => {
+        this.activeRunCompletions.delete(run.runId);
+      });
+
+    this.activeRunCompletions.set(run.runId, completion);
+  }
+
+  private async loadRunnableRun(runId: string): Promise<RunRecord | null> {
     const run = await this.runStore.getRun(runId);
     if (!run) {
       throw new Error(`cannot execute run ${runId}: run not found`);
     }
 
     if (run.status !== 'running') {
-      return;
+      return null;
     }
 
+    return run;
+  }
+
+  private async executeLoadedRun(run: RunRecord): Promise<void> {
     try {
       const output = await this.runExecutor.execute(run);
       await this.runStore.markSucceeded(run.runId, output);
@@ -98,6 +140,10 @@ export class RunService {
     const runningRuns = await this.runStore.listRunningRuns();
 
     for (const run of runningRuns) {
+      if (this.activeRunCompletions.has(run.runId)) {
+        continue;
+      }
+
       try {
         await this.runScheduler.ensureEnqueued(run);
       } catch (error) {
@@ -110,6 +156,14 @@ export class RunService {
         );
       }
     }
+  }
+
+  private async waitForActiveRunCompletions(): Promise<void> {
+    if (this.activeRunCompletions.size === 0) {
+      return;
+    }
+
+    await Promise.allSettled([...this.activeRunCompletions.values()]);
   }
 
   private async enqueueRun(run: RunRecord): Promise<void> {
