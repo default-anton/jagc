@@ -39,7 +39,6 @@ start_postgres() {
   ensure_cluster
 
   if mise exec postgres@18.1 -- pg_isready -h "$PGHOST" -p "$PGPORT" >/dev/null 2>&1; then
-    echo "postgres already running on $PGHOST:$PGPORT"
     return
   fi
 
