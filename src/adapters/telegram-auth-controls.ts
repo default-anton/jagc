@@ -5,8 +5,10 @@ import {
   callbackAuthAttemptRefresh,
   callbackAuthLogin,
   callbackAuthProviders,
+  callbackSettingsOpen,
   type TelegramCallbackAction,
 } from './telegram-controls-callbacks.js';
+import { addCallbackButton, paginate, replyUi, telegramCallbackDataMaxBytes } from './telegram-ui.js';
 
 const providerPageSize = 8;
 
@@ -41,7 +43,7 @@ export class TelegramAuthControls {
   async handleAuthCommand(ctx: Context, args: string): Promise<void> {
     const authService = resolveAuthService(this.options.authService);
     if (!authService) {
-      await this.replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
+      await replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
       return;
     }
 
@@ -59,7 +61,7 @@ export class TelegramAuthControls {
     if (trimmedArgs.startsWith('login ')) {
       const provider = trimmedArgs.slice('login '.length).trim();
       if (!provider) {
-        await this.replyUi(ctx, 'Usage: /auth login <provider>', settingsKeyboard());
+        await replyUi(ctx, 'Usage: /auth login <provider>', settingsKeyboard());
         return;
       }
 
@@ -73,7 +75,7 @@ export class TelegramAuthControls {
       return;
     }
 
-    await this.replyUi(
+    await replyUi(
       ctx,
       [
         'Usage:',
@@ -117,13 +119,13 @@ export class TelegramAuthControls {
   private async showProviderPicker(ctx: Context, requestedPage: number, notice?: string): Promise<void> {
     const authService = resolveAuthService(this.options.authService);
     if (!authService) {
-      await this.replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
+      await replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
       return;
     }
 
     const providers = authService.getProviderStatuses().filter((provider) => provider.oauth_supported);
     if (providers.length === 0) {
-      await this.replyUi(
+      await replyUi(
         ctx,
         ['🔐 Provider login', '', 'No OAuth providers are registered in the current pi runtime.'].join('\n'),
         settingsKeyboard(),
@@ -141,9 +143,40 @@ export class TelegramAuthControls {
     lines.push('🔐 Provider login', `Choose provider (${paged.page + 1}/${paged.totalPages}):`);
 
     const keyboard = new InlineKeyboard();
+    let visibleProviders = 0;
+    let hiddenProviders = 0;
+
     for (const provider of paged.items) {
       const authMarker = provider.has_auth ? '✅' : '🔓';
-      keyboard.text(`${authMarker} ${provider.provider}`, callbackAuthLogin(provider.provider)).row();
+      const added = addCallbackButton(
+        keyboard,
+        `${authMarker} ${provider.provider}`,
+        callbackAuthLogin(provider.provider),
+      );
+      if (!added) {
+        hiddenProviders += 1;
+        continue;
+      }
+
+      visibleProviders += 1;
+      keyboard.row();
+    }
+
+    if (hiddenProviders > 0) {
+      lines.push(
+        '',
+        `⚠️ ${hiddenProviders} provider option(s) hidden due to Telegram callback limit (${telegramCallbackDataMaxBytes} bytes).`,
+      );
+    }
+
+    if (visibleProviders === 0) {
+      lines.push(
+        '',
+        'No provider options fit Telegram button limits. Use jagc auth CLI/API controls for this provider list.',
+      );
+      keyboard.text('⚙️ Settings', callbackSettingsOpen());
+      await replyUi(ctx, lines.join('\n'), keyboard);
+      return;
     }
 
     if (paged.totalPages > 1) {
@@ -156,21 +189,21 @@ export class TelegramAuthControls {
       keyboard.row();
     }
 
-    keyboard.text('⚙️ Settings', 's:open');
+    keyboard.text('⚙️ Settings', callbackSettingsOpen());
 
-    await this.replyUi(ctx, lines.join('\n'), keyboard);
+    await replyUi(ctx, lines.join('\n'), keyboard);
   }
 
   private async startLogin(ctx: Context, provider: string): Promise<void> {
     const authService = resolveAuthService(this.options.authService);
     if (!authService) {
-      await this.replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
+      await replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
       return;
     }
 
     const ownerKey = ownerKeyFromContext(ctx);
     if (!ownerKey) {
-      await this.replyUi(ctx, 'Unable to resolve chat id for provider login.', settingsKeyboard());
+      await replyUi(ctx, 'Unable to resolve chat id for provider login.', settingsKeyboard());
       return;
     }
 
@@ -181,13 +214,13 @@ export class TelegramAuthControls {
   private async cancelAttempt(ctx: Context, attemptId: string): Promise<void> {
     const authService = resolveAuthService(this.options.authService);
     if (!authService) {
-      await this.replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
+      await replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
       return;
     }
 
     const ownerKey = ownerKeyFromContext(ctx);
     if (!ownerKey) {
-      await this.replyUi(ctx, 'Unable to resolve chat id for provider login.', settingsKeyboard());
+      await replyUi(ctx, 'Unable to resolve chat id for provider login.', settingsKeyboard());
       return;
     }
 
@@ -198,7 +231,7 @@ export class TelegramAuthControls {
   private async showPendingAttempt(ctx: Context): Promise<void> {
     const chatId = chatIdFromContext(ctx);
     if (chatId === null) {
-      await this.replyUi(ctx, 'Unable to resolve chat id for auth status.', settingsKeyboard());
+      await replyUi(ctx, 'Unable to resolve chat id for auth status.', settingsKeyboard());
       return;
     }
 
@@ -214,20 +247,20 @@ export class TelegramAuthControls {
   private async submitPendingInput(ctx: Context, value: string): Promise<void> {
     const authService = resolveAuthService(this.options.authService);
     if (!authService) {
-      await this.replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
+      await replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
       return;
     }
 
     const chatId = chatIdFromContext(ctx);
     if (chatId === null) {
-      await this.replyUi(ctx, 'Unable to resolve chat id for auth input.', settingsKeyboard());
+      await replyUi(ctx, 'Unable to resolve chat id for auth input.', settingsKeyboard());
       return;
     }
 
     const ownerKey = ownerKeyFromChatId(chatId);
     const pendingInput = this.pendingAuthInputByChat.get(chatId);
     if (!pendingInput) {
-      await this.replyUi(ctx, 'No pending OAuth input. Use /auth to start a provider login.', settingsKeyboard());
+      await replyUi(ctx, 'No pending OAuth input. Use /auth to start a provider login.', settingsKeyboard());
       return;
     }
 
@@ -287,13 +320,13 @@ export class TelegramAuthControls {
   private async showAttempt(ctx: Context, attemptId: string, notice?: string): Promise<void> {
     const authService = resolveAuthService(this.options.authService);
     if (!authService) {
-      await this.replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
+      await replyUi(ctx, 'OAuth login is unavailable in this server configuration.', settingsKeyboard());
       return;
     }
 
     const ownerKey = ownerKeyFromContext(ctx);
     if (!ownerKey) {
-      await this.replyUi(ctx, 'Unable to resolve chat id for provider login.', settingsKeyboard());
+      await replyUi(ctx, 'Unable to resolve chat id for provider login.', settingsKeyboard());
       return;
     }
 
@@ -356,32 +389,26 @@ export class TelegramAuthControls {
     }
 
     if (attempt.status === 'running' || attempt.status === 'awaiting_input') {
-      keyboard
-        .text('🔄 Refresh', callbackAuthAttemptRefresh(attempt.attempt_id))
-        .text('🛑 Cancel', callbackAuthAttemptCancel(attempt.attempt_id))
-        .row();
-    }
-
-    keyboard.text('⬅️ Providers', callbackAuthProviders(0)).row().text('⚙️ Settings', 's:open');
-
-    await this.replyUi(ctx, lines.join('\n'), keyboard);
-  }
-
-  private async replyUi(ctx: Context, text: string, keyboard: InlineKeyboard): Promise<void> {
-    const options = { reply_markup: keyboard };
-
-    if (ctx.callbackQuery?.message) {
-      try {
-        await ctx.editMessageText(text, options);
-        return;
-      } catch (error) {
-        if (isMessageNotModifiedError(error)) {
-          return;
-        }
+      let controlButtonAdded = false;
+      if (addCallbackButton(keyboard, '🔄 Refresh', callbackAuthAttemptRefresh(attempt.attempt_id))) {
+        controlButtonAdded = true;
+      }
+      if (addCallbackButton(keyboard, '🛑 Cancel', callbackAuthAttemptCancel(attempt.attempt_id))) {
+        controlButtonAdded = true;
+      }
+      if (controlButtonAdded) {
+        keyboard.row();
+      } else {
+        lines.push(
+          '',
+          `⚠️ Auth action buttons hidden due to Telegram callback limit (${telegramCallbackDataMaxBytes} bytes).`,
+        );
       }
     }
 
-    await ctx.reply(text, options);
+    keyboard.text('⬅️ Providers', callbackAuthProviders(0)).row().text('⚙️ Settings', callbackSettingsOpen());
+
+    await replyUi(ctx, lines.join('\n'), keyboard);
   }
 }
 
@@ -400,7 +427,10 @@ function resolveAuthService(authService: TelegramAuthControlsOptions['authServic
 }
 
 function settingsKeyboard(): InlineKeyboard {
-  return new InlineKeyboard().text('🔐 Provider login', callbackAuthProviders(0)).row().text('⚙️ Settings', 's:open');
+  return new InlineKeyboard()
+    .text('🔐 Provider login', callbackAuthProviders(0))
+    .row()
+    .text('⚙️ Settings', callbackSettingsOpen());
 }
 
 function statusLabel(status: OAuthLoginAttemptSnapshot['status']): string {
@@ -416,27 +446,6 @@ function statusLabel(status: OAuthLoginAttemptSnapshot['status']): string {
     case 'cancelled':
       return 'Cancelled';
   }
-}
-
-function paginate<T>(
-  items: readonly T[],
-  requestedPage: number,
-  pageSize: number,
-): {
-  items: T[];
-  page: number;
-  totalPages: number;
-} {
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  const page = Math.min(Math.max(requestedPage, 0), totalPages - 1);
-  const startIndex = page * pageSize;
-  const endIndex = startIndex + pageSize;
-
-  return {
-    items: items.slice(startIndex, endIndex),
-    page,
-    totalPages,
-  };
 }
 
 function chatIdFromContext(ctx: Context): number | null {
@@ -474,12 +483,4 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
-}
-
-function isMessageNotModifiedError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return error.message.includes('message is not modified');
 }

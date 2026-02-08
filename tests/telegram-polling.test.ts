@@ -1,7 +1,10 @@
+import type { Context } from 'grammy';
 import { describe, expect, test } from 'vitest';
 
 import { parseTelegramCallbackData } from '../src/adapters/telegram-controls-callbacks.js';
-import { parseTelegramCommand } from '../src/adapters/telegram-polling.js';
+import { parseTelegramCommand, TelegramPollingAdapter } from '../src/adapters/telegram-polling.js';
+import type { ThreadControlService, ThreadRuntimeState } from '../src/runtime/pi-executor.js';
+import type { RunService } from '../src/server/service.js';
 
 describe('parseTelegramCommand', () => {
   test('parses command with args', () => {
@@ -26,7 +29,7 @@ describe('parseTelegramCommand', () => {
 describe('parseTelegramCallbackData', () => {
   test('parses settings actions', () => {
     expect(parseTelegramCallbackData('s:open')).toEqual({ kind: 'settings_open' });
-    expect(parseTelegramCallbackData('s:refresh')).toEqual({ kind: 'settings_refresh' });
+    expect(parseTelegramCallbackData('s:refresh')).toBeNull();
   });
 
   test('parses auth picker actions', () => {
@@ -46,17 +49,15 @@ describe('parseTelegramCallbackData', () => {
   test('parses model picker actions', () => {
     expect(parseTelegramCallbackData('m:providers:2')).toEqual({ kind: 'model_providers', page: 2 });
     expect(parseTelegramCallbackData('m:list:openai:0')).toEqual({ kind: 'model_list', provider: 'openai', page: 0 });
-    expect(parseTelegramCallbackData('m:set:vercel-ai-gateway:gpt-5:1')).toEqual({
+    expect(parseTelegramCallbackData('m:set:vercel-ai-gateway:gpt-5')).toEqual({
       kind: 'model_set',
       provider: 'vercel-ai-gateway',
       modelId: 'gpt-5',
-      page: 1,
     });
-    expect(parseTelegramCallbackData('m:set:openrouter:deepseek%2Fdeepseek-r1:0')).toEqual({
+    expect(parseTelegramCallbackData('m:set:openrouter:deepseek%2Fdeepseek-r1')).toEqual({
       kind: 'model_set',
       provider: 'openrouter',
       modelId: 'deepseek/deepseek-r1',
-      page: 0,
     });
   });
 
@@ -70,6 +71,119 @@ describe('parseTelegramCallbackData', () => {
     expect(parseTelegramCallbackData('m:providers:-1')).toBeNull();
     expect(parseTelegramCallbackData('m:list::0')).toBeNull();
     expect(parseTelegramCallbackData('m:set:openai::0')).toBeNull();
+    expect(parseTelegramCallbackData('m:set:openai:gpt-5:0')).toBeNull();
     expect(parseTelegramCallbackData('unknown')).toBeNull();
   });
 });
+
+describe('TelegramPollingAdapter callback recovery', () => {
+  test('invalid callback data recovers to the latest settings panel', async () => {
+    const adapter = new TelegramPollingAdapter({
+      botToken: '123456:TESTTOKEN',
+      runService: createRunServiceStub(),
+      threadControlService: new FakeThreadControlService(createRuntimeState()),
+    });
+
+    const { ctx, callbackAnswers, edits } = createCallbackContext('s:refresh');
+    const handleCallbackQuery = (
+      adapter as unknown as { handleCallbackQuery(callbackContext: Context): Promise<void> }
+    ).handleCallbackQuery.bind(adapter);
+    await handleCallbackQuery(ctx);
+
+    expect(callbackAnswers).toHaveLength(1);
+    expect(callbackAnswers[0]?.text).toContain('outdated');
+
+    expect(edits).toHaveLength(1);
+    expect(edits[0]?.text).toContain('⚙️ Runtime settings');
+    expect(edits[0]?.text).toContain('This menu is outdated. Showing latest settings.');
+  });
+});
+
+interface UiCall {
+  text: string;
+  options?: unknown;
+}
+
+class FakeThreadControlService implements ThreadControlService {
+  constructor(private readonly state: ThreadRuntimeState) {}
+
+  async getThreadRuntimeState(): Promise<ThreadRuntimeState> {
+    return this.state;
+  }
+
+  async setThreadModel(): Promise<ThreadRuntimeState> {
+    return this.state;
+  }
+
+  async setThreadThinkingLevel(): Promise<ThreadRuntimeState> {
+    return this.state;
+  }
+}
+
+function createRuntimeState(): ThreadRuntimeState {
+  return {
+    threadKey: 'telegram:chat:101',
+    model: {
+      provider: 'openai',
+      modelId: 'gpt-5',
+      name: 'GPT-5',
+    },
+    thinkingLevel: 'medium',
+    supportsThinking: true,
+    availableThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  };
+}
+
+function createRunServiceStub(): RunService {
+  return {
+    async ingestMessage() {
+      throw new Error('not implemented in this test');
+    },
+    async getRun() {
+      throw new Error('not implemented in this test');
+    },
+  } as unknown as RunService;
+}
+
+function createCallbackContext(data: string): {
+  ctx: Context;
+  callbackAnswers: Array<{ text?: string }>;
+  edits: UiCall[];
+  replies: UiCall[];
+} {
+  const callbackAnswers: Array<{ text?: string }> = [];
+  const edits: UiCall[] = [];
+  const replies: UiCall[] = [];
+
+  const ctx = {
+    chat: {
+      id: 101,
+      type: 'private',
+    },
+    callbackQuery: {
+      data,
+      message: {
+        message_id: 1,
+      },
+    },
+    async answerCallbackQuery(options?: { text?: string }) {
+      callbackAnswers.push({ text: options?.text });
+      return undefined;
+    },
+    async editMessageText(text: string, options?: unknown) {
+      edits.push({ text, options });
+      return undefined;
+    },
+    async reply(text: string, options?: unknown) {
+      replies.push({ text, options });
+      return undefined;
+    },
+  };
+
+  return {
+    ctx: ctx as unknown as Context,
+    callbackAnswers,
+    edits,
+    replies,
+  };
+}

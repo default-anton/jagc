@@ -205,7 +205,38 @@ export class TelegramPollingAdapter {
           callback_data: data,
         }),
       );
-      await ctx.answerCallbackQuery({ text: 'This menu is outdated. Use /settings to refresh.' });
+
+      try {
+        await ctx.answerCallbackQuery({ text: 'This menu is outdated. Loading latest settings...' });
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: 'telegram_callback_query_ack_failed',
+            chat_id: ctx.chat.id,
+            thread_key: telegramThreadKey(ctx.chat.id),
+            callback_data: data,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+
+      try {
+        await this.runtimeControls.handleStaleCallback(ctx);
+      } catch (error) {
+        const message = userFacingError(error);
+        console.error(
+          JSON.stringify({
+            event: 'telegram_callback_query_stale_recovery_failed',
+            chat_id: ctx.chat.id,
+            thread_key: telegramThreadKey(ctx.chat.id),
+            callback_data: data,
+            message,
+          }),
+        );
+
+        await ctx.reply('This menu is outdated. Use /settings to refresh.');
+      }
+
       return;
     }
 

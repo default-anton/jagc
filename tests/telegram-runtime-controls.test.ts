@@ -60,12 +60,8 @@ class FakeAuthService {
   failNextSubmitWithStateConflict = false;
   private readonly attempts = new Map<string, OAuthLoginAttemptSnapshot>();
 
-  getProviderCatalog(): ProviderCatalogEntry[] {
-    return [];
-  }
-
-  getProviderStatuses(): ProviderAuthStatus[] {
-    return [
+  constructor(
+    private readonly providerStatuses: ProviderAuthStatus[] = [
       {
         provider: 'openai-codex',
         has_auth: false,
@@ -75,7 +71,15 @@ class FakeAuthService {
         total_models: 1,
         available_models: 0,
       },
-    ];
+    ],
+  ) {}
+
+  getProviderCatalog(): ProviderCatalogEntry[] {
+    return [];
+  }
+
+  getProviderStatuses(): ProviderAuthStatus[] {
+    return this.providerStatuses;
   }
 
   startOAuthLogin(provider: string, ownerKey: string): OAuthLoginAttemptSnapshot {
@@ -209,17 +213,94 @@ describe('TelegramRuntimeControls', () => {
     });
 
     const pickerCallbackData = allCallbackData(lastCall(pickerContext.edits));
-    expect(pickerCallbackData).toContain('m:set:openrouter:deepseek%2Fdeepseek-r1:0');
+    expect(pickerCallbackData).toContain('m:set:openrouter:deepseek%2Fdeepseek-r1');
 
     const staleContext = createContext({ callback: true });
     await controls.handleCallbackAction(staleContext.ctx, {
       kind: 'model_set',
       provider: 'openrouter',
       modelId: 'missing-model',
-      page: 0,
     });
 
     expect(lastText(staleContext.edits)).toContain('Model option expired. Reopen /model and try again.');
+  });
+
+  test('model set returns to settings panel with updated state', async () => {
+    const threadControlService = new FakeThreadControlService(createState());
+    const controls = new TelegramRuntimeControls({
+      authService: {
+        getProviderCatalog: () => [createProvider('openrouter', ['deepseek/deepseek-r1'])],
+      },
+      threadControlService,
+    });
+
+    const { ctx, edits } = createContext({ callback: true });
+    await controls.handleCallbackAction(ctx, {
+      kind: 'model_set',
+      provider: 'openrouter',
+      modelId: 'deepseek/deepseek-r1',
+    });
+
+    expect(threadControlService.modelSetCalls).toEqual([
+      {
+        threadKey: 'telegram:chat:101',
+        provider: 'openrouter',
+        modelId: 'deepseek/deepseek-r1',
+      },
+    ]);
+
+    const lastEdit = lastCall(edits);
+    expect(lastEdit.text).toContain('✅ Model set to openrouter/deepseek/deepseek-r1');
+    expect(lastEdit.text).toContain('⚙️ Runtime settings');
+    expect(lastEdit.text).toContain('Model: openrouter/deepseek/deepseek-r1');
+
+    const callbackData = allCallbackData(lastEdit);
+    expect(callbackData).toContain('m:providers:0');
+    expect(callbackData).toContain('t:list');
+    expect(callbackData).toContain('a:providers:0');
+    expect(callbackData).not.toContain('s:refresh');
+  });
+
+  test('hides model options that exceed Telegram callback size limit', async () => {
+    const controls = new TelegramRuntimeControls({
+      authService: {
+        getProviderCatalog: () => [
+          createProvider('openrouter', [
+            'short-model',
+            'this/is-a-very-very-very-very-very-very-very-long-model-identifier-that-overflows-callback-limit',
+          ]),
+        ],
+      },
+      threadControlService: new FakeThreadControlService(createState()),
+    });
+
+    const { ctx, edits } = createContext({ callback: true });
+    await controls.handleCallbackAction(ctx, {
+      kind: 'model_list',
+      provider: 'openrouter',
+      page: 0,
+    });
+
+    const lastEdit = lastCall(edits);
+    expect(lastEdit.text).toContain('hidden due to Telegram callback limit (64 bytes)');
+
+    const callbackData = allCallbackData(lastEdit);
+    expect(callbackData).toContain('m:set:openrouter:short-model');
+    expect(callbackData.some((value) => value.includes('very-very-very-very-very-very-very-long-model'))).toBe(false);
+  });
+
+  test('shows stale-callback recovery notice with latest settings', async () => {
+    const controls = new TelegramRuntimeControls({
+      threadControlService: new FakeThreadControlService(createState()),
+      authService: new FakeAuthService(),
+    });
+
+    const { ctx, edits } = createContext({ callback: true });
+    await controls.handleStaleCallback(ctx);
+
+    const lastEdit = lastCall(edits);
+    expect(lastEdit.text).toContain('This menu is outdated. Showing latest settings.');
+    expect(lastEdit.text).toContain('⚙️ Runtime settings');
   });
 
   test('shows unavailable message when pi thread controls are not configured', async () => {
@@ -229,6 +310,22 @@ describe('TelegramRuntimeControls', () => {
     await controls.handleModelCommand(ctx, '');
 
     expect(lastText(replies)).toBe('Model controls are unavailable when JAGC_RUNNER is not pi.');
+  });
+
+  test('settings keyboard omits refresh button', async () => {
+    const controls = new TelegramRuntimeControls({
+      threadControlService: new FakeThreadControlService(createState()),
+      authService: new FakeAuthService(),
+    });
+
+    const { ctx, replies } = createContext();
+    await controls.handleSettingsCommand(ctx);
+
+    const callbackData = allCallbackData(lastCall(replies));
+    expect(callbackData).toContain('m:providers:0');
+    expect(callbackData).toContain('t:list');
+    expect(callbackData).toContain('a:providers:0');
+    expect(callbackData).not.toContain('s:refresh');
   });
 
   test('auth command opens oauth provider picker', async () => {
@@ -243,6 +340,36 @@ describe('TelegramRuntimeControls', () => {
     expect(lastText(replies)).toContain('Provider login');
     const callbackData = allCallbackData(lastCall(replies));
     expect(callbackData).toContain('a:login:openai-codex');
+  });
+
+  test('auth provider picker hides providers that exceed callback size limit', async () => {
+    const controls = new TelegramRuntimeControls({
+      authService: new FakeAuthService([
+        {
+          provider:
+            'this-provider-name-is-unreasonably-long-and-exceeds-the-telegram-callback-data-limit-for-login-actions',
+          has_auth: false,
+          credential_type: null,
+          oauth_supported: true,
+          env_var_hint: null,
+          total_models: 1,
+          available_models: 1,
+        },
+      ]),
+      threadControlService: new FakeThreadControlService(createState()),
+    });
+
+    const { ctx, replies } = createContext();
+    await controls.handleAuthCommand(ctx, '');
+
+    const lastReply = lastCall(replies);
+    expect(lastReply.text).toContain('hidden due to Telegram callback limit (64 bytes)');
+
+    const callbackData = allCallbackData(lastReply);
+    expect(callbackData).not.toContain(
+      'a:login:this-provider-name-is-unreasonably-long-and-exceeds-the-telegram-callback-data-limit-for-login-actions',
+    );
+    expect(callbackData).toContain('s:open');
   });
 
   test('auth input command submits pending oauth code', async () => {
@@ -333,6 +460,43 @@ describe('TelegramRuntimeControls', () => {
     const callbackData = allCallbackData(lastCall(replies));
     expect(callbackData).toContain('m:providers:0');
     expect(callbackData).toContain('s:open');
+  });
+
+  test('thinking set returns to settings panel with updated state', async () => {
+    const threadControlService = new FakeThreadControlService(
+      createState({ availableThinkingLevels: ['off', 'low', 'medium', 'high'], thinkingLevel: 'medium' }),
+    );
+
+    const controls = new TelegramRuntimeControls({
+      authService: {
+        getProviderCatalog: () => [createProvider('openai', ['gpt-5'])],
+      },
+      threadControlService,
+    });
+
+    const { ctx, edits } = createContext({ callback: true });
+    await controls.handleCallbackAction(ctx, {
+      kind: 'thinking_set',
+      thinkingLevel: 'high',
+    });
+
+    expect(threadControlService.thinkingSetCalls).toEqual([
+      {
+        threadKey: 'telegram:chat:101',
+        thinkingLevel: 'high',
+      },
+    ]);
+
+    const lastEdit = lastCall(edits);
+    expect(lastEdit.text).toContain('✅ Thinking set to high');
+    expect(lastEdit.text).toContain('⚙️ Runtime settings');
+    expect(lastEdit.text).toContain('Thinking: high');
+
+    const callbackData = allCallbackData(lastEdit);
+    expect(callbackData).toContain('m:providers:0');
+    expect(callbackData).toContain('t:list');
+    expect(callbackData).toContain('a:providers:0');
+    expect(callbackData).not.toContain('s:refresh');
   });
 
   test('rejects stale thinking callbacks not present in runtime state', async () => {

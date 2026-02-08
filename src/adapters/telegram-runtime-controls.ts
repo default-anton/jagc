@@ -12,9 +12,12 @@ import {
   callbackModelList,
   callbackModelProviders,
   callbackModelSet,
+  callbackSettingsOpen,
+  callbackThinkingList,
   callbackThinkingSet,
   type TelegramCallbackAction,
 } from './telegram-controls-callbacks.js';
+import { addCallbackButton, paginate, replyUi, telegramCallbackDataMaxBytes } from './telegram-ui.js';
 
 const providerPageSize = 8;
 const modelPageSize = 8;
@@ -47,6 +50,10 @@ export class TelegramRuntimeControls {
 
   async handleSettingsCommand(ctx: Context): Promise<void> {
     await this.showSettingsPanel(ctx);
+  }
+
+  async handleStaleCallback(ctx: Context): Promise<void> {
+    await this.showSettingsPanel(ctx, '⚠️ This menu is outdated. Showing latest settings.');
   }
 
   async handleModelCommand(ctx: Context, args: string): Promise<void> {
@@ -83,8 +90,7 @@ export class TelegramRuntimeControls {
 
   async handleCallbackAction(ctx: Context, action: TelegramCallbackAction): Promise<void> {
     switch (action.kind) {
-      case 'settings_open':
-      case 'settings_refresh': {
+      case 'settings_open': {
         await this.showSettingsPanel(ctx);
         return;
       }
@@ -105,7 +111,7 @@ export class TelegramRuntimeControls {
         return;
       }
       case 'model_set': {
-        await this.setModelFromPicker(ctx, action.provider, action.modelId, action.page);
+        await this.setModelFromPicker(ctx, action.provider, action.modelId);
         return;
       }
       case 'thinking_list': {
@@ -119,13 +125,13 @@ export class TelegramRuntimeControls {
     }
   }
 
-  private async showSettingsPanel(ctx: Context): Promise<void> {
+  private async showSettingsPanel(ctx: Context, notice?: string): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await this.replyUi(
+      await replyUi(
         ctx,
         'Runtime controls are unavailable when JAGC_RUNNER is not pi.',
-        new InlineKeyboard().text('ℹ️ Help', 's:open'),
+        new InlineKeyboard().text('ℹ️ Help', callbackSettingsOpen()),
       );
       return;
     }
@@ -133,15 +139,20 @@ export class TelegramRuntimeControls {
     const threadKey = telegramThreadKey(ctx.chat?.id);
     const state = await threadControlService.getThreadRuntimeState(threadKey);
 
-    const lines = [
+    const lines: string[] = [];
+    if (notice) {
+      lines.push(notice, '');
+    }
+
+    lines.push(
       '⚙️ Runtime settings',
       `Model: ${formatModelValue(state)}`,
       `Thinking: ${state.thinkingLevel}`,
       '',
       'Choose what to change:',
-    ];
+    );
 
-    await this.replyUi(ctx, lines.join('\n'), settingsKeyboard());
+    await replyUi(ctx, lines.join('\n'), settingsKeyboard());
   }
 
   private async showModelProviderPicker(ctx: Context, requestedPage: number): Promise<void> {
@@ -149,12 +160,12 @@ export class TelegramRuntimeControls {
     const authService = this.options.authService;
 
     if (!threadControlService) {
-      await this.replyUi(ctx, 'Model controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
+      await replyUi(ctx, 'Model controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
       return;
     }
 
     if (!authService) {
-      await this.replyUi(ctx, 'Model catalog is unavailable.', settingsKeyboard());
+      await replyUi(ctx, 'Model catalog is unavailable.', settingsKeyboard());
       return;
     }
 
@@ -163,7 +174,7 @@ export class TelegramRuntimeControls {
 
     const providers = authService.getProviderCatalog().filter((provider) => provider.available_models > 0);
     if (providers.length === 0) {
-      await this.replyUi(
+      await replyUi(
         ctx,
         [
           '🤖 Model selection',
@@ -187,10 +198,36 @@ export class TelegramRuntimeControls {
     ];
 
     const keyboard = new InlineKeyboard();
+    let visibleProviders = 0;
+    let hiddenProviders = 0;
+
     for (const provider of paged.items) {
-      keyboard
-        .text(`${provider.provider} (${provider.available_models})`, callbackModelList(provider.provider, 0))
-        .row();
+      const callbackData = callbackModelList(provider.provider, 0);
+      const added = addCallbackButton(keyboard, `${provider.provider} (${provider.available_models})`, callbackData);
+      if (!added) {
+        hiddenProviders += 1;
+        continue;
+      }
+
+      visibleProviders += 1;
+      keyboard.row();
+    }
+
+    if (hiddenProviders > 0) {
+      lines.push(
+        '',
+        `⚠️ ${hiddenProviders} provider option(s) hidden due to Telegram callback limit (${telegramCallbackDataMaxBytes} bytes).`,
+      );
+    }
+
+    if (visibleProviders === 0) {
+      lines.push(
+        '',
+        'No provider options fit Telegram button limits. Use jagc CLI/API model controls for this provider list.',
+      );
+      keyboard.text('⚙️ Settings', callbackSettingsOpen());
+      await replyUi(ctx, lines.join('\n'), keyboard);
+      return;
     }
 
     if (paged.totalPages > 1) {
@@ -203,9 +240,9 @@ export class TelegramRuntimeControls {
       keyboard.row();
     }
 
-    keyboard.text('⚙️ Settings', 's:open');
+    keyboard.text('⚙️ Settings', callbackSettingsOpen());
 
-    await this.replyUi(ctx, lines.join('\n'), keyboard);
+    await replyUi(ctx, lines.join('\n'), keyboard);
   }
 
   private async showModelList(
@@ -218,18 +255,18 @@ export class TelegramRuntimeControls {
     const authService = this.options.authService;
 
     if (!threadControlService) {
-      await this.replyUi(ctx, 'Model controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
+      await replyUi(ctx, 'Model controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
       return;
     }
 
     if (!authService) {
-      await this.replyUi(ctx, 'Model catalog is unavailable.', settingsKeyboard());
+      await replyUi(ctx, 'Model catalog is unavailable.', settingsKeyboard());
       return;
     }
 
     const provider = authService.getProviderCatalog().find((entry) => entry.provider === providerName);
     if (!provider) {
-      await this.replyUi(ctx, 'Provider not found. Use /model to reopen the model picker.', settingsKeyboard());
+      await replyUi(ctx, 'Provider not found. Use /model to reopen the model picker.', settingsKeyboard());
       return;
     }
 
@@ -239,12 +276,15 @@ export class TelegramRuntimeControls {
     const availableModels = provider.models.filter((model) => model.available).map((model) => ({ model }));
 
     if (availableModels.length === 0) {
-      await this.replyUi(
+      await replyUi(
         ctx,
         [`🤖 Model selection`, `Provider: ${provider.provider}`, '', 'No available models for this provider.'].join(
           '\n',
         ),
-        new InlineKeyboard().text('⬅️ Back to providers', callbackModelProviders(0)).row().text('⚙️ Settings', 's:open'),
+        new InlineKeyboard()
+          .text('⬅️ Back to providers', callbackModelProviders(0))
+          .row()
+          .text('⚙️ Settings', callbackSettingsOpen()),
       );
       return;
     }
@@ -265,69 +305,91 @@ export class TelegramRuntimeControls {
     );
 
     const keyboard = new InlineKeyboard();
+    let visibleModels = 0;
+    let hiddenModels = 0;
+
     for (const { model } of paged.items) {
       const selected = state.model?.provider === provider.provider && state.model.modelId === model.model_id;
       const prefix = selected ? '✅' : '◻️';
       const reasoning = model.reasoning ? ' 🧠' : '';
-      keyboard
-        .text(
-          `${prefix} ${model.model_id}${reasoning}`,
-          callbackModelSet(provider.provider, model.model_id, paged.page),
-        )
-        .row();
-    }
+      const callbackData = callbackModelSet(provider.provider, model.model_id);
+      const added = addCallbackButton(keyboard, `${prefix} ${model.model_id}${reasoning}`, callbackData);
+      if (!added) {
+        hiddenModels += 1;
+        continue;
+      }
 
-    if (paged.totalPages > 1) {
-      if (paged.page > 0) {
-        keyboard.text('⬅️ Prev', callbackModelList(provider.provider, paged.page - 1));
-      }
-      if (paged.page < paged.totalPages - 1) {
-        keyboard.text('Next ➡️', callbackModelList(provider.provider, paged.page + 1));
-      }
+      visibleModels += 1;
       keyboard.row();
     }
 
-    keyboard.text('⬅️ Providers', callbackModelProviders(0)).row().text('⚙️ Settings', 's:open');
+    if (hiddenModels > 0) {
+      lines.push(
+        '',
+        `⚠️ ${hiddenModels} model option(s) hidden due to Telegram callback limit (${telegramCallbackDataMaxBytes} bytes).`,
+      );
+    }
 
-    await this.replyUi(ctx, lines.join('\n'), keyboard);
+    if (visibleModels === 0) {
+      lines.push('', 'No model options fit Telegram button limits. Use jagc CLI/API model controls for this provider.');
+    }
+
+    if (paged.totalPages > 1) {
+      let hasPageButton = false;
+
+      if (paged.page > 0) {
+        const prevData = callbackModelList(provider.provider, paged.page - 1);
+        if (addCallbackButton(keyboard, '⬅️ Prev', prevData)) {
+          hasPageButton = true;
+        }
+      }
+      if (paged.page < paged.totalPages - 1) {
+        const nextData = callbackModelList(provider.provider, paged.page + 1);
+        if (addCallbackButton(keyboard, 'Next ➡️', nextData)) {
+          hasPageButton = true;
+        }
+      }
+      if (hasPageButton) {
+        keyboard.row();
+      }
+    }
+
+    keyboard.text('⬅️ Providers', callbackModelProviders(0)).row().text('⚙️ Settings', callbackSettingsOpen());
+
+    await replyUi(ctx, lines.join('\n'), keyboard);
   }
 
-  private async setModelFromPicker(ctx: Context, providerName: string, modelId: string, page: number): Promise<void> {
+  private async setModelFromPicker(ctx: Context, providerName: string, modelId: string): Promise<void> {
     const threadControlService = this.options.threadControlService;
     const authService = this.options.authService;
 
     if (!threadControlService || !authService) {
-      await this.replyUi(ctx, 'Model controls are unavailable.', settingsKeyboard());
+      await replyUi(ctx, 'Model controls are unavailable.', settingsKeyboard());
       return;
     }
 
     const provider = authService.getProviderCatalog().find((entry) => entry.provider === providerName);
     if (!provider) {
-      await this.replyUi(ctx, 'Provider not found. Use /model to reopen the model picker.', settingsKeyboard());
+      await replyUi(ctx, 'Provider not found. Use /model to reopen the model picker.', settingsKeyboard());
       return;
     }
 
     const selectedModel = provider.models.find((model) => model.available && model.model_id === modelId);
     if (!selectedModel) {
-      await this.replyUi(ctx, 'Model option expired. Reopen /model and try again.', settingsKeyboard());
+      await replyUi(ctx, 'Model option expired. Reopen /model and try again.', settingsKeyboard());
       return;
     }
 
     const threadKey = telegramThreadKey(ctx.chat?.id);
     await threadControlService.setThreadModel(threadKey, provider.provider, selectedModel.model_id);
 
-    await this.showModelList(
-      ctx,
-      provider.provider,
-      page,
-      `✅ Model set to ${provider.provider}/${selectedModel.model_id}`,
-    );
+    await this.showSettingsPanel(ctx, `✅ Model set to ${provider.provider}/${selectedModel.model_id}`);
   }
 
   private async showThinkingPicker(ctx: Context, notice?: string): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await this.replyUi(ctx, 'Thinking controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
+      await replyUi(ctx, 'Thinking controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
       return;
     }
 
@@ -351,10 +413,12 @@ export class TelegramRuntimeControls {
     const availableLevels = state.availableThinkingLevels;
     if (!state.supportsThinking || availableLevels.length === 0) {
       lines.push('', 'This model does not support configurable thinking levels.');
-      keyboard.text('🤖 Change model', callbackModelProviders(0)).row().text('⚙️ Settings', 's:open');
-      await this.replyUi(ctx, lines.join('\n'), keyboard);
+      keyboard.text('🤖 Change model', callbackModelProviders(0)).row().text('⚙️ Settings', callbackSettingsOpen());
+      await replyUi(ctx, lines.join('\n'), keyboard);
       return;
     }
+
+    let hiddenLevels = 0;
 
     for (let i = 0; i < availableLevels.length; i += 2) {
       const first = availableLevels[i];
@@ -362,27 +426,45 @@ export class TelegramRuntimeControls {
         continue;
       }
 
+      let rowHasButton = false;
       const firstLabel = first === state.thinkingLevel ? `✅ ${first}` : first;
-      keyboard.text(firstLabel, callbackThinkingSet(first));
+      if (addCallbackButton(keyboard, firstLabel, callbackThinkingSet(first))) {
+        rowHasButton = true;
+      } else {
+        hiddenLevels += 1;
+      }
 
       const second = availableLevels[i + 1];
       if (second) {
         const secondLabel = second === state.thinkingLevel ? `✅ ${second}` : second;
-        keyboard.text(secondLabel, callbackThinkingSet(second));
+        if (addCallbackButton(keyboard, secondLabel, callbackThinkingSet(second))) {
+          rowHasButton = true;
+        } else {
+          hiddenLevels += 1;
+        }
       }
 
-      keyboard.row();
+      if (rowHasButton) {
+        keyboard.row();
+      }
     }
 
-    keyboard.text('⚙️ Settings', 's:open').row().text('🤖 Change model', callbackModelProviders(0));
+    if (hiddenLevels > 0) {
+      lines.push(
+        '',
+        `⚠️ ${hiddenLevels} thinking option(s) hidden due to Telegram callback limit (${telegramCallbackDataMaxBytes} bytes).`,
+      );
+    }
 
-    await this.replyUi(ctx, lines.join('\n'), keyboard);
+    keyboard.text('⚙️ Settings', callbackSettingsOpen()).row().text('🤖 Change model', callbackModelProviders(0));
+
+    await replyUi(ctx, lines.join('\n'), keyboard);
   }
 
   private async setThinkingFromPicker(ctx: Context, thinkingLevel: string): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await this.replyUi(ctx, 'Thinking controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
+      await replyUi(ctx, 'Thinking controls are unavailable when JAGC_RUNNER is not pi.', settingsKeyboard());
       return;
     }
 
@@ -396,24 +478,7 @@ export class TelegramRuntimeControls {
 
     const state = await threadControlService.setThreadThinkingLevel(threadKey, selectedThinkingLevel);
 
-    await this.showThinkingPicker(ctx, `✅ Thinking set to ${state.thinkingLevel}`);
-  }
-
-  private async replyUi(ctx: Context, text: string, keyboard: InlineKeyboard): Promise<void> {
-    const options = { reply_markup: keyboard };
-
-    if (ctx.callbackQuery?.message) {
-      try {
-        await ctx.editMessageText(text, options);
-        return;
-      } catch (error) {
-        if (isMessageNotModifiedError(error)) {
-          return;
-        }
-      }
-    }
-
-    await ctx.reply(text, options);
+    await this.showSettingsPanel(ctx, `✅ Thinking set to ${state.thinkingLevel}`);
   }
 }
 
@@ -421,11 +486,9 @@ function settingsKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text('🤖 Change model', callbackModelProviders(0))
     .row()
-    .text('🧠 Change thinking', 't:list')
+    .text('🧠 Change thinking', callbackThinkingList())
     .row()
-    .text('🔐 Provider login', callbackAuthProviders(0))
-    .row()
-    .text('🔄 Refresh', 's:refresh');
+    .text('🔐 Provider login', callbackAuthProviders(0));
 }
 
 function formatModelValue(state: ThreadRuntimeState): string {
@@ -436,39 +499,10 @@ function formatModelValue(state: ThreadRuntimeState): string {
   return `${state.model.provider}/${state.model.modelId}`;
 }
 
-function paginate<T>(
-  items: readonly T[],
-  requestedPage: number,
-  pageSize: number,
-): {
-  items: T[];
-  page: number;
-  totalPages: number;
-} {
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  const page = Math.min(Math.max(requestedPage, 0), totalPages - 1);
-  const startIndex = page * pageSize;
-  const endIndex = startIndex + pageSize;
-
-  return {
-    items: items.slice(startIndex, endIndex),
-    page,
-    totalPages,
-  };
-}
-
 function telegramThreadKey(chatId: number | undefined): string {
   if (chatId === undefined) {
     throw new Error('telegram message has no chat id');
   }
 
   return `telegram:chat:${chatId}`;
-}
-
-function isMessageNotModifiedError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return error.message.includes('message is not modified');
 }

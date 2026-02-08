@@ -1,6 +1,5 @@
 export type TelegramCallbackAction =
   | { kind: 'settings_open' }
-  | { kind: 'settings_refresh' }
   | { kind: 'auth_open' }
   | { kind: 'auth_providers'; page: number }
   | { kind: 'auth_login'; provider: string }
@@ -8,17 +7,13 @@ export type TelegramCallbackAction =
   | { kind: 'auth_attempt_cancel'; attemptId: string }
   | { kind: 'model_providers'; page: number }
   | { kind: 'model_list'; provider: string; page: number }
-  | { kind: 'model_set'; provider: string; modelId: string; page: number }
+  | { kind: 'model_set'; provider: string; modelId: string }
   | { kind: 'thinking_list' }
   | { kind: 'thinking_set'; thinkingLevel: string };
 
 export function parseTelegramCallbackData(data: string): TelegramCallbackAction | null {
   if (data === 's:open') {
     return { kind: 'settings_open' };
-  }
-
-  if (data === 's:refresh') {
-    return { kind: 'settings_refresh' };
   }
 
   if (data === 'a:open') {
@@ -85,15 +80,14 @@ export function parseTelegramCallbackData(data: string): TelegramCallbackAction 
     return { kind: 'model_list', provider, page };
   }
 
-  if (segments[0] === 'm' && segments[1] === 'set' && segments.length === 5) {
+  if (segments[0] === 'm' && segments[1] === 'set' && segments.length === 4) {
     const provider = decodeSegment(segments[2]);
     const modelId = decodeSegment(segments[3]);
-    const page = parseNonNegativeInteger(segments[4]);
-    if (!provider || !modelId || page === null) {
+    if (!provider || !modelId) {
       return null;
     }
 
-    return { kind: 'model_set', provider, modelId, page };
+    return { kind: 'model_set', provider, modelId };
   }
 
   if (segments[0] === 't' && segments[1] === 'set' && segments.length === 3) {
@@ -106,6 +100,10 @@ export function parseTelegramCallbackData(data: string): TelegramCallbackAction 
   }
 
   return null;
+}
+
+export function callbackSettingsOpen(): string {
+  return 's:open';
 }
 
 export function callbackAuthOpen(): string {
@@ -136,8 +134,12 @@ export function callbackModelList(provider: string, page: number): string {
   return `m:list:${encodeSegment(provider)}:${page}`;
 }
 
-export function callbackModelSet(provider: string, modelId: string, page: number): string {
-  return `m:set:${encodeSegment(provider)}:${encodeSegment(modelId)}:${page}`;
+export function callbackModelSet(provider: string, modelId: string): string {
+  return `m:set:${encodeSegment(provider)}:${encodeSegment(modelId)}`;
+}
+
+export function callbackThinkingList(): string {
+  return 't:list';
 }
 
 export function callbackThinkingSet(level: string): string {
