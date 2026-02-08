@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 
+import { createInterface, type Interface } from 'node:readline/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { Command, InvalidArgumentError, Option } from 'commander';
-import { thinkingLevels } from '../shared/api-contracts.js';
+import { type OAuthLoginAttemptResponse, type OAuthLoginPromptKind, thinkingLevels } from '../shared/api-contracts.js';
 import {
   getAuthProviders,
   getModelCatalog,
+  getOAuthLoginAttempt,
   getThreadRuntime,
   healthcheck,
   sendMessage,
   setThreadModel,
   setThreadThinkingLevel,
+  startOAuthLogin,
+  submitOAuthLoginInput,
   waitForRun,
 } from './client.js';
 
@@ -89,10 +94,39 @@ authCommand
         for (const provider of status.providers) {
           const auth = provider.has_auth ? provider.credential_type : 'missing';
           const envHint = provider.env_var_hint ? ` env:${provider.env_var_hint}` : '';
+          const oauth = provider.oauth_supported ? 'yes' : 'no';
           console.log(
-            `${provider.provider} auth:${auth} models:${provider.available_models}/${provider.total_models}${envHint}`,
+            `${provider.provider} auth:${auth} oauth:${oauth} models:${provider.available_models}/${provider.total_models}${envHint}`,
           );
         }
+      }
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+authCommand
+  .command('login')
+  .argument('<provider>', 'OAuth provider id (for example: openai-codex)')
+  .option('--owner-key <key>', 'stable owner key for resuming the same login flow across retries')
+  .option('--poll-interval-ms <ms>', 'poll interval milliseconds', parsePositiveNumber, 1000)
+  .option('--json', 'JSON output')
+  .action(async (provider, options: { ownerKey?: string; pollIntervalMs: number; json?: boolean }) => {
+    try {
+      const initialAttempt = await startOAuthLogin(apiUrl(program), provider, options.ownerKey);
+
+      if (!options.json) {
+        process.stderr.write(`OAuth attempt: ${initialAttempt.attempt_id} owner:${initialAttempt.owner_key}\n`);
+      }
+
+      const finalAttempt = await completeOAuthLogin(apiUrl(program), initialAttempt, {
+        pollIntervalMs: options.pollIntervalMs,
+      });
+
+      if (options.json) {
+        printJson(finalAttempt);
+      } else {
+        console.log(`Logged in to ${finalAttempt.provider}.`);
       }
     } catch (error) {
       exitWithError(error);
@@ -287,6 +321,119 @@ function parseProviderModel(input: string): { provider: string; modelId: string 
 
 function isThinkingLevel(value: string): value is (typeof thinkingLevels)[number] {
   return thinkingLevels.includes(value as (typeof thinkingLevels)[number]);
+}
+
+async function completeOAuthLogin(
+  apiUrl: string,
+  initialAttempt: OAuthLoginAttemptResponse,
+  options: { pollIntervalMs: number },
+): Promise<OAuthLoginAttemptResponse> {
+  let attempt = initialAttempt;
+  let promptInterface: Interface | null = null;
+  let emittedProgressCount = 0;
+  let lastAuthSignature: string | null = null;
+
+  try {
+    while (true) {
+      if (attempt.auth) {
+        const signature = `${attempt.auth.url}\n${attempt.auth.instructions ?? ''}`;
+        if (signature !== lastAuthSignature) {
+          process.stderr.write(`Open this URL to continue login:\n${attempt.auth.url}\n`);
+          if (attempt.auth.instructions) {
+            process.stderr.write(`${attempt.auth.instructions}\n`);
+          }
+          lastAuthSignature = signature;
+        }
+      }
+
+      while (emittedProgressCount < attempt.progress_messages.length) {
+        process.stderr.write(`${attempt.progress_messages[emittedProgressCount]}\n`);
+        emittedProgressCount += 1;
+      }
+
+      if (attempt.status === 'succeeded') {
+        return attempt;
+      }
+
+      if (attempt.status === 'failed') {
+        throw new Error(attempt.error ?? `OAuth login failed for ${attempt.provider}`);
+      }
+
+      if (attempt.status === 'cancelled') {
+        throw new Error(attempt.error ?? 'OAuth login was cancelled');
+      }
+
+      if (attempt.status === 'awaiting_input' && attempt.prompt) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+          throw new Error('OAuth login requires interactive input, but this terminal is not interactive');
+        }
+
+        if (!promptInterface) {
+          promptInterface = createInterface({
+            input: process.stdin,
+            output: process.stderr,
+          });
+        }
+
+        const inputValue = await promptForOAuthInput(promptInterface, attempt.prompt.kind, attempt.prompt.message);
+        if (inputValue.trim().length === 0) {
+          attempt = await getOAuthLoginAttempt(apiUrl, attempt.attempt_id, attempt.owner_key);
+          continue;
+        }
+
+        try {
+          attempt = await submitOAuthLoginInput(apiUrl, attempt.attempt_id, attempt.owner_key, {
+            kind: attempt.prompt.kind,
+            value: inputValue,
+          });
+        } catch (error) {
+          if (!isOAuthInputRaceError(error)) {
+            throw error;
+          }
+
+          const refreshedAttempt = await getOAuthLoginAttempt(apiUrl, attempt.attempt_id, attempt.owner_key);
+          if (refreshedAttempt.status === 'succeeded') {
+            process.stderr.write('OAuth login already completed in browser.\n');
+            return refreshedAttempt;
+          }
+
+          if (refreshedAttempt.status !== 'awaiting_input') {
+            attempt = refreshedAttempt;
+            continue;
+          }
+
+          process.stderr.write('OAuth login state changed while you were typing. Try again.\n');
+          attempt = refreshedAttempt;
+        }
+
+        continue;
+      }
+
+      await sleep(options.pollIntervalMs);
+      attempt = await getOAuthLoginAttempt(apiUrl, attempt.attempt_id, attempt.owner_key);
+    }
+  } finally {
+    promptInterface?.close();
+  }
+}
+
+async function promptForOAuthInput(
+  promptInterface: Interface,
+  kind: OAuthLoginPromptKind,
+  message: string,
+): Promise<string> {
+  const hint = kind === 'manual_code' ? 'Press Enter to refresh status if browser already completed.' : '';
+  const prefix = kind === 'manual_code' ? 'code/url' : 'input';
+  const instruction = hint ? `${message}\n${hint}\n${prefix}> ` : `${message}\n${prefix}> `;
+  return promptInterface.question(instruction);
+}
+
+function isOAuthInputRaceError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.includes('not waiting for input') || error.message.includes('expects');
 }
 
 function exitWithError(error: unknown): never {

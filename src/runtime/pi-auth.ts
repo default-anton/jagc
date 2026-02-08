@@ -1,6 +1,15 @@
 import { join } from 'node:path';
 
 import { type AuthCredential, AuthStorage, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import {
+  OAuthLoginAttemptNotFoundError,
+  type OAuthLoginAttemptSnapshot,
+  OAuthLoginBroker,
+  OAuthLoginCapacityExceededError,
+  type OAuthLoginInputKind,
+  OAuthLoginInvalidStateError,
+  OAuthLoginProviderNotFoundError,
+} from './oauth-login-broker.js';
 
 const providerEnvVarHints: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -43,13 +52,28 @@ export interface ProviderCatalogEntry extends ProviderAuthStatus {
   models: ProviderModelStatus[];
 }
 
+export {
+  OAuthLoginAttemptNotFoundError,
+  OAuthLoginCapacityExceededError,
+  OAuthLoginInvalidStateError,
+  OAuthLoginProviderNotFoundError,
+  type OAuthLoginAttemptSnapshot,
+  type OAuthLoginInputKind,
+};
+
 export class PiAuthService {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
+  private readonly oauthLoginBroker: OAuthLoginBroker;
 
   constructor(agentDir: string) {
     this.authStorage = new AuthStorage(join(agentDir, 'auth.json'));
     this.modelRegistry = new ModelRegistry(this.authStorage, join(agentDir, 'models.json'));
+    this.oauthLoginBroker = new OAuthLoginBroker(this.authStorage, {
+      onCredentialsUpdated: () => {
+        this.modelRegistry.refresh();
+      },
+    });
   }
 
   getProviderStatuses(): ProviderAuthStatus[] {
@@ -63,9 +87,14 @@ export class PiAuthService {
     const allModels = this.modelRegistry.getAll();
     const availableModels = this.modelRegistry.getAvailable();
     const authProviders = Object.keys(this.authStorage.getAll());
+    const oauthProviders = this.authStorage.getOAuthProviders().map((provider) => provider.id);
 
-    const providers = new Set<string>([...allModels.map((model) => model.provider), ...authProviders]);
-    const oauthProviders = new Set(this.authStorage.getOAuthProviders().map((provider) => provider.id));
+    const providers = new Set<string>([
+      ...allModels.map((model) => model.provider),
+      ...authProviders,
+      ...oauthProviders,
+    ]);
+    const oauthProviderSet = new Set(oauthProviders);
 
     const allModelCounts = countByProvider(allModels.map((model) => model.provider));
     const availableModelCounts = countByProvider(availableModels.map((model) => model.provider));
@@ -91,13 +120,34 @@ export class PiAuthService {
           provider,
           has_auth: this.authStorage.hasAuth(provider),
           credential_type: credential?.type ?? null,
-          oauth_supported: oauthProviders.has(provider),
+          oauth_supported: oauthProviderSet.has(provider),
           env_var_hint: providerEnvVarHints[provider] ?? null,
           total_models: allModelCounts.get(provider) ?? 0,
           available_models: availableModelCounts.get(provider) ?? 0,
           models,
         };
       });
+  }
+
+  startOAuthLogin(provider: string, ownerKey: string): OAuthLoginAttemptSnapshot {
+    return this.oauthLoginBroker.start(provider, ownerKey);
+  }
+
+  getOAuthLoginAttempt(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot | null {
+    return this.oauthLoginBroker.get(attemptId, ownerKey);
+  }
+
+  submitOAuthLoginInput(
+    attemptId: string,
+    ownerKey: string,
+    value: string,
+    expectedKind?: OAuthLoginInputKind,
+  ): OAuthLoginAttemptSnapshot {
+    return this.oauthLoginBroker.submitInput(attemptId, ownerKey, value, expectedKind);
+  }
+
+  cancelOAuthLogin(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot {
+    return this.oauthLoginBroker.cancel(attemptId, ownerKey);
   }
 }
 

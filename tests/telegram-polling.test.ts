@@ -29,6 +29,20 @@ describe('parseTelegramCallbackData', () => {
     expect(parseTelegramCallbackData('s:refresh')).toEqual({ kind: 'settings_refresh' });
   });
 
+  test('parses auth picker actions', () => {
+    expect(parseTelegramCallbackData('a:open')).toEqual({ kind: 'auth_open' });
+    expect(parseTelegramCallbackData('a:providers:1')).toEqual({ kind: 'auth_providers', page: 1 });
+    expect(parseTelegramCallbackData('a:login:openai-codex')).toEqual({ kind: 'auth_login', provider: 'openai-codex' });
+    expect(parseTelegramCallbackData('a:attempt:refresh:abc-123')).toEqual({
+      kind: 'auth_attempt_refresh',
+      attemptId: 'abc-123',
+    });
+    expect(parseTelegramCallbackData('a:attempt:cancel:abc-123')).toEqual({
+      kind: 'auth_attempt_cancel',
+      attemptId: 'abc-123',
+    });
+  });
+
   test('parses model picker actions', () => {
     expect(parseTelegramCallbackData('m:providers:2')).toEqual({ kind: 'model_providers', page: 2 });
     expect(parseTelegramCallbackData('m:list:openai:0')).toEqual({ kind: 'model_list', provider: 'openai', page: 0 });

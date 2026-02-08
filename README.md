@@ -14,12 +14,12 @@ For deferred APIs, deployment notes, and post-MVP plans, see **[`docs/future.md`
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
-- Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, `/v1/auth/providers`, `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking}`).
-- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `model list/get/set`, and `thinking get/set`.
+- Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking}`).
+- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `model list/get/set`, and `thinking get/set`.
 - Default executor runs through pi SDK sessions with DBOS-backed durable run scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Strict global one-active-run-per-thread is enforced via DBOS partitioned queueing keyed by `thread_key`.
-- Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/model`, and `/thinking`.
+- Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/model`, `/thinking`, and `/auth`.
 - `JAGC_RUNNER=echo` is available for deterministic smoke tests.
 - **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
 
@@ -110,9 +110,9 @@ $JAGC_WORKSPACE_DIR/
 | `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | Required when Telegram webhook mode is enabled |
 | `JAGC_WEBHOOK_BEARER_TOKEN` | No | Required when generic `POST /v1/webhooks/:source` ingress is enabled |
 
-Auth bootstrap and provider credential details: [`docs/auth.md`](docs/auth.md).
+Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
-By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources, and does a one-time bootstrap copy of `~/.pi/agent/{settings.json,auth.json}` if destination files are missing.
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. It creates the directory if needed, but does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
 
 ## Quick start (dev, intended)
 
@@ -123,8 +123,11 @@ By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and p
 5. `pnpm dev` (applies SQL migrations from `migrations/` on startup)
 6. Verify:
    - `pnpm smoke`
+   - `pnpm test` (runs against real Postgres and creates worker-specific test databases on demand)
+   - optional cleanup: `pnpm db:drop:test`
    - or manually: `pnpm dev:cli health --json` then `pnpm dev:cli message "ping" --json`
    - inspect provider/model catalog: `pnpm dev:cli model list --json`
+   - inspect auth status / start OAuth login: `pnpm dev:cli auth providers --json` and `pnpm dev:cli auth login openai-codex`
    - inspect thread runtime controls: `pnpm dev:cli model get --thread-key cli:default --json` and `pnpm dev:cli thinking get --thread-key cli:default --json`
 
 ### CLI runtime controls (v0)
@@ -140,6 +143,12 @@ jagc thinking get --thread-key cli:default --json
 # set model + thinking for a thread
 jagc model set openai/gpt-5 --thread-key cli:default --json
 jagc thinking set medium --thread-key cli:default --json
+
+# OAuth login via jagc broker
+jagc auth providers --json
+jagc auth login openai-codex
+# optional: stable owner key to resume the same login flow
+jagc auth login openai-codex --owner-key cli:default
 ```
 
 ## Security baseline

@@ -11,23 +11,32 @@ jagc uses pi SDK auth resolution order for model credentials:
 
 `JAGC_WORKSPACE_DIR` is the single directory for both jagc workspace files and pi agent resources (skills, prompts, extensions, themes, settings, auth, sessions).
 
-## One-time migration bootstrap
+## Workspace bootstrap
 
-On server startup, jagc performs a one-time bootstrap:
+On server startup, jagc only ensures `JAGC_WORKSPACE_DIR` exists (mode `0700`).
 
-- creates `JAGC_WORKSPACE_DIR` if missing
-- copies `~/.pi/agent/settings.json` -> `JAGC_WORKSPACE_DIR/settings.json` if destination is missing
-- copies `~/.pi/agent/auth.json` -> `JAGC_WORKSPACE_DIR/auth.json` if destination is missing
-
-It does **not** copy skills/extensions/prompts/themes.
+It **does not copy** `~/.pi/agent/settings.json` or `~/.pi/agent/auth.json`.
 
 ## Fast setup paths
 
-### Path A: use default workspace directory (recommended now)
+### Path A: OAuth login via jagc (recommended for remote/headless)
 
-Use default `JAGC_WORKSPACE_DIR=~/.jagc`.
+Start from CLI:
 
-On first run, bootstrap copies your existing `~/.pi/agent/{settings.json,auth.json}` once when missing.
+```bash
+jagc auth providers --json
+jagc auth login openai-codex
+
+# optional: make retries/resume deterministic across terminals
+jagc auth login openai-codex --owner-key cli:anton:laptop
+```
+
+Start from Telegram:
+
+- `/auth` opens provider picker
+- tap a provider to start login
+- if input is requested, send `/auth input <value>`
+- `/auth status` refreshes the current attempt
 
 ### Path B: provide env vars to the jagc process
 
@@ -42,6 +51,10 @@ export ANTHROPIC_API_KEY=...
 
 For deployment, inject these into your service manager instead of interactive shells.
 
+### Path C: manually manage `auth.json`
+
+You can still pre-populate `JAGC_WORKSPACE_DIR/auth.json` using pi-compatible credentials.
+
 ## Discover what is missing
 
 Use the auth/runtime status endpoints via CLI:
@@ -55,25 +68,33 @@ jagc thinking get --thread-key cli:default --json
 
 This reports:
 
-- per provider auth state (`has_auth`, credential type, env var hint)
+- per provider auth state (`has_auth`, credential type, env var hint, OAuth support)
 - model catalog grouped by provider
 - current thread model selection
 - current thread thinking level and available thinking levels
 
-## OAuth in remote homelab deployments
+## OAuth broker API (implemented)
 
-Current v0 baseline: OAuth login is still done through interactive `pi` on the server host (or any host that shares the same `JAGC_WORKSPACE_DIR` files).
+Server endpoints:
 
-### Planned follow-up (design target)
+- `POST /v1/auth/providers/:provider/login` — start OAuth login attempt (or return the active one for the same owner + provider)
+- `GET /v1/auth/logins/:attempt_id` — inspect current attempt status
+- `POST /v1/auth/logins/:attempt_id/input` — submit requested input (`prompt` or `manual_code`)
+- `POST /v1/auth/logins/:attempt_id/cancel` — cancel attempt
 
-Implement a jagc-managed OAuth broker workflow:
+Ownership/isolation rules:
 
-1. Start login from CLI/Telegram (`auth login <provider>`)
-2. jagc runs `AuthStorage.login()` with callback bridging
-3. jagc returns either:
-   - browser URL
-   - or device code + verification URL
-4. user completes auth from any device
-5. jagc stores refreshed tokens in `auth.json`
+- OAuth attempts are scoped by `X-JAGC-Auth-Owner`.
+- `POST /login` accepts an optional owner header; if omitted, jagc generates one.
+- Follow-up endpoints (`GET`, `/input`, `/cancel`) require `X-JAGC-Auth-Owner`.
+- Attempt operations with the wrong owner return `404` to avoid cross-client/session leakage.
 
-This works for headless servers and avoids requiring shell access for `/login`.
+Attempt snapshots include:
+
+- owner key + provider + attempt id
+- current status (`running|awaiting_input|succeeded|failed|cancelled`)
+- browser URL/instructions (when available)
+- requested input prompt (when waiting for user input)
+- progress messages and terminal error text
+
+Successful logins are persisted to `auth.json` through pi `AuthStorage.login()` and are used immediately by `ModelRegistry`.

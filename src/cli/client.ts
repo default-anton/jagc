@@ -5,11 +5,16 @@ import {
   authProvidersResponseSchema,
   type ModelCatalogResponse,
   modelCatalogResponseSchema,
+  type OAuthLoginAttemptResponse,
+  oauthLoginAttemptSchema,
+  oauthOwnerHeaderName,
   type PostMessageRequest,
   type RunResponse,
   runResponseSchema,
   type SetThreadModelRequest,
   type SetThreadThinkingRequest,
+  type SubmitOAuthLoginInputRequest,
+  submitOAuthLoginInputRequestSchema,
   type ThreadRuntimeStateResponse,
   threadRuntimeStateSchema,
 } from '../shared/api-contracts.js';
@@ -18,6 +23,7 @@ export type ApiRunResponse = RunResponse;
 export type ApiAuthProvidersResponse = AuthProvidersResponse;
 export type ApiModelCatalogResponse = ModelCatalogResponse;
 export type ApiThreadRuntimeStateResponse = ThreadRuntimeStateResponse;
+export type ApiOAuthLoginAttemptResponse = OAuthLoginAttemptResponse;
 export type MessageRequest = PostMessageRequest;
 
 export async function sendMessage(apiUrl: string, payload: MessageRequest): Promise<ApiRunResponse> {
@@ -89,6 +95,63 @@ export async function getAuthProviders(apiUrl: string): Promise<ApiAuthProviders
   return authProvidersResponseSchema.parse(responseBody);
 }
 
+export async function startOAuthLogin(
+  apiUrl: string,
+  provider: string,
+  ownerKey?: string,
+): Promise<ApiOAuthLoginAttemptResponse> {
+  const response = await fetch(`${apiUrl}/v1/auth/providers/${encodeURIComponent(provider)}/login`, {
+    method: 'POST',
+    headers: ownerKey ? oauthOwnerHeader(ownerKey) : undefined,
+  });
+
+  return parseOAuthLoginAttemptResponse(response);
+}
+
+export async function getOAuthLoginAttempt(
+  apiUrl: string,
+  attemptId: string,
+  ownerKey: string,
+): Promise<ApiOAuthLoginAttemptResponse> {
+  const response = await fetch(`${apiUrl}/v1/auth/logins/${encodeURIComponent(attemptId)}`, {
+    headers: oauthOwnerHeader(ownerKey),
+  });
+  return parseOAuthLoginAttemptResponse(response);
+}
+
+export async function submitOAuthLoginInput(
+  apiUrl: string,
+  attemptId: string,
+  ownerKey: string,
+  payload: SubmitOAuthLoginInputRequest,
+): Promise<ApiOAuthLoginAttemptResponse> {
+  const parsedPayload = submitOAuthLoginInputRequestSchema.parse(payload);
+
+  const response = await fetch(`${apiUrl}/v1/auth/logins/${encodeURIComponent(attemptId)}/input`, {
+    method: 'POST',
+    headers: {
+      ...oauthOwnerHeader(ownerKey),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(parsedPayload),
+  });
+
+  return parseOAuthLoginAttemptResponse(response);
+}
+
+export async function cancelOAuthLogin(
+  apiUrl: string,
+  attemptId: string,
+  ownerKey: string,
+): Promise<ApiOAuthLoginAttemptResponse> {
+  const response = await fetch(`${apiUrl}/v1/auth/logins/${encodeURIComponent(attemptId)}/cancel`, {
+    method: 'POST',
+    headers: oauthOwnerHeader(ownerKey),
+  });
+
+  return parseOAuthLoginAttemptResponse(response);
+}
+
 export async function getModelCatalog(apiUrl: string): Promise<ApiModelCatalogResponse> {
   const response = await fetch(`${apiUrl}/v1/models`);
   const responseBody = await parseJsonResponse(response);
@@ -141,6 +204,12 @@ export async function setThreadThinkingLevel(
   return parseThreadRuntimeResponse(response);
 }
 
+function oauthOwnerHeader(ownerKey: string): Record<string, string> {
+  return {
+    [oauthOwnerHeaderName]: ownerKey,
+  };
+}
+
 async function parseRunResponse(response: Response): Promise<ApiRunResponse> {
   const responseBody = await parseJsonResponse(response);
 
@@ -153,6 +222,20 @@ async function parseRunResponse(response: Response): Promise<ApiRunResponse> {
   }
 
   return runResponseSchema.parse(responseBody);
+}
+
+async function parseOAuthLoginAttemptResponse(response: Response): Promise<ApiOAuthLoginAttemptResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return oauthLoginAttemptSchema.parse(responseBody);
 }
 
 async function parseThreadRuntimeResponse(response: Response): Promise<ApiThreadRuntimeStateResponse> {

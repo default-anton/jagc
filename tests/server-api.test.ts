@@ -1,11 +1,18 @@
-import { describe, expect, test } from 'vitest';
+import { randomUUID } from 'node:crypto';
 
+import { describe, expect, test } from 'vitest';
+import {
+  OAuthLoginAttemptNotFoundError,
+  OAuthLoginInvalidStateError,
+  OAuthLoginProviderNotFoundError,
+} from '../src/runtime/pi-auth.js';
 import { createApp } from '../src/server/app.js';
 import type { RunExecutor } from '../src/server/executor.js';
 import type { RunScheduler } from '../src/server/scheduler.js';
 import { RunService } from '../src/server/service.js';
-import { InMemoryRunStore } from '../src/server/store.js';
+import { PostgresRunStore } from '../src/server/store.js';
 import type { RunOutput, RunRecord } from '../src/shared/run-types.js';
+import { usePostgresTestDb } from './helpers/postgres-test-db.js';
 
 class TestExecutor implements RunExecutor {
   async execute(run: RunRecord): Promise<RunOutput> {
@@ -23,6 +30,8 @@ class FailingExecutor implements RunExecutor {
 }
 
 class FakeAuthService {
+  private readonly attempts = new Map<string, FakeOAuthAttempt>();
+
   getProviderStatuses() {
     return [
       {
@@ -33,6 +42,15 @@ class FakeAuthService {
         env_var_hint: 'OPENAI_API_KEY',
         total_models: 2,
         available_models: 2,
+      },
+      {
+        provider: 'openai-codex',
+        has_auth: false,
+        credential_type: null,
+        oauth_supported: true,
+        env_var_hint: null,
+        total_models: 1,
+        available_models: 0,
       },
     ];
   }
@@ -64,9 +82,120 @@ class FakeAuthService {
           },
         ],
       },
+      {
+        provider: 'openai-codex',
+        has_auth: false,
+        credential_type: null,
+        oauth_supported: true,
+        env_var_hint: null,
+        total_models: 1,
+        available_models: 0,
+        models: [
+          {
+            provider: 'openai-codex',
+            model_id: 'gpt-5-codex',
+            name: 'GPT-5 Codex',
+            reasoning: true,
+            available: false,
+          },
+        ],
+      },
     ];
   }
+
+  startOAuthLogin(provider: string, ownerKey: string) {
+    if (provider !== 'openai-codex') {
+      throw new OAuthLoginProviderNotFoundError(provider);
+    }
+
+    const attempt: FakeOAuthAttempt = {
+      attempt_id: randomUUID(),
+      owner_key: ownerKey,
+      provider,
+      provider_name: 'ChatGPT Plus/Pro (Codex Subscription)',
+      status: 'awaiting_input',
+      auth: {
+        url: 'https://auth.example/openai-codex',
+        instructions: 'Complete sign-in in your browser.',
+      },
+      prompt: {
+        kind: 'manual_code',
+        message: 'Paste the authorization code or full redirect URL.',
+        placeholder: null,
+        allow_empty: false,
+      },
+      progress_messages: ['Waiting for OAuth callback...'],
+      error: null,
+    };
+
+    this.attempts.set(attempt.attempt_id, attempt);
+    return attempt;
+  }
+
+  getOAuthLoginAttempt(attemptId: string, ownerKey: string) {
+    const attempt = this.attempts.get(attemptId);
+    if (!attempt || attempt.owner_key !== ownerKey) {
+      return null;
+    }
+
+    return attempt;
+  }
+
+  submitOAuthLoginInput(attemptId: string, ownerKey: string, value: string, _expectedKind?: 'prompt' | 'manual_code') {
+    const attempt = this.attempts.get(attemptId);
+    if (!attempt || attempt.owner_key !== ownerKey) {
+      throw new OAuthLoginAttemptNotFoundError(attemptId);
+    }
+
+    if (value.trim().length === 0) {
+      throw new OAuthLoginInvalidStateError('Input must not be empty for this prompt');
+    }
+
+    const updated: FakeOAuthAttempt = {
+      ...attempt,
+      status: 'succeeded',
+      prompt: null,
+      progress_messages: [...attempt.progress_messages, 'OAuth login completed.'],
+    };
+
+    this.attempts.set(attemptId, updated);
+    return updated;
+  }
+
+  cancelOAuthLogin(attemptId: string, ownerKey: string) {
+    const attempt = this.attempts.get(attemptId);
+    if (!attempt || attempt.owner_key !== ownerKey) {
+      throw new OAuthLoginAttemptNotFoundError(attemptId);
+    }
+
+    const updated: FakeOAuthAttempt = {
+      ...attempt,
+      status: 'cancelled',
+      prompt: null,
+      error: 'OAuth login cancelled',
+    };
+
+    this.attempts.set(attemptId, updated);
+    return updated;
+  }
 }
+
+type FakeOAuthAttempt = {
+  attempt_id: string;
+  owner_key: string;
+  provider: string;
+  provider_name: string | null;
+  status: 'running' | 'awaiting_input' | 'succeeded' | 'failed' | 'cancelled';
+  auth: { url: string; instructions: string | null } | null;
+  prompt: {
+    kind: 'prompt' | 'manual_code';
+    message: string;
+    placeholder: string | null;
+    allow_empty: boolean;
+  } | null;
+  progress_messages: string[];
+  error: string | null;
+};
 
 type FakeThreadState = {
   threadKey: string;
@@ -126,6 +255,8 @@ class FakeThreadControlService {
     return state;
   }
 }
+
+const testDb = usePostgresTestDb();
 
 describe('server API', () => {
   test('GET /healthz returns ok', async () => {
@@ -295,13 +426,174 @@ describe('server API', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      providers: [
-        {
+    const catalog = response.json();
+    expect(catalog.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
           provider: 'openai',
-          models: [{ model_id: 'gpt-4.1' }, { model_id: 'gpt-4o-mini' }],
+          models: expect.arrayContaining([expect.objectContaining({ model_id: 'gpt-4.1' })]),
+        }),
+      ]),
+    );
+
+    await app.close();
+  });
+
+  test('auth login endpoints start, inspect and complete OAuth attempt', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+    });
+
+    const startResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/providers/openai-codex/login',
+    });
+
+    expect(startResponse.statusCode).toBe(200);
+    const started = startResponse.json();
+    expect(started.status).toBe('awaiting_input');
+    expect(started.owner_key).toEqual(expect.any(String));
+    expect(started.prompt).toMatchObject({
+      kind: 'manual_code',
+    });
+
+    const inspectResponse = await app.inject({
+      method: 'GET',
+      url: `/v1/auth/logins/${encodeURIComponent(started.attempt_id)}`,
+      headers: {
+        'x-jagc-auth-owner': started.owner_key,
+      },
+    });
+
+    expect(inspectResponse.statusCode).toBe(200);
+    expect(inspectResponse.json().attempt_id).toBe(started.attempt_id);
+
+    const submitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/auth/logins/${encodeURIComponent(started.attempt_id)}/input`,
+      headers: {
+        'x-jagc-auth-owner': started.owner_key,
+      },
+      payload: {
+        kind: 'manual_code',
+        value: 'https://localhost/callback?code=abc',
+      },
+    });
+
+    expect(submitResponse.statusCode).toBe(200);
+    expect(submitResponse.json()).toMatchObject({
+      attempt_id: started.attempt_id,
+      status: 'succeeded',
+      prompt: null,
+    });
+
+    await app.close();
+  });
+
+  test('auth login attempts are isolated by owner key', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+    });
+
+    const startResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/providers/openai-codex/login',
+      headers: {
+        'x-jagc-auth-owner': 'cli:owner-a',
+      },
+    });
+
+    expect(startResponse.statusCode).toBe(200);
+    const started = startResponse.json();
+
+    const inspectResponse = await app.inject({
+      method: 'GET',
+      url: `/v1/auth/logins/${encodeURIComponent(started.attempt_id)}`,
+      headers: {
+        'x-jagc-auth-owner': 'cli:owner-b',
+      },
+    });
+
+    expect(inspectResponse.statusCode).toBe(404);
+    expect(inspectResponse.json()).toMatchObject({
+      error: {
+        code: 'auth_login_not_found',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('auth login input returns error for missing attempt', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/logins/missing-attempt/input',
+      headers: {
+        'x-jagc-auth-owner': 'cli:test-owner',
+      },
+      payload: {
+        value: 'code',
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'auth_login_not_found',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('auth login inspect requires owner header', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: new FakeAuthService(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/auth/logins/attempt-id',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'invalid_auth_owner_key',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('auth login unexpected errors return 500', async () => {
+    const { app } = await createTestApp(new TestExecutor(), {
+      authService: {
+        getProviderStatuses: () => [],
+        getProviderCatalog: () => [],
+        startOAuthLogin: () => {
+          throw new Error('boom');
         },
-      ],
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/providers/openai-codex/login',
+      headers: {
+        'x-jagc-auth-owner': 'cli:owner',
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'auth_login_internal_error',
+      },
     });
 
     await app.close();
@@ -388,11 +680,11 @@ describe('server API', () => {
 async function createTestApp(
   runExecutor: RunExecutor,
   options: {
-    authService?: FakeAuthService;
+    authService?: Parameters<typeof createApp>[0]['authService'];
     threadControlService?: FakeThreadControlService;
   } = {},
 ) {
-  const runStore = new InMemoryRunStore();
+  const runStore = new PostgresRunStore(testDb.pool);
 
   let runService!: RunService;
   const runScheduler: RunScheduler = {

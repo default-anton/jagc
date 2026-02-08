@@ -42,6 +42,9 @@ importers:
       '@types/pg':
         specifier: ^8.16.0
         version: 8.16.0
+      pg-transactional-tests:
+        specifier: ^1.2.0
+        version: 1.2.0(pg@8.18.0)
       tsdown:
         specifier: ^0.20.3
         version: 0.20.3(typescript@5.9.3)
@@ -1749,6 +1752,11 @@ packages:
 
   pg-protocol@1.11.0:
     resolution: {integrity: sha512-pfsxk2M9M3BuGgDOfuy37VNRRX3jmKgMjcvAcWqNDpZSf4cUmv8HSOl5ViRQFsfARFn0KuUQTgLxVMbNq5NW3g==}
+
+  pg-transactional-tests@1.2.0:
+    resolution: {integrity: sha512-sfuq/TCJA9i/wG5LsCAPe7LuCOrMNbqDv+xWm2XSbiYA+5wMMaqgkku8fywmV6hTSKRpgM7vVTbWHHerNJiJzA==}
+    peerDependencies:
+      pg: '*'
 
   pg-types@2.2.0:
     resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
@@ -4252,6 +4260,10 @@ snapshots:
       pg: 8.18.0
 
   pg-protocol@1.11.0: {}
+
+  pg-transactional-tests@1.2.0(pg@8.18.0):
+    dependencies:
+      pg: 8.18.0
 
   pg-types@2.2.0:
     dependencies:

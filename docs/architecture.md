@@ -13,6 +13,10 @@ Current implemented vertical slice:
   - `POST /v1/messages`
   - `GET /v1/runs/:run_id`
   - `GET /v1/auth/providers`
+  - `POST /v1/auth/providers/:provider/login`
+  - `GET /v1/auth/logins/:attempt_id`
+  - `POST /v1/auth/logins/:attempt_id/input`
+  - `POST /v1/auth/logins/:attempt_id/cancel`
   - `GET /v1/models`
   - `GET /v1/threads/:thread_key/runtime`
   - `PUT /v1/threads/:thread_key/model`
@@ -22,10 +26,11 @@ Current implemented vertical slice:
   - `jagc message`
   - `jagc run wait`
   - `jagc auth providers`
+  - `jagc auth login <provider>`
   - `jagc model list|get|set`
   - `jagc thinking get|set`
 - Runtime executors: `echo` (deterministic) and `pi` (real agent)
-- Telegram polling adapter (personal chats) with button-based runtime controls (`/settings`, `/model`, `/thinking`)
+- Telegram polling adapter (personal chats) with button-based runtime controls (`/settings`, `/model`, `/thinking`, `/auth`)
 - Durable run scheduling/recovery via DBOS
 - Postgres persistence for runs, idempotency keys, and `thread_key -> session` mapping
 
@@ -53,6 +58,8 @@ Current implemented vertical slice:
   - `/settings` opens runtime settings menu
   - `/model` opens model picker (button-based)
   - `/thinking` opens thinking picker (button-based)
+  - `/auth` opens OAuth provider login controls (button-based picker + status)
+  - `/auth input <value>` submits prompt/manual-code input for the active login attempt
   - text arguments for `/model` and `/thinking` are intentionally not supported
 
 ### 2) Durable execution
@@ -113,6 +120,24 @@ Current implemented vertical slice:
   - a run is finalized when the next user message is delivered or at `agent_end`
 - This avoids mis-attribution when pi `prompt(..., { streamingBehavior })` resolves before queued work is actually completed.
 - Note: immediate in-flight interruption of run N by run N+1 (`steer`) across separate run records is not guaranteed under strict per-thread run serialization. It requires a future thread-owned draining loop model.
+
+## OAuth login broker
+
+For `pi` runner mode, jagc exposes OAuth login bridging over HTTP:
+
+- `POST /v1/auth/providers/:provider/login`
+- `GET /v1/auth/logins/:attempt_id`
+- `POST /v1/auth/logins/:attempt_id/input`
+- `POST /v1/auth/logins/:attempt_id/cancel`
+
+Implementation details:
+
+- `PiAuthService` wraps pi `AuthStorage` + `ModelRegistry`.
+- `OAuthLoginBroker` keeps in-memory attempt state and bridges `AuthStorage.login()` callbacks (`onAuth`, `onPrompt`, `onManualCodeInput`, `onProgress`).
+- Attempts are owner-scoped (`X-JAGC-Auth-Owner`) and never shared across owners.
+- Follow-up endpoints (`GET`, `/input`, `/cancel`) require owner header and return `404` on owner mismatch.
+- Overflow pruning removes only terminal attempts; if broker capacity is still exhausted with active attempts, new starts return `429` (`auth_login_capacity_exceeded`) rather than evicting in-flight attempts.
+- Terminal credentials are persisted by pi to workspace `auth.json`.
 
 ## Thread runtime controls (model/thinking)
 

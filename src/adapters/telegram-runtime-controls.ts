@@ -1,7 +1,14 @@
 import { type Context, InlineKeyboard } from 'grammy';
-import type { ProviderCatalogEntry } from '../runtime/pi-auth.js';
+import type {
+  OAuthLoginAttemptSnapshot,
+  OAuthLoginInputKind,
+  ProviderAuthStatus,
+  ProviderCatalogEntry,
+} from '../runtime/pi-auth.js';
 import type { ThreadControlService, ThreadRuntimeState } from '../runtime/pi-executor.js';
+import { TelegramAuthControls } from './telegram-auth-controls.js';
 import {
+  callbackAuthProviders,
   callbackModelList,
   callbackModelProviders,
   callbackModelSet,
@@ -15,12 +22,28 @@ const modelPageSize = 8;
 interface TelegramRuntimeControlsOptions {
   authService?: {
     getProviderCatalog(): ProviderCatalogEntry[];
+    getProviderStatuses?(): ProviderAuthStatus[];
+    startOAuthLogin?(provider: string, ownerKey: string): OAuthLoginAttemptSnapshot;
+    getOAuthLoginAttempt?(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot | null;
+    submitOAuthLoginInput?(
+      attemptId: string,
+      ownerKey: string,
+      value: string,
+      expectedKind?: OAuthLoginInputKind,
+    ): OAuthLoginAttemptSnapshot;
+    cancelOAuthLogin?(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
   threadControlService?: ThreadControlService;
 }
 
 export class TelegramRuntimeControls {
-  constructor(private readonly options: TelegramRuntimeControlsOptions) {}
+  private readonly authControls: TelegramAuthControls;
+
+  constructor(private readonly options: TelegramRuntimeControlsOptions) {
+    this.authControls = new TelegramAuthControls({
+      authService: options.authService,
+    });
+  }
 
   async handleSettingsCommand(ctx: Context): Promise<void> {
     await this.showSettingsPanel(ctx);
@@ -54,11 +77,23 @@ export class TelegramRuntimeControls {
     await this.showThinkingPicker(ctx);
   }
 
+  async handleAuthCommand(ctx: Context, args: string): Promise<void> {
+    await this.authControls.handleAuthCommand(ctx, args);
+  }
+
   async handleCallbackAction(ctx: Context, action: TelegramCallbackAction): Promise<void> {
     switch (action.kind) {
       case 'settings_open':
       case 'settings_refresh': {
         await this.showSettingsPanel(ctx);
+        return;
+      }
+      case 'auth_open':
+      case 'auth_providers':
+      case 'auth_login':
+      case 'auth_attempt_refresh':
+      case 'auth_attempt_cancel': {
+        await this.authControls.handleCallbackAction(ctx, action);
         return;
       }
       case 'model_providers': {
@@ -387,6 +422,8 @@ function settingsKeyboard(): InlineKeyboard {
     .text('🤖 Change model', callbackModelProviders(0))
     .row()
     .text('🧠 Change thinking', 't:list')
+    .row()
+    .text('🔐 Provider login', callbackAuthProviders(0))
     .row()
     .text('🔄 Refresh', 's:refresh');
 }

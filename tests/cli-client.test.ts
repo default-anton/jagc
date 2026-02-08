@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { waitForRun } from '../src/cli/client.js';
+import { startOAuthLogin, waitForRun } from '../src/cli/client.js';
+import { oauthOwnerHeaderName } from '../src/shared/api-contracts.js';
 
 describe('waitForRun', () => {
   afterEach(() => {
@@ -21,5 +22,77 @@ describe('waitForRun', () => {
       'invalid intervalMs: NaN',
     );
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('startOAuthLogin', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('omits owner header when owner key is not provided', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          attempt_id: 'attempt-1',
+          owner_key: 'generated-owner',
+          provider: 'openai-codex',
+          provider_name: 'OpenAI Codex',
+          status: 'running',
+          auth: null,
+          prompt: null,
+          progress_messages: [],
+          error: null,
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    await startOAuthLogin('http://127.0.0.1:31415', 'openai-codex');
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://127.0.0.1:31415/v1/auth/providers/openai-codex/login',
+      expect.objectContaining({
+        method: 'POST',
+        headers: undefined,
+      }),
+    );
+  });
+
+  test('sends owner header when owner key is provided', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          attempt_id: 'attempt-1',
+          owner_key: 'cli:owner',
+          provider: 'openai-codex',
+          provider_name: 'OpenAI Codex',
+          status: 'running',
+          auth: null,
+          prompt: null,
+          progress_messages: [],
+          error: null,
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    await startOAuthLogin('http://127.0.0.1:31415', 'openai-codex', 'cli:owner');
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://127.0.0.1:31415/v1/auth/providers/openai-codex/login',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          [oauthOwnerHeaderName]: 'cli:owner',
+        },
+      }),
+    );
   });
 });

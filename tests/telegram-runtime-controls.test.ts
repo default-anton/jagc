@@ -1,7 +1,7 @@
 import type { Context } from 'grammy';
 import { describe, expect, test } from 'vitest';
 import { TelegramRuntimeControls } from '../src/adapters/telegram-runtime-controls.js';
-import type { ProviderCatalogEntry } from '../src/runtime/pi-auth.js';
+import type { OAuthLoginAttemptSnapshot, ProviderAuthStatus, ProviderCatalogEntry } from '../src/runtime/pi-auth.js';
 import type { ThreadControlService, ThreadRuntimeState } from '../src/runtime/pi-executor.js';
 
 type ThinkingLevel = ThreadRuntimeState['thinkingLevel'];
@@ -47,6 +47,130 @@ class FakeThreadControlService implements ThreadControlService {
     };
 
     return this.state;
+  }
+}
+
+class FakeAuthService {
+  readonly submitCalls: Array<{
+    attemptId: string;
+    ownerKey: string;
+    value: string;
+    expectedKind?: 'prompt' | 'manual_code';
+  }> = [];
+  failNextSubmitWithStateConflict = false;
+  private readonly attempts = new Map<string, OAuthLoginAttemptSnapshot>();
+
+  getProviderCatalog(): ProviderCatalogEntry[] {
+    return [];
+  }
+
+  getProviderStatuses(): ProviderAuthStatus[] {
+    return [
+      {
+        provider: 'openai-codex',
+        has_auth: false,
+        credential_type: null,
+        oauth_supported: true,
+        env_var_hint: null,
+        total_models: 1,
+        available_models: 0,
+      },
+    ];
+  }
+
+  startOAuthLogin(provider: string, ownerKey: string): OAuthLoginAttemptSnapshot {
+    const attempt: OAuthLoginAttemptSnapshot = {
+      attempt_id: 'attempt-1',
+      owner_key: ownerKey,
+      provider,
+      provider_name: 'OpenAI Codex',
+      status: 'awaiting_input',
+      auth: {
+        url: 'https://example.com/auth',
+        instructions: 'Complete login in browser.',
+      },
+      prompt: {
+        kind: 'manual_code',
+        message: 'Paste authorization code',
+        placeholder: null,
+        allow_empty: false,
+      },
+      progress_messages: ['Waiting for callback...'],
+      error: null,
+    };
+
+    this.attempts.set(attempt.attempt_id, attempt);
+    return attempt;
+  }
+
+  getOAuthLoginAttempt(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot | null {
+    const attempt = this.attempts.get(attemptId);
+    if (!attempt || attempt.owner_key !== ownerKey) {
+      return null;
+    }
+
+    return attempt;
+  }
+
+  markAttemptSucceeded(attemptId: string): void {
+    const current = this.attempts.get(attemptId);
+    if (!current) {
+      return;
+    }
+
+    this.attempts.set(attemptId, {
+      ...current,
+      status: 'succeeded',
+      prompt: null,
+      progress_messages: [...current.progress_messages, 'OAuth login completed'],
+    });
+  }
+
+  submitOAuthLoginInput(
+    attemptId: string,
+    ownerKey: string,
+    value: string,
+    expectedKind?: 'prompt' | 'manual_code',
+  ): OAuthLoginAttemptSnapshot {
+    this.submitCalls.push({ attemptId, ownerKey, value, expectedKind });
+
+    const current = this.attempts.get(attemptId);
+    if (!current || current.owner_key !== ownerKey) {
+      throw new Error('attempt not found');
+    }
+
+    if (this.failNextSubmitWithStateConflict) {
+      this.failNextSubmitWithStateConflict = false;
+      this.markAttemptSucceeded(attemptId);
+      throw new Error('OAuth login attempt is not waiting for input');
+    }
+
+    const updated: OAuthLoginAttemptSnapshot = {
+      ...current,
+      status: 'succeeded',
+      prompt: null,
+      progress_messages: [...current.progress_messages, 'OAuth login completed'],
+    };
+
+    this.attempts.set(attemptId, updated);
+    return updated;
+  }
+
+  cancelOAuthLogin(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot {
+    const current = this.attempts.get(attemptId);
+    if (!current || current.owner_key !== ownerKey) {
+      throw new Error('attempt not found');
+    }
+
+    const updated: OAuthLoginAttemptSnapshot = {
+      ...current,
+      status: 'cancelled',
+      prompt: null,
+      error: 'OAuth login cancelled',
+    };
+
+    this.attempts.set(attemptId, updated);
+    return updated;
   }
 }
 
@@ -105,6 +229,90 @@ describe('TelegramRuntimeControls', () => {
     await controls.handleModelCommand(ctx, '');
 
     expect(lastText(replies)).toBe('Model controls are unavailable when JAGC_RUNNER is not pi.');
+  });
+
+  test('auth command opens oauth provider picker', async () => {
+    const controls = new TelegramRuntimeControls({
+      authService: new FakeAuthService(),
+      threadControlService: new FakeThreadControlService(createState()),
+    });
+
+    const { ctx, replies } = createContext();
+    await controls.handleAuthCommand(ctx, '');
+
+    expect(lastText(replies)).toContain('Provider login');
+    const callbackData = allCallbackData(lastCall(replies));
+    expect(callbackData).toContain('a:login:openai-codex');
+  });
+
+  test('auth input command submits pending oauth code', async () => {
+    const authService = new FakeAuthService();
+    const controls = new TelegramRuntimeControls({
+      authService,
+      threadControlService: new FakeThreadControlService(createState()),
+    });
+
+    const callbackContext = createContext({ callback: true });
+    await controls.handleCallbackAction(callbackContext.ctx, {
+      kind: 'auth_login',
+      provider: 'openai-codex',
+    });
+
+    const commandContext = createContext();
+    await controls.handleAuthCommand(commandContext.ctx, 'input https://example/callback?code=abc');
+
+    expect(authService.submitCalls).toHaveLength(1);
+    expect(authService.submitCalls[0]).toMatchObject({
+      attemptId: 'attempt-1',
+      expectedKind: 'manual_code',
+    });
+    expect(lastText(commandContext.replies)).toContain('Status: Succeeded');
+  });
+
+  test('auth input reports browser-completed login without failing', async () => {
+    const authService = new FakeAuthService();
+    const controls = new TelegramRuntimeControls({
+      authService,
+      threadControlService: new FakeThreadControlService(createState()),
+    });
+
+    const callbackContext = createContext({ callback: true });
+    await controls.handleCallbackAction(callbackContext.ctx, {
+      kind: 'auth_login',
+      provider: 'openai-codex',
+    });
+
+    authService.markAttemptSucceeded('attempt-1');
+
+    const commandContext = createContext();
+    await controls.handleAuthCommand(commandContext.ctx, 'input https://example/callback?code=abc');
+
+    expect(authService.submitCalls).toHaveLength(0);
+    expect(lastText(commandContext.replies)).toContain('OAuth login already completed in browser.');
+    expect(lastText(commandContext.replies)).toContain('Status: Succeeded');
+  });
+
+  test('auth input race after typing resolves to succeeded attempt', async () => {
+    const authService = new FakeAuthService();
+    authService.failNextSubmitWithStateConflict = true;
+
+    const controls = new TelegramRuntimeControls({
+      authService,
+      threadControlService: new FakeThreadControlService(createState()),
+    });
+
+    const callbackContext = createContext({ callback: true });
+    await controls.handleCallbackAction(callbackContext.ctx, {
+      kind: 'auth_login',
+      provider: 'openai-codex',
+    });
+
+    const commandContext = createContext();
+    await controls.handleAuthCommand(commandContext.ctx, 'input https://example/callback?code=abc');
+
+    expect(authService.submitCalls).toHaveLength(1);
+    expect(lastText(commandContext.replies)).toContain('OAuth login already completed in browser.');
+    expect(lastText(commandContext.replies)).toContain('Status: Succeeded');
   });
 
   test('shows unsupported-thinking message when current model does not support thinking', async () => {

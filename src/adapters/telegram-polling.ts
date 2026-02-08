@@ -2,7 +2,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { type RunnerHandle, run } from '@grammyjs/runner';
 import { Bot, type Context } from 'grammy';
-import type { ProviderCatalogEntry } from '../runtime/pi-auth.js';
+import type {
+  OAuthLoginAttemptSnapshot,
+  OAuthLoginInputKind,
+  ProviderAuthStatus,
+  ProviderCatalogEntry,
+} from '../runtime/pi-auth.js';
 import type { ThreadControlService } from '../runtime/pi-executor.js';
 import type { RunService } from '../server/service.js';
 import type { RunRecord } from '../shared/run-types.js';
@@ -18,6 +23,16 @@ interface TelegramPollingAdapterOptions {
   runService: RunService;
   authService?: {
     getProviderCatalog(): ProviderCatalogEntry[];
+    getProviderStatuses(): ProviderAuthStatus[];
+    startOAuthLogin(provider: string, ownerKey: string): OAuthLoginAttemptSnapshot;
+    getOAuthLoginAttempt(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot | null;
+    submitOAuthLoginInput(
+      attemptId: string,
+      ownerKey: string,
+      value: string,
+      expectedKind?: OAuthLoginInputKind,
+    ): OAuthLoginAttemptSnapshot;
+    cancelOAuthLogin(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
   threadControlService?: ThreadControlService;
   waitTimeoutMs?: number;
@@ -122,31 +137,49 @@ export class TelegramPollingAdapter {
   }
 
   private async handleCommand(ctx: Context, command: ParsedTelegramCommand): Promise<void> {
-    switch (command.command) {
-      case 'start':
-      case 'help': {
-        await ctx.reply(helpText());
-        return;
+    try {
+      switch (command.command) {
+        case 'start':
+        case 'help': {
+          await ctx.reply(helpText());
+          return;
+        }
+        case 'settings': {
+          await this.runtimeControls.handleSettingsCommand(ctx);
+          return;
+        }
+        case 'model': {
+          await this.runtimeControls.handleModelCommand(ctx, command.args);
+          return;
+        }
+        case 'thinking': {
+          await this.runtimeControls.handleThinkingCommand(ctx, command.args);
+          return;
+        }
+        case 'auth': {
+          await this.runtimeControls.handleAuthCommand(ctx, command.args);
+          return;
+        }
+        case 'steer': {
+          await this.handleAssistantMessage(ctx, command.args.trim(), 'steer');
+          return;
+        }
+        default: {
+          await ctx.reply(`Unknown command: /${command.command}`);
+        }
       }
-      case 'settings': {
-        await this.runtimeControls.handleSettingsCommand(ctx);
-        return;
-      }
-      case 'model': {
-        await this.runtimeControls.handleModelCommand(ctx, command.args);
-        return;
-      }
-      case 'thinking': {
-        await this.runtimeControls.handleThinkingCommand(ctx, command.args);
-        return;
-      }
-      case 'steer': {
-        await this.handleAssistantMessage(ctx, command.args.trim(), 'steer');
-        return;
-      }
-      default: {
-        await ctx.reply(`Unknown command: /${command.command}`);
-      }
+    } catch (error) {
+      const message = userFacingError(error);
+      console.error(
+        JSON.stringify({
+          event: 'telegram_command_failed',
+          chat_id: ctx.chat?.id,
+          thread_key: ctx.chat ? telegramThreadKey(ctx.chat.id) : null,
+          command: command.command,
+          message,
+        }),
+      );
+      await ctx.reply(`❌ ${message}`);
     }
   }
 
@@ -304,6 +337,7 @@ function helpText(): string {
     '/settings — open runtime settings',
     '/model — open model picker',
     '/thinking — open thinking picker',
+    '/auth — open provider login controls',
     '/steer <message> — send an interrupting message (explicit steer)',
   ].join('\n');
 }
