@@ -1,3 +1,5 @@
+import type { Logger } from '../shared/logger.js';
+import { noopLogger } from '../shared/logger.js';
 import type { MessageIngest, RunRecord } from '../shared/run-types.js';
 import type { RunExecutor } from './executor.js';
 import type { RunScheduler } from './scheduler.js';
@@ -12,6 +14,7 @@ export class RunService {
     private readonly runStore: RunStore,
     private readonly runExecutor: RunExecutor,
     private readonly runScheduler: RunScheduler,
+    private readonly logger: Logger = noopLogger,
   ) {}
 
   async init(): Promise<void> {
@@ -73,13 +76,11 @@ export class RunService {
 
     const completion = this.executeLoadedRun(run)
       .catch((error) => {
-        console.error(
-          JSON.stringify({
-            event: 'run_dispatch_execute_failed',
-            run_id: run.runId,
-            message: toErrorMessage(error),
-          }),
-        );
+        this.logger.error({
+          event: 'run_dispatch_execute_failed',
+          run_id: run.runId,
+          message: toErrorMessage(error),
+        });
       })
       .finally(() => {
         this.activeRunCompletions.delete(run.runId);
@@ -147,13 +148,11 @@ export class RunService {
       try {
         await this.runScheduler.ensureEnqueued(run);
       } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: 'run_recovery_enqueue_failed',
-            run_id: run.runId,
-            message: toErrorMessage(error),
-          }),
-        );
+        this.logger.error({
+          event: 'run_recovery_enqueue_failed',
+          run_id: run.runId,
+          message: toErrorMessage(error),
+        });
       }
     }
   }
@@ -170,13 +169,11 @@ export class RunService {
     try {
       await this.runScheduler.enqueue(run);
     } catch (error) {
-      console.error(
-        JSON.stringify({
-          event: 'run_enqueue_failed',
-          run_id: run.runId,
-          message: toErrorMessage(error),
-        }),
-      );
+      this.logger.error({
+        event: 'run_enqueue_failed',
+        run_id: run.runId,
+        message: toErrorMessage(error),
+      });
       throw error;
     }
   }

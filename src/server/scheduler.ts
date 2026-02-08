@@ -1,3 +1,5 @@
+import type { Logger } from '../shared/logger.js';
+import { noopLogger } from '../shared/logger.js';
 import type { RunRecord } from '../shared/run-types.js';
 
 export interface RunScheduler {
@@ -11,6 +13,7 @@ type DispatchRunHandler = (runId: string) => Promise<void>;
 
 interface LocalRunSchedulerOptions {
   dispatchRunById: DispatchRunHandler;
+  logger?: Logger;
 }
 
 export class LocalRunScheduler implements RunScheduler {
@@ -18,8 +21,11 @@ export class LocalRunScheduler implements RunScheduler {
   private readonly scheduledRunIds = new Set<string>();
   private readonly activeDispatches = new Set<Promise<void>>();
   private readonly threadDispatchTails = new Map<string, Promise<void>>();
+  private readonly logger: Logger;
 
-  constructor(private readonly options: LocalRunSchedulerOptions) {}
+  constructor(private readonly options: LocalRunSchedulerOptions) {
+    this.logger = options.logger ?? noopLogger;
+  }
 
   async start(): Promise<void> {
     if (this.started) {
@@ -78,13 +84,11 @@ export class LocalRunScheduler implements RunScheduler {
         try {
           await this.options.dispatchRunById(run.runId);
         } catch (error) {
-          console.error(
-            JSON.stringify({
-              event: 'run_scheduler_dispatch_failed',
-              run_id: run.runId,
-              message: toErrorMessage(error),
-            }),
-          );
+          this.logger.error({
+            event: 'run_scheduler_dispatch_failed',
+            run_id: run.runId,
+            message: toErrorMessage(error),
+          });
         }
       })
       .finally(() => {

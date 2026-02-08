@@ -10,6 +10,8 @@ import type {
 } from '../runtime/pi-auth.js';
 import type { ThreadControlService } from '../runtime/pi-executor.js';
 import type { RunService } from '../server/service.js';
+import type { Logger } from '../shared/logger.js';
+import { noopLogger } from '../shared/logger.js';
 import type { RunRecord } from '../shared/run-types.js';
 import { parseTelegramCallbackData } from './telegram-controls-callbacks.js';
 import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
@@ -37,6 +39,7 @@ interface TelegramPollingAdapterOptions {
   threadControlService?: ThreadControlService;
   waitTimeoutMs?: number;
   pollIntervalMs?: number;
+  logger?: Logger;
 }
 
 interface ParsedTelegramCommand {
@@ -50,6 +53,7 @@ export class TelegramPollingAdapter {
   private runner: RunnerHandle | null = null;
   private readonly waitTimeoutMs: number;
   private readonly pollIntervalMs: number;
+  private readonly logger: Logger;
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
     this.bot = new Bot(options.botToken);
@@ -59,14 +63,13 @@ export class TelegramPollingAdapter {
     });
     this.waitTimeoutMs = options.waitTimeoutMs ?? defaultWaitTimeoutMs;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
+    this.logger = options.logger ?? noopLogger;
 
     this.bot.catch((error) => {
-      console.error(
-        JSON.stringify({
-          event: 'telegram_handler_error',
-          message: error.error instanceof Error ? error.error.message : String(error.error),
-        }),
-      );
+      this.logger.error({
+        event: 'telegram_handler_error',
+        message: error.error instanceof Error ? error.error.message : String(error.error),
+      });
     });
 
     this.bot.on('message:text', async (ctx) => {
@@ -94,16 +97,14 @@ export class TelegramPollingAdapter {
     });
 
     void this.runner.task()?.catch((error) => {
-      console.error(
-        JSON.stringify({
-          event: 'telegram_runner_stopped_with_error',
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      this.logger.error({
+        event: 'telegram_runner_stopped_with_error',
+        message: error instanceof Error ? error.message : String(error),
+      });
     });
 
     const username = this.bot.botInfo.username;
-    console.info(JSON.stringify({ event: 'telegram_polling_started', username }));
+    this.logger.info({ event: 'telegram_polling_started', username });
   }
 
   async stop(): Promise<void> {
@@ -113,7 +114,7 @@ export class TelegramPollingAdapter {
 
     await this.runner.stop();
     this.runner = null;
-    console.info(JSON.stringify({ event: 'telegram_polling_stopped' }));
+    this.logger.info({ event: 'telegram_polling_stopped' });
   }
 
   private async handleTextMessage(ctx: Context): Promise<void> {
@@ -170,15 +171,13 @@ export class TelegramPollingAdapter {
       }
     } catch (error) {
       const message = userFacingError(error);
-      console.error(
-        JSON.stringify({
-          event: 'telegram_command_failed',
-          chat_id: ctx.chat?.id,
-          thread_key: ctx.chat ? telegramThreadKey(ctx.chat.id) : null,
-          command: command.command,
-          message,
-        }),
-      );
+      this.logger.error({
+        event: 'telegram_command_failed',
+        chat_id: ctx.chat?.id,
+        thread_key: ctx.chat ? telegramThreadKey(ctx.chat.id) : null,
+        command: command.command,
+        message,
+      });
       await ctx.reply(`❌ ${message}`);
     }
   }
@@ -197,42 +196,29 @@ export class TelegramPollingAdapter {
 
     const action = parseTelegramCallbackData(data);
     if (!action) {
-      console.info(
-        JSON.stringify({
-          event: 'telegram_callback_query_ignored',
-          reason: 'invalid_callback_data',
-          chat_id: ctx.chat.id,
-          callback_data: data,
-        }),
-      );
-
       try {
         await ctx.answerCallbackQuery({ text: 'This menu is outdated. Loading latest settings...' });
       } catch (error) {
-        console.warn(
-          JSON.stringify({
-            event: 'telegram_callback_query_ack_failed',
-            chat_id: ctx.chat.id,
-            thread_key: telegramThreadKey(ctx.chat.id),
-            callback_data: data,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
+        this.logger.warn({
+          event: 'telegram_callback_query_ack_failed',
+          chat_id: ctx.chat.id,
+          thread_key: telegramThreadKey(ctx.chat.id),
+          callback_data: data,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
 
       try {
         await this.runtimeControls.handleStaleCallback(ctx);
       } catch (error) {
         const message = userFacingError(error);
-        console.error(
-          JSON.stringify({
-            event: 'telegram_callback_query_stale_recovery_failed',
-            chat_id: ctx.chat.id,
-            thread_key: telegramThreadKey(ctx.chat.id),
-            callback_data: data,
-            message,
-          }),
-        );
+        this.logger.error({
+          event: 'telegram_callback_query_stale_recovery_failed',
+          chat_id: ctx.chat.id,
+          thread_key: telegramThreadKey(ctx.chat.id),
+          callback_data: data,
+          message,
+        });
 
         await ctx.reply('This menu is outdated. Use /settings to refresh.');
       }
@@ -250,28 +236,24 @@ export class TelegramPollingAdapter {
     try {
       await ctx.answerCallbackQuery();
     } catch (error) {
-      console.warn(
-        JSON.stringify({
-          event: 'telegram_callback_query_ack_failed',
-          ...callbackLogContext,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      this.logger.warn({
+        event: 'telegram_callback_query_ack_failed',
+        ...callbackLogContext,
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
 
     try {
       await this.runtimeControls.handleCallbackAction(ctx, action);
-      console.info(JSON.stringify({ event: 'telegram_callback_query_handled', ...callbackLogContext }));
+      this.logger.info({ event: 'telegram_callback_query_handled', ...callbackLogContext });
     } catch (error) {
       const message = userFacingError(error);
 
-      console.error(
-        JSON.stringify({
-          event: 'telegram_callback_query_failed',
-          ...callbackLogContext,
-          message,
-        }),
-      );
+      this.logger.error({
+        event: 'telegram_callback_query_failed',
+        ...callbackLogContext,
+        message,
+      });
 
       await ctx.reply(`❌ ${message}`);
     }

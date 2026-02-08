@@ -5,6 +5,7 @@ import { bootstrapAgentDir } from '../runtime/agent-dir-bootstrap.js';
 import { PiAuthService } from '../runtime/pi-auth.js';
 import { PiRunExecutor, type ThreadControlService } from '../runtime/pi-executor.js';
 import { loadConfig } from '../shared/config.js';
+import { createJsonLogger, resolveLogLevel } from '../shared/logger.js';
 import { createApp } from './app.js';
 import { EchoRunExecutor, type RunExecutor } from './executor.js';
 import { runMigrations } from './migrations.js';
@@ -14,16 +15,15 @@ import { PostgresRunStore } from './store.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const logger = createJsonLogger({ level: config.JAGC_LOG_LEVEL });
 
   const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR);
   if (bootstrapResult.createdDirectory) {
-    console.info(
-      JSON.stringify({
-        event: 'workspace_bootstrap',
-        workspace_dir: config.JAGC_WORKSPACE_DIR,
-        created_directory: true,
-      }),
-    );
+    logger.info({
+      event: 'workspace_bootstrap',
+      workspace_dir: config.JAGC_WORKSPACE_DIR,
+      created_directory: true,
+    });
   }
 
   const pool = new Pool({
@@ -57,9 +57,10 @@ async function main(): Promise<void> {
 
       await runService.dispatchRunById(runId);
     },
+    logger,
   });
 
-  runService = new RunService(runStore, runExecutor, runScheduler);
+  runService = new RunService(runStore, runExecutor, runScheduler, logger);
   await runService.init();
 
   const authService = new PiAuthService(config.JAGC_WORKSPACE_DIR);
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
       runService,
       authService,
       threadControlService,
+      logger,
     });
   }
 
@@ -108,7 +110,15 @@ async function main(): Promise<void> {
   }
 }
 
+const startupLogger = createJsonLogger({
+  level: resolveLogLevel(process.env.JAGC_LOG_LEVEL),
+});
+
 main().catch((error) => {
-  console.error(error);
+  startupLogger.error({
+    event: 'server_main_failed',
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
   process.exit(1);
 });
