@@ -25,7 +25,8 @@ This doc is the implementation snapshot (not design intent).
 
 - Executors: `echo` (deterministic), `pi` (real agent)
 - Telegram polling adapter (personal chats) with `/settings`, `/model`, `/thinking`, `/auth`
-- DBOS durable scheduling + Postgres persistence (`runs`, ingest idempotency, `thread_sessions`)
+- Postgres persistence (`runs`, ingest idempotency, `thread_sessions`)
+- In-process run scheduler for dispatch/recovery (no external workflow engine)
 
 ## Request/execution flow
 
@@ -34,13 +35,15 @@ This doc is the implementation snapshot (not design intent).
 - `src/server/app.ts` validates payload.
 - Header/body idempotency key mismatch returns `400`.
 - `RunService.ingestMessage(...)` writes/gets run via `RunStore.createRun(...)`.
-- Non-deduplicated runs are enqueued durably through DBOS (`workflowID = run_id`).
+- Non-deduplicated runs are enqueued into the in-process run scheduler.
 - Response is a normalized run envelope (`run_id`, `status`, `output`, `error`) with `202`.
 
-### 2) Durable execution
+### 2) Run dispatch and execution
 
-- DBOS dequeues `jagc.execute_run` and calls `RunService.executeRunById(run_id)`.
-- Service executes only if run is still `running`.
+- `LocalRunScheduler` dispatches runs in process.
+- Scheduler deduplicates currently scheduled run IDs (`run_id`) and does not use an external queue/workflow engine.
+- Scheduler serializes dispatch per `thread_key` (FIFO at dispatch boundary), while allowing different threads to dispatch concurrently.
+- Scheduler calls `RunService.dispatchRunById(run_id)`, which starts background execution only if the run is still `running` and not already in-flight.
 - `RunExecutor.execute(run)` returns structured `RunOutput` or throws.
 - Service finalizes with `markSucceeded` / `markFailed`.
 
@@ -51,13 +54,18 @@ This doc is the implementation snapshot (not design intent).
 
 ## Durability + recovery
 
-- Queue: `jagc_runs`
-- Partition key: `thread_key`
-- Per-partition concurrency: `1` (strict global one-active-run-per-thread)
-- DBOS recovery resumes pending queue work on startup.
-- `RunService.init()` also performs:
+- Source of truth is Postgres run state (`runs.status`).
+- `RunService.init()` performs:
   - immediate scan of `runs.status='running'`
-  - periodic recovery pass (15s) to re-enqueue missing work
+  - periodic recovery pass (15s) to re-enqueue missing in-process work
+- Recovery skips runs already in the local in-flight completion set.
+- Scheduler deduplicates currently scheduled run IDs so ingest + recovery can race safely.
+
+### Concurrency scope
+
+- Run dispatch is in-process and single-server-process scoped.
+- Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread `ThreadRunController` instances in the pi executor.
+- Multi-process/global run coordination is intentionally deferred post-v0.
 
 ## Session/thread model (pi executor)
 
@@ -74,9 +82,10 @@ This doc is the implementation snapshot (not design intent).
 - Additional same-thread runs queue via `session.followUp(...)` or `session.steer(...)`.
 - Run completion attribution comes from session events (not prompt promise timing), using user/assistant boundary events.
 
-Constraint to keep in mind:
+Operational note:
 
-- With strict per-thread DBOS serialization, immediate in-flight interruption of run N by run N+1 (`steer`) across separate run records is not guaranteed; that would require a future thread-owned draining loop.
+- With the in-process scheduler feeding a per-thread controller, same-thread `followUp`/`steer` messages can be delivered while a session is active.
+- If the process crashes, pending `running` rows are replayed from Postgres on recovery.
 
 ## Telegram polling behavior
 
@@ -119,3 +128,4 @@ Constraint to keep in mind:
 - Telegram webhook mode is not implemented (polling is implemented).
 - Webhook hardening beyond current baseline is pending (signatures/replay protection).
 - CI merge-gate automation is not wired yet; local release gate is the current gate (`pnpm typecheck && pnpm lint && pnpm test && pnpm build`).
+- Multi-process one-active-run-per-thread coordination is deferred.

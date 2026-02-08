@@ -22,7 +22,7 @@
 - v0 scope includes server + CLI + Telegram polling (personal chats).
 - `output` is a structured payload contract (not plain-text-only).
 - Default same-thread delivery mode is `followUp`; `steer` is explicit opt-in.
-- One active run per thread is enforced globally via DBOS partitioned queueing (`jagc_runs`, partition key `thread_key`, per-partition concurrency `1`).
+- Same-thread turn ordering (`followUp` / `steer`) is enforced by the per-thread pi session controller (single-process scope in v0; global multi-process locking is deferred).
 - Provider/model/thinking state lives in pi settings/session state; do not duplicate model/thinking state in jagc DB.
 - Local CLI usage is unauthenticated; webhook ingress requires token auth.
 - Primary runtime integration is pi SDK in-process (`createAgentSession`); RPC is optional/non-primary.

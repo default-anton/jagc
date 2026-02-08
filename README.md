@@ -4,7 +4,7 @@
 
 Self-hosted AI assistant to automate your life:
 - **pi-coding-agent** for agent runtime behavior (sessions, context files, skills/prompts/extensions/themes/packages)
-- **DBOS Transact (TypeScript)** for durable workflow execution (Postgres-backed)
+- **Postgres-backed run state + in-process scheduler** for durable run tracking and execution
 
 This README is intentionally short and v0-focused.
 
@@ -17,9 +17,9 @@ For deferred APIs, deployment notes, and post-v0 plans, see **[`docs/future.md`]
 - **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating is still manual/local-only.
 - Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking}`).
 - CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `model list/get/set`, and `thinking get/set`.
-- Default executor runs through pi SDK sessions with DBOS-backed durable run scheduling/recovery.
+- Default executor runs through pi SDK sessions with Postgres-backed durable run tracking and in-process scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
-- Strict global one-active-run-per-thread is enforced via DBOS partitioned queueing keyed by `thread_key`.
+- Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread pi session controllers; run dispatch/recovery is in-process and single-server-process scoped in v0.
 - Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/model`, `/thinking`, and `/auth`.
 - Model/thinking changes from Telegram button pickers return to the `/settings` panel with updated runtime state.
 - Outdated Telegram inline callbacks auto-recover by replacing the menu with the latest `/settings` panel.
@@ -35,7 +35,7 @@ Source of truth: **[`AGENTS.md`](AGENTS.md)**.
 - Server/API: Fastify + Zod + Pino
 - CLI: Commander
 - Agent/runtime: pi-coding-agent
-- Durable execution: DBOS Transact + Postgres
+- Durable run state: Postgres (`runs`, `message_ingest`, `thread_sessions`) + in-process scheduler
 - Telegram: grammY (polling first)
 - Quality/tooling: Biome + Vitest
 - Build: tsdown
@@ -87,7 +87,6 @@ Canonical layout (v0):
 
 ```text
 $JAGC_WORKSPACE_DIR/
-  workflows/          # required
   AGENTS.md           # recommended
   SYSTEM.md           # optional
   APPEND_SYSTEM.md    # optional

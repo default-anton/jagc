@@ -12,8 +12,8 @@ v0 is shipped as pre-alpha with:
 
 - Server: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth endpoints, model/runtime controls.
 - CLI: `health`, `message`, `run wait`, auth/model/thinking commands.
-- Runtime: pi SDK in-process sessions with DBOS durable scheduling.
-- Concurrency: strict global one-active-run-per-thread via DBOS partitioned queueing.
+- Runtime: pi SDK in-process sessions with Postgres-backed run state + in-process scheduling.
+- Concurrency: in-process dispatch + per-thread pi session turn control (`followUp` / `steer`); multi-process/global locking deferred.
 - Telegram: polling adapter for personal chats + button-based `/settings` `/model` `/thinking` `/auth`.
 
 Do not add implementation detail here unless it is deferred/future-looking.
