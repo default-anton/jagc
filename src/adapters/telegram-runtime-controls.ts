@@ -52,6 +52,18 @@ export class TelegramRuntimeControls {
     await this.showSettingsPanel(ctx);
   }
 
+  async handleNewCommand(ctx: Context): Promise<void> {
+    const threadControlService = this.options.threadControlService;
+    if (!threadControlService) {
+      await ctx.reply('Session reset is unavailable when JAGC_RUNNER is not pi.');
+      return;
+    }
+
+    const threadKey = telegramThreadKey(ctx.chat?.id);
+    await threadControlService.resetThreadSession(threadKey);
+    await ctx.reply('✅ Session reset. Your next message will start a new pi session.');
+  }
+
   async handleStaleCallback(ctx: Context): Promise<void> {
     await this.showSettingsPanel(ctx, '⚠️ This menu is outdated. Showing latest settings.');
   }

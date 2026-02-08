@@ -10,6 +10,7 @@ import {
   getOAuthLoginAttempt,
   getThreadRuntime,
   healthcheck,
+  resetThreadSession,
   sendMessage,
   setThreadModel,
   setThreadThinkingLevel,
@@ -73,6 +74,25 @@ program
         printJson(run);
       } else {
         console.log(run.run_id);
+      }
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+program
+  .command('new')
+  .description('reset thread session so the next message starts a fresh pi session')
+  .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
+  .option('--json', 'JSON output')
+  .action(async (options) => {
+    try {
+      const response = await resetThreadSession(apiUrl(program), options.threadKey);
+
+      if (options.json) {
+        printJson(response);
+      } else {
+        console.log(`thread:${response.thread_key} session reset`);
       }
     } catch (error) {
       exitWithError(error);

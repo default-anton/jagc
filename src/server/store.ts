@@ -47,6 +47,7 @@ export interface RunStore {
   markFailed(runId: string, errorMessage: string): Promise<void>;
   getThreadSession(threadKey: string): Promise<ThreadSessionRecord | null>;
   upsertThreadSession(threadKey: string, sessionId: string, sessionFile: string): Promise<ThreadSessionRecord>;
+  deleteThreadSession(threadKey: string): Promise<void>;
 }
 
 export class PostgresRunStore implements RunStore {
@@ -199,6 +200,10 @@ export class PostgresRunStore implements RunStore {
     }
 
     return mapThreadSessionRow(row);
+  }
+
+  async deleteThreadSession(threadKey: string): Promise<void> {
+    await this.pool.query('DELETE FROM thread_sessions WHERE thread_key = $1', [threadKey]);
   }
 
   private async getRunById(client: PoolClient, runId: string): Promise<RunRecord | null> {

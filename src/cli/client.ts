@@ -9,7 +9,9 @@ import {
   oauthLoginAttemptSchema,
   oauthOwnerHeaderName,
   type PostMessageRequest,
+  type ResetThreadSessionResponse,
   type RunResponse,
+  resetThreadSessionResponseSchema,
   runResponseSchema,
   type SetThreadModelRequest,
   type SetThreadThinkingRequest,
@@ -24,6 +26,7 @@ export type ApiAuthProvidersResponse = AuthProvidersResponse;
 export type ApiModelCatalogResponse = ModelCatalogResponse;
 export type ApiThreadRuntimeStateResponse = ThreadRuntimeStateResponse;
 export type ApiOAuthLoginAttemptResponse = OAuthLoginAttemptResponse;
+export type ApiResetThreadSessionResponse = ResetThreadSessionResponse;
 export type MessageRequest = PostMessageRequest;
 
 export async function sendMessage(apiUrl: string, payload: MessageRequest): Promise<ApiRunResponse> {
@@ -204,6 +207,14 @@ export async function setThreadThinkingLevel(
   return parseThreadRuntimeResponse(response);
 }
 
+export async function resetThreadSession(apiUrl: string, threadKey: string): Promise<ApiResetThreadSessionResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/session`, {
+    method: 'DELETE',
+  });
+
+  return parseResetThreadSessionResponse(response);
+}
+
 function oauthOwnerHeader(ownerKey: string): Record<string, string> {
   return {
     [oauthOwnerHeaderName]: ownerKey,
@@ -250,6 +261,20 @@ async function parseThreadRuntimeResponse(response: Response): Promise<ApiThread
   }
 
   return threadRuntimeStateSchema.parse(responseBody);
+}
+
+async function parseResetThreadSessionResponse(response: Response): Promise<ApiResetThreadSessionResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return resetThreadSessionResponseSchema.parse(responseBody);
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {

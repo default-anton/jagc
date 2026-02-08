@@ -11,7 +11,7 @@ This doc is the implementation snapshot (not design intent).
 
 - Core run lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
 - OAuth broker: `GET /v1/auth/providers`, `POST /v1/auth/providers/:provider/login`, `GET /v1/auth/logins/:attempt_id`, `POST /v1/auth/logins/:attempt_id/input`, `POST /v1/auth/logins/:attempt_id/cancel`
-- Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`
+- Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`, `DELETE /v1/threads/:thread_key/session`
 
 ### CLI
 
@@ -19,12 +19,12 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc model list|get|set`, `jagc thinking get|set`
+- `jagc new`, `jagc model list|get|set`, `jagc thinking get|set`
 
 ### Runtime/adapters
 
 - Executors: `echo` (deterministic), `pi` (real agent)
-- Telegram polling adapter (personal chats) with `/settings`, `/model`, `/thinking`, `/auth`
+- Telegram polling adapter (personal chats) with `/settings`, `/new`, `/model`, `/thinking`, `/auth`
 - Postgres persistence (`runs`, ingest idempotency, `thread_sessions`)
 - In-process run scheduler for dispatch/recovery (no external workflow engine)
 
@@ -93,6 +93,7 @@ Operational note:
 - Thread mapping: `thread_key = telegram:chat:<chat_id>`.
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
+- Telegram `/new` and API `DELETE /v1/threads/:thread_key/session` abort/dispose the current thread session, clear persisted `thread_sessions` mapping, and cause the next message to create a fresh pi session.
 - Adapter waits for terminal run status and replies with output/error.
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
 - After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.

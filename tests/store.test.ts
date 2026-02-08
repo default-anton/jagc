@@ -70,4 +70,15 @@ describe('PostgresRunStore', () => {
       sessionFile: '/tmp/session-1.jsonl',
     });
   });
+
+  test('deletes persisted thread session mapping', async () => {
+    const store = new PostgresRunStore(testDb.pool);
+    await store.init();
+
+    await store.upsertThreadSession('cli:default', 'session-1', '/tmp/session-1.jsonl');
+    await store.deleteThreadSession('cli:default');
+
+    const record = await store.getThreadSession('cli:default');
+    expect(record).toBeNull();
+  });
 });

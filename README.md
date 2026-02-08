@@ -15,12 +15,12 @@ For deferred APIs, deployment notes, and post-v0 plans, see **[`docs/future.md`]
 
 - **Pre-alpha.** Expect breaking changes.
 - **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating is still manual/local-only.
-- Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking}`).
-- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `model list/get/set`, and `thinking get/set`.
+- Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking,session}`).
+- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `new`, `model list/get/set`, and `thinking get/set`.
 - Default executor runs through pi SDK sessions with Postgres-backed durable run tracking and in-process scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread pi session controllers; run dispatch/recovery is in-process and single-server-process scoped in v0.
-- Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/model`, `/thinking`, and `/auth`.
+- Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/new`, `/model`, `/thinking`, and `/auth`.
 - Model/thinking changes from Telegram button pickers return to the `/settings` panel with updated runtime state.
 - Outdated Telegram inline callbacks auto-recover by replacing the menu with the latest `/settings` panel.
 - Telegram callback payload limits are enforced; over-limit model/auth options are hidden with an in-chat notice.
@@ -56,6 +56,7 @@ Shipped in v0:
   - Personal chats only
   - One active run per Telegram thread (`thread_key = telegram:chat:<chat_id>`)
   - Queued input behavior aligned with pi semantics (`steer` / `followUp`)
+  - `/new` resets the current Telegram thread's pi session; the next message creates a fresh session
 
 ### v0 acceptance behavior
 
@@ -132,6 +133,7 @@ By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and p
    - inspect provider/model catalog: `pnpm dev:cli model list --json`
    - inspect auth status / start OAuth login: `pnpm dev:cli auth providers --json` and `pnpm dev:cli auth login openai-codex`
    - inspect thread runtime controls: `pnpm dev:cli model get --thread-key cli:default --json` and `pnpm dev:cli thinking get --thread-key cli:default --json`
+   - reset thread session: `pnpm dev:cli new --thread-key cli:default --json`
 
 ### CLI runtime controls (v0)
 
@@ -142,6 +144,9 @@ jagc model list --json
 # read current thread model + thinking
 jagc model get --thread-key cli:default --json
 jagc thinking get --thread-key cli:default --json
+
+# reset current thread session (next message starts fresh)
+jagc new --thread-key cli:default --json
 
 # set model + thinking for a thread
 jagc model set openai/gpt-5 --thread-key cli:default --json

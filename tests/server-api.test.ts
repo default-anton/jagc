@@ -233,6 +233,10 @@ class FakeThreadControlService {
     return state;
   }
 
+  async resetThreadSession(threadKey: string) {
+    this.byThread.delete(threadKey);
+  }
+
   private ensure(threadKey: string) {
     const existing = this.byThread.get(threadKey);
     if (existing) {
@@ -599,7 +603,7 @@ describe('server API', () => {
     await app.close();
   });
 
-  test('thread model and thinking endpoints return 501 without thread control service', async () => {
+  test('thread model/thinking/session endpoints return 501 without thread control service', async () => {
     const { app } = await createTestApp(new TestExecutor(), {
       authService: new FakeAuthService(),
     });
@@ -622,10 +626,27 @@ describe('server API', () => {
 
     expect(modelResponse.statusCode).toBe(501);
 
+    const thinkingResponse = await app.inject({
+      method: 'PUT',
+      url: '/v1/threads/cli%3Adefault/thinking',
+      payload: {
+        thinking_level: 'high',
+      },
+    });
+
+    expect(thinkingResponse.statusCode).toBe(501);
+
+    const resetResponse = await app.inject({
+      method: 'DELETE',
+      url: '/v1/threads/cli%3Adefault/session',
+    });
+
+    expect(resetResponse.statusCode).toBe(501);
+
     await app.close();
   });
 
-  test('thread model and thinking endpoints update runtime state', async () => {
+  test('thread model/thinking/session endpoints update runtime state', async () => {
     const { app } = await createTestApp(new TestExecutor(), {
       authService: new FakeAuthService(),
       threadControlService: new FakeThreadControlService(),
@@ -671,6 +692,29 @@ describe('server API', () => {
     expect(setThinkingResponse.statusCode).toBe(200);
     expect(setThinkingResponse.json()).toMatchObject({
       thinking_level: 'high',
+    });
+
+    const resetResponse = await app.inject({
+      method: 'DELETE',
+      url: '/v1/threads/cli%3Adefault/session',
+    });
+
+    expect(resetResponse.statusCode).toBe(200);
+    expect(resetResponse.json()).toEqual({
+      thread_key: 'cli:default',
+      reset: true,
+    });
+
+    const getAfterReset = await app.inject({
+      method: 'GET',
+      url: '/v1/threads/cli%3Adefault/runtime',
+    });
+
+    expect(getAfterReset.statusCode).toBe(200);
+    expect(getAfterReset.json()).toMatchObject({
+      thread_key: 'cli:default',
+      model: { provider: 'openai', model_id: 'gpt-4o-mini' },
+      thinking_level: 'medium',
     });
 
     await app.close();

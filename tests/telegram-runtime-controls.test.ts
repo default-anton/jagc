@@ -18,6 +18,7 @@ interface UiCall {
 class FakeThreadControlService implements ThreadControlService {
   readonly modelSetCalls: Array<{ threadKey: string; provider: string; modelId: string }> = [];
   readonly thinkingSetCalls: Array<{ threadKey: string; thinkingLevel: ThinkingLevel }> = [];
+  readonly resetCalls: string[] = [];
 
   constructor(private state: ThreadRuntimeState) {}
 
@@ -47,6 +48,10 @@ class FakeThreadControlService implements ThreadControlService {
     };
 
     return this.state;
+  }
+
+  async resetThreadSession(threadKey: string): Promise<void> {
+    this.resetCalls.push(threadKey);
   }
 }
 
@@ -310,6 +315,28 @@ describe('TelegramRuntimeControls', () => {
     await controls.handleModelCommand(ctx, '');
 
     expect(lastText(replies)).toBe('Model controls are unavailable when JAGC_RUNNER is not pi.');
+  });
+
+  test('new command resets thread session', async () => {
+    const threadControlService = new FakeThreadControlService(createState());
+    const controls = new TelegramRuntimeControls({
+      threadControlService,
+    });
+
+    const { ctx, replies } = createContext();
+    await controls.handleNewCommand(ctx);
+
+    expect(threadControlService.resetCalls).toEqual(['telegram:chat:101']);
+    expect(lastText(replies)).toBe('✅ Session reset. Your next message will start a new pi session.');
+  });
+
+  test('new command reports unavailable when pi thread controls are not configured', async () => {
+    const controls = new TelegramRuntimeControls({});
+    const { ctx, replies } = createContext();
+
+    await controls.handleNewCommand(ctx);
+
+    expect(lastText(replies)).toBe('Session reset is unavailable when JAGC_RUNNER is not pi.');
   });
 
   test('settings keyboard omits refresh button', async () => {

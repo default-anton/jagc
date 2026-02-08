@@ -76,6 +76,31 @@ describe('parseTelegramCallbackData', () => {
   });
 });
 
+describe('TelegramPollingAdapter commands', () => {
+  test('/new resets thread session and confirms next message starts fresh', async () => {
+    const threadControlService = new FakeThreadControlService(createRuntimeState());
+    const adapter = new TelegramPollingAdapter({
+      botToken: '123456:TESTTOKEN',
+      runService: createRunServiceStub(),
+      threadControlService,
+    });
+
+    const { ctx, replies } = createTextContext('/new');
+    const handleTextMessage = (
+      adapter as unknown as { handleTextMessage(messageContext: Context): Promise<void> }
+    ).handleTextMessage.bind(adapter);
+    await handleTextMessage(ctx);
+
+    expect(threadControlService.resetCalls).toEqual(['telegram:chat:101']);
+    expect(replies).toEqual([
+      {
+        text: '✅ Session reset. Your next message will start a new pi session.',
+        options: undefined,
+      },
+    ]);
+  });
+});
+
 describe('TelegramPollingAdapter callback recovery', () => {
   test('invalid callback data recovers to the latest settings panel', async () => {
     const adapter = new TelegramPollingAdapter({
@@ -105,6 +130,8 @@ interface UiCall {
 }
 
 class FakeThreadControlService implements ThreadControlService {
+  readonly resetCalls: string[] = [];
+
   constructor(private readonly state: ThreadRuntimeState) {}
 
   async getThreadRuntimeState(): Promise<ThreadRuntimeState> {
@@ -117,6 +144,10 @@ class FakeThreadControlService implements ThreadControlService {
 
   async setThreadThinkingLevel(): Promise<ThreadRuntimeState> {
     return this.state;
+  }
+
+  async resetThreadSession(threadKey: string): Promise<void> {
+    this.resetCalls.push(threadKey);
   }
 }
 
@@ -143,6 +174,38 @@ function createRunServiceStub(): RunService {
       throw new Error('not implemented in this test');
     },
   } as unknown as RunService;
+}
+
+function createTextContext(text: string): {
+  ctx: Context;
+  replies: UiCall[];
+} {
+  const replies: UiCall[] = [];
+
+  const ctx = {
+    chat: {
+      id: 101,
+      type: 'private',
+    },
+    from: {
+      id: 202,
+    },
+    message: {
+      text,
+    },
+    update: {
+      update_id: 1,
+    },
+    async reply(replyText: string, options?: unknown) {
+      replies.push({ text: replyText, options });
+      return undefined;
+    },
+  };
+
+  return {
+    ctx: ctx as unknown as Context,
+    replies,
+  };
 }
 
 function createCallbackContext(data: string): {

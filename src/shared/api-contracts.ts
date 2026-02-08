@@ -136,6 +136,11 @@ export const setThreadThinkingRequestSchema = z.object({
   thinking_level: thinkingLevelSchema,
 });
 
+export const resetThreadSessionResponseSchema = z.object({
+  thread_key: z.string(),
+  reset: z.literal(true),
+});
+
 export type PostMessageRequest = z.infer<typeof postMessageRequestSchema>;
 export type RunResponse = z.infer<typeof runResponseSchema>;
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
@@ -147,3 +152,4 @@ export type SubmitOAuthLoginInputRequest = z.infer<typeof submitOAuthLoginInputR
 export type ThreadRuntimeStateResponse = z.infer<typeof threadRuntimeStateSchema>;
 export type SetThreadModelRequest = z.infer<typeof setThreadModelRequestSchema>;
 export type SetThreadThinkingRequest = z.infer<typeof setThreadThinkingRequestSchema>;
+export type ResetThreadSessionResponse = z.infer<typeof resetThreadSessionResponseSchema>;

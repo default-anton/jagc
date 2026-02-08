@@ -200,6 +200,8 @@ class InMemoryRunStore implements RunStore {
   ): Promise<ThreadSessionRecord> {
     throw new Error('not implemented for this test');
   }
+
+  async deleteThreadSession(_threadKey: string): Promise<void> {}
 }
 
 function runRecord(runId: string, threadKey: string, deliveryMode: DeliveryMode = 'followUp'): RunRecord {

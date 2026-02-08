@@ -149,6 +149,10 @@ export class TelegramPollingAdapter {
           await this.runtimeControls.handleSettingsCommand(ctx);
           return;
         }
+        case 'new': {
+          await this.runtimeControls.handleNewCommand(ctx);
+          return;
+        }
         case 'model': {
           await this.runtimeControls.handleModelCommand(ctx, command.args);
           return;
@@ -348,6 +352,7 @@ function helpText(): string {
   return [
     'jagc Telegram commands:',
     '/settings — open runtime settings',
+    '/new — reset this chat session (next message starts fresh)',
     '/model — open model picker',
     '/thinking — open thinking picker',
     '/auth — open provider login controls',

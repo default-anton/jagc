@@ -22,6 +22,7 @@ import {
   oauthOwnerHeaderName,
   postMessageRequestSchema,
   type RunResponse,
+  resetThreadSessionResponseSchema,
   runParamsSchema,
   setThreadModelRequestSchema,
   setThreadThinkingRequestSchema,
@@ -53,6 +54,7 @@ interface AppOptions {
     getThreadRuntimeState(threadKey: string): Promise<ThreadRuntimeState>;
     setThreadModel(threadKey: string, provider: string, modelId: string): Promise<ThreadRuntimeState>;
     setThreadThinkingLevel(threadKey: string, thinkingLevel: SupportedThinkingLevel): Promise<ThreadRuntimeState>;
+    resetThreadSession(threadKey: string): Promise<void>;
   };
   logger?: boolean | object;
 }
@@ -317,6 +319,31 @@ export function createApp(options: AppOptions): FastifyInstance {
       return reply.send(threadRuntimeStateResponse(state));
     } catch (error) {
       return reply.status(400).send(errorResponse('thread_thinking_error', toErrorMessage(error)));
+    }
+  });
+
+  app.delete('/v1/threads/:thread_key/session', async (request, reply) => {
+    if (!options.threadControlService) {
+      return reply
+        .status(501)
+        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
+    }
+
+    const paramsResult = threadParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
+    }
+
+    try {
+      await options.threadControlService.resetThreadSession(paramsResult.data.thread_key);
+      return reply.send(
+        resetThreadSessionResponseSchema.parse({
+          thread_key: paramsResult.data.thread_key,
+          reset: true,
+        }),
+      );
+    } catch (error) {
+      return reply.status(400).send(errorResponse('thread_session_reset_error', toErrorMessage(error)));
     }
   });
 
