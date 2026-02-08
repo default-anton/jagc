@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'vitest';
 
-import { InMemoryRunStore } from '../src/server/store.js';
+import { PostgresRunStore } from '../src/server/store.js';
+import { usePostgresTestDb } from './helpers/postgres-test-db.js';
 
-describe('InMemoryRunStore', () => {
+const testDb = usePostgresTestDb();
+
+describe('PostgresRunStore', () => {
   test('markFailed rejects when run is already succeeded', async () => {
-    const store = new InMemoryRunStore();
+    const store = new PostgresRunStore(testDb.pool);
     await store.init();
 
     const created = await store.createRun({
@@ -22,7 +25,7 @@ describe('InMemoryRunStore', () => {
   });
 
   test('markSucceeded rejects when run is missing', async () => {
-    const store = new InMemoryRunStore();
+    const store = new PostgresRunStore(testDb.pool);
     await store.init();
 
     await expect(store.markSucceeded('missing-run-id', { type: 'message', text: 'hello' })).rejects.toThrow(
@@ -31,7 +34,7 @@ describe('InMemoryRunStore', () => {
   });
 
   test('listRunningRuns returns only running runs', async () => {
-    const store = new InMemoryRunStore();
+    const store = new PostgresRunStore(testDb.pool);
     await store.init();
 
     const first = await store.createRun({
@@ -55,7 +58,7 @@ describe('InMemoryRunStore', () => {
   });
 
   test('persists thread session mapping', async () => {
-    const store = new InMemoryRunStore();
+    const store = new PostgresRunStore(testDb.pool);
     await store.init();
 
     await store.upsertThreadSession('cli:default', 'session-1', '/tmp/session-1.jsonl');

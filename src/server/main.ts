@@ -16,13 +16,12 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR);
-  if (bootstrapResult.copiedAuth || bootstrapResult.copiedSettings) {
+  if (bootstrapResult.createdDirectory) {
     console.info(
       JSON.stringify({
         event: 'workspace_bootstrap',
         workspace_dir: config.JAGC_WORKSPACE_DIR,
-        copied_auth: bootstrapResult.copiedAuth,
-        copied_settings: bootstrapResult.copiedSettings,
+        created_directory: true,
       }),
     );
   }

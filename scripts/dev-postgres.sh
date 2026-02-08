@@ -10,16 +10,17 @@ PGUSER="${JAGC_PGUSER:-postgres}"
 PGDATABASE="${JAGC_PGDATABASE:-jagc}"
 
 usage() {
-  cat <<EOF
-Usage: scripts/dev-postgres.sh <start|stop|status|createdb>
+  cat <<'EOF'
+Usage: scripts/dev-postgres.sh <start|stop|status|createdb|drop-testdb>
 
 Environment overrides:
-  JAGC_PGDATA_DIR   (default: .local/pgdata)
-  JAGC_PGLOG_FILE   (default: .local/postgres.log)
-  JAGC_PGHOST       (default: 127.0.0.1)
-  JAGC_PGPORT       (default: 5432)
-  JAGC_PGUSER       (default: postgres)
-  JAGC_PGDATABASE   (default: jagc)
+  JAGC_PGDATA_DIR    (default: .local/pgdata)
+  JAGC_PGLOG_FILE    (default: .local/postgres.log)
+  JAGC_PGHOST        (default: 127.0.0.1)
+  JAGC_PGPORT        (default: 5432)
+  JAGC_PGUSER        (default: postgres)
+  JAGC_PGDATABASE    (default: jagc)
+  JAGC_TEST_DATABASE (default: ${JAGC_PGDATABASE}_test)
 EOF
 }
 
@@ -70,7 +71,10 @@ create_database() {
   start_postgres
 
   local db_exists_output
-  db_exists_output="$(mise exec postgres@18.1 -- psql -X -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -tAc "SELECT 1 FROM pg_database WHERE datname='$PGDATABASE'")"
+  local database_literal
+  database_literal="$(quote_literal "$PGDATABASE")"
+
+  db_exists_output="$(mise exec postgres@18.1 -- psql -X -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -tAc "SELECT 1 FROM pg_database WHERE datname = $database_literal")"
 
   if [[ "$db_exists_output" == *"1"* ]]; then
     echo "database $PGDATABASE already exists"
@@ -79,6 +83,46 @@ create_database() {
 
   mise exec postgres@18.1 -- createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE"
   echo "created database $PGDATABASE"
+}
+
+quote_identifier() {
+  local value="$1"
+  value="${value//\"/\"\"}"
+  printf '"%s"' "$value"
+}
+
+quote_literal() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
+drop_test_databases() {
+  ensure_cluster
+  start_postgres
+
+  local test_database_base="${JAGC_TEST_DATABASE:-${PGDATABASE}_test}"
+  local test_database_base_literal
+  test_database_base_literal="$(quote_literal "$test_database_base")"
+
+  local databases
+  databases="$(mise exec postgres@18.1 -- psql -X -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -tAc "SELECT datname FROM pg_database WHERE datname = $test_database_base_literal OR datname LIKE replace($test_database_base_literal, '_', '\\_') || '\\_%' ESCAPE '\\';")"
+
+  if [[ -z "${databases//[$'\n''\t'' ']/}" ]]; then
+    echo "no test databases found for base $test_database_base"
+    return
+  fi
+
+  while IFS= read -r db_name; do
+    if [[ -z "$db_name" ]]; then
+      continue
+    fi
+
+    local quoted
+    quoted="$(quote_identifier "$db_name")"
+    mise exec postgres@18.1 -- psql -X -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -tAc "DROP DATABASE IF EXISTS $quoted WITH (FORCE)"
+    echo "dropped database $db_name"
+  done <<<"$databases"
 }
 
 main() {
@@ -96,6 +140,9 @@ main() {
       ;;
     createdb)
       create_database
+      ;;
+    drop-testdb)
+      drop_test_databases
       ;;
     *)
       usage
