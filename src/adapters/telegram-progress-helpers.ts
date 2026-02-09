@@ -1,5 +1,48 @@
 export const maxProgressToolLabelChars = 180;
 
+const progressStartupLines = [
+  'thinking...',
+  'pondering...',
+  'pontificating...',
+  'ruminating...',
+  'scheming...',
+  'noodling...',
+  'conjuring...',
+  'wizarding...',
+  'calculating...',
+  'brainstormulating...',
+  'plotting...',
+  'synthesizing...',
+  'brainweaving...',
+  'daydreaming...',
+  'freestyling...',
+  'juggling...',
+  'moonwalking...',
+  'spelunking...',
+  'tinkering...',
+  'orchestrating...',
+  'harmonizing...',
+  'improvising...',
+  'scribbling...',
+  'whittling...',
+  'refactoring...',
+  'calibrating...',
+  'optimizing...',
+  'triangulating...',
+  'decoding...',
+  'untangling...',
+  'stargazing...',
+  'alchemizing...',
+  'clockworking...',
+  'mapmaking...',
+  'narrating...',
+  'riffing...',
+  'ideating...',
+  'debugomancy...',
+  'foreshadowing...',
+  'compiling...',
+];
+
 export function summarizeToolLabel(
   toolName: string,
   payload: unknown,
@@ -11,6 +54,12 @@ export function summarizeToolLabel(
   }
 
   return truncateLine(`${toolName} ${argsHint}`, maxChars);
+}
+
+export function pickProgressStartupLine(randomValue: number = Math.random()): string {
+  const normalized = Number.isFinite(randomValue) ? randomValue - Math.floor(randomValue) : 0;
+  const index = Math.min(progressStartupLines.length - 1, Math.floor(normalized * progressStartupLines.length));
+  return progressStartupLines[index] ?? progressStartupLines[0] ?? 'thinking...';
 }
 
 export function normalizePreviewDelta(text: string): string {
@@ -41,52 +90,6 @@ export function truncateMessage(text: string, maxChars: number): string {
 export function truncateLine(text: string, maxChars: number): string {
   const normalized = text.replaceAll('\n', ' ').trim();
   return truncateMessage(normalized, maxChars);
-}
-
-export function formatDuration(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  if (minutes <= 0) {
-    return `${seconds}s`;
-  }
-
-  return `${minutes}m ${seconds}s`;
-}
-
-export function renderProgressStatusLabel(options: {
-  phase: 'queued' | 'running' | 'succeeded' | 'failed';
-  isLongRunning: boolean;
-  currentToolLabel: string | null;
-  lastThinkingAt: number;
-  now: number;
-}): { text: string } {
-  if (options.phase === 'queued') {
-    return { text: 'queued' };
-  }
-
-  if (options.phase === 'succeeded') {
-    return { text: 'done' };
-  }
-
-  if (options.phase === 'failed') {
-    return { text: 'failed' };
-  }
-
-  if (options.currentToolLabel) {
-    return { text: 'using a tool' };
-  }
-
-  if (options.now - options.lastThinkingAt <= 8_000 && options.lastThinkingAt > 0) {
-    return { text: 'thinking' };
-  }
-
-  if (options.isLongRunning) {
-    return { text: 'running in background' };
-  }
-
-  return { text: 'working' };
 }
 
 export function isEditMessageGoneError(error: unknown): boolean {

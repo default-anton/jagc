@@ -117,10 +117,12 @@ describe('TelegramPollingAdapter message flow integration', () => {
 
         const progressMessage = await clone.waitForBotCall(
           'sendMessage',
-          (call) => typeof call.payload.text === 'string' && call.payload.text.includes('queued'),
+          (call) => isFunnyProgressLine(call.payload.text),
           4_000,
         );
-        expect(progressMessage.payload.text).toContain('queued');
+
+        const startupProgressLine = String(progressMessage.payload.text ?? '');
+        expect(isFunnyProgressLine(startupProgressLine)).toBe(true);
 
         const typingCall = await clone.waitForBotCall('sendChatAction', () => true, 4_000);
         expect(typingCall.payload.action).toBe('typing');
@@ -135,6 +137,7 @@ describe('TelegramPollingAdapter message flow integration', () => {
         );
         expect(progressEdit.payload.text).toContain('> bash cmd="pnpm test"');
         expect(progressEdit.payload.text).toContain('~');
+        expect(progressEdit.payload.text).not.toContain(startupProgressLine);
         expect(progressEdit.payload.text).not.toContain('Now:');
         expect(progressEdit.payload.text).not.toContain('Recent tool calls:');
         expect(progressEdit.payload.text).not.toContain('Thinking:');
@@ -221,6 +224,14 @@ describe('TelegramPollingAdapter message flow integration', () => {
           text: 'show latest thinking preview',
         });
 
+        const progressMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => isFunnyProgressLine(call.payload.text),
+          4_000,
+        );
+
+        const startupProgressLine = String(progressMessage.payload.text ?? '');
+
         const progressEdit = await clone.waitForBotCall(
           'editMessageText',
           (call) =>
@@ -231,6 +242,7 @@ describe('TelegramPollingAdapter message flow integration', () => {
 
         expect(progressEdit.payload.text).toContain('~ **Listing directories');
         expect(progressEdit.payload.text).toContain('> bash cmd="find . -maxdepth 1 -type d"');
+        expect(progressEdit.payload.text).not.toContain(startupProgressLine);
 
         const finalMessage = await clone.waitForBotCall(
           'sendMessage',
@@ -426,13 +438,18 @@ describe('TelegramPollingAdapter message flow integration', () => {
         progressEventsByPoll: {
           1: [progressEvent('run-edit-retry', 'started')],
           2: [
-            progressEvent('run-edit-retry', 'assistant_text_delta', {
-              delta: 'progress text',
+            progressEvent('run-edit-retry', 'tool_execution_start', {
+              toolCallId: 'retry-tool',
+              toolName: 'bash',
+              args: { command: 'echo retry' },
             }),
           ],
           3: [
-            progressEvent('run-edit-retry', 'assistant_text_delta', {
-              delta: 'more progress text',
+            progressEvent('run-edit-retry', 'tool_execution_end', {
+              toolCallId: 'retry-tool',
+              toolName: 'bash',
+              result: { ok: true },
+              isError: false,
             }),
           ],
         },
@@ -784,6 +801,10 @@ describe('TelegramPollingAdapter message flow integration', () => {
     }
   });
 });
+
+function isFunnyProgressLine(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z]+\.\.\.$/u.test(value);
+}
 
 class StubRunService {
   readonly ingests: MessageIngest[] = [];

@@ -17,7 +17,8 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Telegram progress updates no longer show status headers like `queued`, `working`, or `done`; they now start with a short single-word placeholder and drop it as soon as the first thinking/tool snippet arrives.
+- Expanded Telegram startup placeholder variety with a larger set of creative single-word lines while preserving the same lowercase `word...` format.
 
 ### Fixed
 

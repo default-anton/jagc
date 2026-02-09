@@ -6,11 +6,10 @@ import type { RunProgressEvent } from '../shared/run-progress.js';
 import { extractTelegramRetryAfterSeconds, isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
 import {
   appendTail,
-  formatDuration,
   isEditMessageGoneError,
   maxProgressToolLabelChars,
   normalizePreviewDelta,
-  renderProgressStatusLabel,
+  pickProgressStartupLine,
   summarizeToolLabel,
   truncateLine,
   truncateMessage,
@@ -42,16 +41,16 @@ const maxDeltaChars = 200;
 const minThinkingLogIntervalMs = 1_800;
 
 export class TelegramRunProgressReporter {
-  private readonly startedAt = Date.now();
   private readonly messageLimit: number;
   private readonly minEditIntervalMs: number;
   private readonly typingIntervalMs: number;
+  private readonly startupLine = pickProgressStartupLine();
 
   private phase: ProgressPhase = 'queued';
+  private showStartupLine = true;
   private isLongRunning = false;
   private terminalErrorMessage: string | null = null;
 
-  private lastThinkingAt = 0;
   private lastThinkingLoggedAt = 0;
   private thinkingPreview = '';
   private hasPendingThinkingPreview = false;
@@ -140,10 +139,10 @@ export class TelegramRunProgressReporter {
       case 'assistant_thinking_delta': {
         this.phase = 'running';
         const now = Date.now();
-        this.lastThinkingAt = now;
 
         const delta = normalizePreviewDelta(event.delta);
         if (delta.trim().length > 0) {
+          this.showStartupLine = false;
           this.thinkingPreview = appendTail(this.thinkingPreview, delta.slice(-maxDeltaChars), maxThinkingPreviewChars);
           this.hasPendingThinkingPreview = true;
           if (now - this.lastThinkingLoggedAt >= minThinkingLogIntervalMs) {
@@ -154,6 +153,7 @@ export class TelegramRunProgressReporter {
       }
       case 'tool_execution_start': {
         this.phase = 'running';
+        this.showStartupLine = false;
         const label = summarizeToolLabel(event.toolName, event.args);
         this.toolLabelsByCallId.set(event.toolCallId, label);
         this.currentTool = {
@@ -169,6 +169,7 @@ export class TelegramRunProgressReporter {
       }
       case 'tool_execution_end': {
         this.phase = 'running';
+        this.showStartupLine = false;
         const label = this.toolLabelsByCallId.get(event.toolCallId) ?? summarizeToolLabel(event.toolName, undefined);
         this.toolLabelsByCallId.delete(event.toolCallId);
 
@@ -413,17 +414,12 @@ export class TelegramRunProgressReporter {
   }
 
   private renderProgressText(): string {
-    const now = Date.now();
-    const elapsed = formatDuration(now - this.startedAt);
-    const status = renderProgressStatusLabel({
-      phase: this.phase,
-      isLongRunning: this.isLongRunning,
-      currentToolLabel: this.currentTool?.label ?? null,
-      lastThinkingAt: this.lastThinkingAt,
-      now,
-    });
+    const lines: string[] = [];
 
-    const lines: string[] = [`${status.text} · ${elapsed}`];
+    if (this.showStartupLine) {
+      lines.push(this.startupLine);
+    }
+
     lines.push(...this.eventLogLines);
 
     if (this.isLongRunning && this.phase === 'running') {
@@ -432,6 +428,10 @@ export class TelegramRunProgressReporter {
 
     if (this.phase === 'failed' && this.terminalErrorMessage) {
       lines.push(`error: ${truncateLine(this.terminalErrorMessage, 240)}`);
+    }
+
+    if (lines.length === 0) {
+      lines.push('...');
     }
 
     return this.renderTrimmedLines(lines);

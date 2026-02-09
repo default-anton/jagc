@@ -79,6 +79,7 @@ jagc model set <provider/model> --thread-key cli:default --json
 - Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
 - CLI: `health`, `message`, `run wait`, `new`, `model list|get|set`, `thinking get|set`, `auth providers|login`
 - Telegram polling adapter (personal chats) with `/settings`, `/new`, `/model`, `/thinking`, `/auth`
+- Telegram progress stream shows tool/thinking snippets; before the first snippet, a short placeholder line (for faster feedback)
 - Runtime semantics: same-thread `followUp` (default) and explicit `steer`
 - In-process scheduling + SQLite-backed recovery after restart
 
