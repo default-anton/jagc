@@ -17,6 +17,20 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
+- None.
+
+### Fixed
+
+- None.
+
+## [0.1.5] - 2026-02-09
+
+### Added
+
+- None.
+
+### Changed
+
 - Release workflow trusted-publish path now unsets token env only within the publish step (instead of exporting empty token env globally), while still failing fast if token auth is configured.
 
 ### Fixed
