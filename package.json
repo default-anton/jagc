@@ -27,6 +27,8 @@
     "defaults/AGENTS.md",
     "defaults/SYSTEM.md",
     "defaults/settings.json",
+    "defaults/skills",
+    "defaults/extensions",
     "migrations",
     "README.md",
     "LICENSE",

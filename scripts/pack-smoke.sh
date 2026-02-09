@@ -25,6 +25,11 @@ PACK_OUTPUT="$(npm pack --pack-destination "$TMP_DIR")"
 TARBALL_NAME="$(echo "$PACK_OUTPUT" | tail -n 1)"
 TARBALL_PATH="$TMP_DIR/$TARBALL_NAME"
 
+if ! tar -tf "$TARBALL_PATH" | rg -q '^package/defaults/skills/agents-md/SKILL\.md$'; then
+  echo "pack smoke tarball missing defaults/skills payload" >&2
+  exit 1
+fi
+
 npm install -g --prefix "$PREFIX_DIR" "$TARBALL_PATH" >/dev/null
 
 CLI_PATH="$PREFIX_DIR/bin/jagc"
@@ -46,6 +51,11 @@ done
 
 if ! curl -sf "$API_URL/healthz" >/dev/null; then
   echo "pack smoke server failed to start; see $SERVER_LOG_FILE" >&2
+  exit 1
+fi
+
+if [[ ! -f "$WORKSPACE_DIR/skills/agents-md/SKILL.md" ]]; then
+  echo "pack smoke workspace bootstrap missing skills payload" >&2
   exit 1
 fi
 

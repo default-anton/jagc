@@ -12,11 +12,11 @@ This project follows a readable, sectioned changelog format with a permanent **U
 
 ### Changed
 
-- _None yet._
+- `pnpm test:pack` now asserts packaged defaults include `defaults/skills/**` and verifies workspace bootstrap creates `skills/*` from bundled defaults.
 
 ### Fixed
 
-- _None yet._
+- npm package contents now include `defaults/skills/**` (and `defaults/extensions/**`), restoring default skill bootstrap for fresh installs.
 
 ## [0.1.0] - 2026-02-09
 
