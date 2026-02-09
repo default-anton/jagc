@@ -17,6 +17,20 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
+- None.
+
+### Fixed
+
+- None.
+
+## [0.1.6] - 2026-02-09
+
+### Added
+
+- None.
+
+### Changed
+
 - Release workflow trusted-publish step now strips npmrc token lines and unsets `NODE_AUTH_TOKEN` before `npm publish`, while failing only if `NPM_TOKEN` is explicitly configured.
 
 ### Fixed
