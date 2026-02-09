@@ -10,6 +10,7 @@ This README is intentionally short and v0-focused.
 
 For current implemented architecture, see **[`docs/architecture.md`](docs/architecture.md)**.
 For deferred APIs, deployment notes, and post-v0 plans, see **[`docs/future.md`](docs/future.md)**.
+For testing loops (including Telegram behavioral polling clone), see **[`docs/testing.md`](docs/testing.md)**.
 
 ## Status
 

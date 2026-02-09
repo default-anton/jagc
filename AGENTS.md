@@ -4,6 +4,7 @@
 
 - Read `README.md` first for the current operator-facing contract.
 - Read `docs/architecture.md` for implemented behavior. Treat `docs/future.md` as historical/deferred notes.
+- Read `docs/testing.md` for canonical test loops (especially Telegram behavioral clone coverage).
 - Run `mise install` at repo root when tools are missing or after `.tool-versions` changes.
 - If `mise install` fails, follow `docs/tooling.md`.
 
@@ -15,6 +16,8 @@
 - Stop local Postgres: `pnpm db:stop`
 - Fast end-to-end smoke (echo runner): `pnpm smoke`
 - Smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
+- Full non-smoke test suite (includes Telegram behavioral clone tests): `pnpm test`
+- Focused Telegram loop (optional while iterating): `pnpm test:telegram`
 - Local release gate before handoff: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
 
 ## Non-obvious invariants (do not change accidentally)
@@ -39,4 +42,5 @@
 ## Docs update rule
 
 - If behavior/contracts change, update `README.md` and `docs/architecture.md` in the same change.
+- If test feedback loops change, update `docs/testing.md` in the same change.
 - Keep this file terse; move niche instructions to subtree `AGENTS.md` files.
