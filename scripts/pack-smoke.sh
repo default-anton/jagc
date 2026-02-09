@@ -25,13 +25,16 @@ PACK_OUTPUT="$(npm pack --pack-destination "$TMP_DIR")"
 TARBALL_NAME="$(echo "$PACK_OUTPUT" | tail -n 1)"
 TARBALL_PATH="$TMP_DIR/$TARBALL_NAME"
 
+TARBALL_CONTENTS_FILE="$TMP_DIR/tarball-contents.txt"
+tar -tf "$TARBALL_PATH" >"$TARBALL_CONTENTS_FILE"
+
 if command -v rg >/dev/null 2>&1; then
-  if ! tar -tf "$TARBALL_PATH" | rg -q '^package/defaults/skills/agents-md/SKILL\.md$'; then
+  if ! rg -q '^package/defaults/skills/agents-md/SKILL\.md$' "$TARBALL_CONTENTS_FILE"; then
     echo "pack smoke tarball missing defaults/skills payload" >&2
     exit 1
   fi
 else
-  if ! tar -tf "$TARBALL_PATH" | grep -q '^package/defaults/skills/agents-md/SKILL\.md$'; then
+  if ! grep -q '^package/defaults/skills/agents-md/SKILL\.md$' "$TARBALL_CONTENTS_FILE"; then
     echo "pack smoke tarball missing defaults/skills payload" >&2
     exit 1
   fi

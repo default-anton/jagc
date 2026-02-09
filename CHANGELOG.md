@@ -23,6 +23,20 @@ All notable changes to `jagc` are documented here.
 
 - None.
 
+## [0.1.3] - 2026-02-09
+
+### Added
+
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- `scripts/pack-smoke.sh` now checks tarball contents from a captured file instead of a `tar | grep` pipe, avoiding `pipefail` false negatives in CI.
+
 ## [0.1.2] - 2026-02-09
 
 ### Added
