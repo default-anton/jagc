@@ -100,7 +100,7 @@ $JAGC_WORKSPACE_DIR/
   themes/             # optional
   tools/              # optional
   jagc.json           # optional
-  settings.json       # optional (pi workspace settings)
+  settings.json       # auto-created on first startup (pi workspace settings + default packages)
   .gitignore          # auto-managed: .sessions/, auth.json, git/
 ```
 
@@ -120,7 +120,7 @@ $JAGC_WORKSPACE_DIR/
 
 Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
-By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. On startup it ensures the directory exists, creates `SYSTEM.md` and `AGENTS.md` from built-in markdown templates if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, and `git/`. It does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. On startup it ensures the directory exists, creates `SYSTEM.md`, `AGENTS.md`, and `settings.json` from built-in templates if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, and `git/`. The default `settings.json` pre-installs `git:github.com/default-anton/pi-librarian` and `git:github.com/default-anton/pi-subdir-context`; users can edit/remove them later. jagc still does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
 
 ## Quick start (dev)
 

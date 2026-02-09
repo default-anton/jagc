@@ -31,7 +31,8 @@ This doc is the implementation snapshot (not design intent).
 ## Workspace bootstrap
 
 - Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
-- Bootstrap creates default `SYSTEM.md` and `AGENTS.md` files from repo markdown templates when missing (never overwrites existing files).
+- Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (never overwrites existing files).
+- Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
 - Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, and `git/` entries.
 
 ## Request/execution flow

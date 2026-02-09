@@ -17,6 +17,10 @@ const defaultWorkspaceFiles = [
     name: 'AGENTS.md',
     templatePath: workspaceTemplatePath('AGENTS.md'),
   },
+  {
+    name: 'settings.json',
+    templatePath: workspaceTemplatePath('settings.json'),
+  },
 ] as const;
 
 export async function bootstrapAgentDir(agentDir: string): Promise<AgentDirBootstrapResult> {
