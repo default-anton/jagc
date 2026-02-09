@@ -25,9 +25,16 @@ PACK_OUTPUT="$(npm pack --pack-destination "$TMP_DIR")"
 TARBALL_NAME="$(echo "$PACK_OUTPUT" | tail -n 1)"
 TARBALL_PATH="$TMP_DIR/$TARBALL_NAME"
 
-if ! tar -tf "$TARBALL_PATH" | rg -q '^package/defaults/skills/agents-md/SKILL\.md$'; then
-  echo "pack smoke tarball missing defaults/skills payload" >&2
-  exit 1
+if command -v rg >/dev/null 2>&1; then
+  if ! tar -tf "$TARBALL_PATH" | rg -q '^package/defaults/skills/agents-md/SKILL\.md$'; then
+    echo "pack smoke tarball missing defaults/skills payload" >&2
+    exit 1
+  fi
+else
+  if ! tar -tf "$TARBALL_PATH" | grep -q '^package/defaults/skills/agents-md/SKILL\.md$'; then
+    echo "pack smoke tarball missing defaults/skills payload" >&2
+    exit 1
+  fi
 fi
 
 npm install -g --prefix "$PREFIX_DIR" "$TARBALL_PATH" >/dev/null

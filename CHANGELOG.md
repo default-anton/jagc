@@ -23,6 +23,20 @@ All notable changes to `jagc` are documented here.
 
 - None.
 
+## [0.1.2] - 2026-02-09
+
+### Added
+
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- `scripts/pack-smoke.sh` now falls back to `grep` when `rg` is unavailable, so `pnpm release:gate` works on stock GitHub Actions runners.
+
 ## [0.1.1] - 2026-02-09
 
 ### Added
