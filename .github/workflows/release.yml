@@ -32,7 +32,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -44,6 +43,30 @@ jobs:
 
       - name: Release gate
         run: pnpm release:gate
+
+      - name: Enforce trusted publishing mode
+        run: |
+          {
+            echo "NODE_AUTH_TOKEN="
+            echo "NPM_TOKEN="
+          } >> "$GITHUB_ENV"
+
+          if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "${NPM_CONFIG_USERCONFIG}" ]; then
+            awk '!/_authToken/' "${NPM_CONFIG_USERCONFIG}" > /tmp/npmrc.trusted
+            mv /tmp/npmrc.trusted "${NPM_CONFIG_USERCONFIG}"
+          fi
+
+      - name: Verify trusted publishing preconditions
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ] || [ -n "${NPM_TOKEN:-}" ]; then
+            echo "::error::Trusted publishing requires NODE_AUTH_TOKEN and NPM_TOKEN to be unset."
+            exit 1
+          fi
+
+          if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "${NPM_CONFIG_USERCONFIG}" ] && grep -q "_authToken" "${NPM_CONFIG_USERCONFIG}"; then
+            echo "::error::Trusted publishing requires npm auth token config to be absent."
+            exit 1
+          fi
 
       - name: Publish to npm
         run: npm publish --access public --provenance

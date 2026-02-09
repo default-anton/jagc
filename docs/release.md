@@ -17,6 +17,8 @@ This is the canonical publish procedure for `jagc`.
    - Repo: `<github-owner>/jagc`
 3. Ensure GitHub Actions is enabled and can request OIDC tokens.
    - Workflow must have `permissions: id-token: write`.
+4. Do **not** configure npm publish tokens (`NODE_AUTH_TOKEN` / `NPM_TOKEN`) for this repo.
+   - Release workflow enforces tokenless publish and fails if token auth is present.
 
 > 2FA remains enabled on the npm account. Trusted publishing avoids long-lived npm tokens in repo secrets.
 
