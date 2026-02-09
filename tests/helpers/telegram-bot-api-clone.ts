@@ -385,6 +385,10 @@ export class TelegramBotApiClone {
         this.recordBotCall({ method, payload });
         return true;
       }
+      case 'sendChatAction': {
+        this.recordBotCall({ method, payload });
+        return true;
+      }
       default: {
         throw new TelegramCloneApiError({
           errorCode: 404,

@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 
 import type { RunService } from '../src/server/service.js';
+import type { RunProgressEvent } from '../src/shared/run-progress.js';
 import type { MessageIngest, RunRecord } from '../src/shared/run-types.js';
 import {
   telegramTestChatId as testChatId,
@@ -40,6 +41,187 @@ describe('TelegramPollingAdapter message flow integration', () => {
       ]);
     });
   });
+
+  test('shows progress updates and typing indicator during long-running runs', async () => {
+    const runningState = runRecord({
+      runId: 'run-progress',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-progress',
+      status: 'succeeded',
+      output: { text: 'Progress done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-progress',
+      [
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        completedState,
+      ],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-progress', 'started')],
+          2: [
+            progressEvent('run-progress', 'tool_execution_start', {
+              toolCallId: 'tool-1',
+              toolName: 'bash',
+              args: { command: 'pnpm test' },
+            }),
+          ],
+          3: [
+            progressEvent('run-progress', 'assistant_thinking_delta', {
+              delta: 'Thinking about next step',
+            }),
+          ],
+          4: [
+            progressEvent('run-progress', 'assistant_text_delta', {
+              delta: 'Draft progress output',
+            }),
+          ],
+          5: [
+            progressEvent('run-progress', 'tool_execution_end', {
+              toolCallId: 'tool-1',
+              toolName: 'bash',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 200,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show me progress',
+        });
+
+        const progressMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => typeof call.payload.text === 'string' && call.payload.text.includes('Run run-progress'),
+          4_000,
+        );
+        expect(progressMessage.payload.text).toContain('Run run-progress');
+
+        const typingCall = await clone.waitForBotCall('sendChatAction', () => true, 4_000);
+        expect(typingCall.payload.action).toBe('typing');
+
+        const progressEdit = await clone.waitForBotCall(
+          'editMessageText',
+          (call) =>
+            typeof call.payload.text === 'string' &&
+            call.payload.text.includes('Recent tools:') &&
+            call.payload.text.includes('✅ bash'),
+          6_000,
+        );
+        expect(progressEdit.payload.text).toContain('Recent tools:');
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Progress done',
+          6_000,
+        );
+        expect(finalMessage.payload.text).toBe('Progress done');
+      },
+    );
+  }, 12_000);
+
+  test('retries progress edits after Telegram 429 retry_after responses', async () => {
+    const runningState = runRecord({
+      runId: 'run-edit-retry',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-edit-retry',
+      status: 'succeeded',
+      output: { text: 'Edit retry done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-edit-retry',
+      [
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        completedState,
+      ],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-edit-retry', 'started')],
+          2: [
+            progressEvent('run-edit-retry', 'assistant_text_delta', {
+              delta: 'progress text',
+            }),
+          ],
+          3: [
+            progressEvent('run-edit-retry', 'assistant_text_delta', {
+              delta: 'more progress text',
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 200,
+      },
+      async ({ clone }) => {
+        clone.failNextApiCall('editMessageText', {
+          errorCode: 429,
+          description: 'Too Many Requests: retry later',
+          parameters: {
+            retry_after: 0.05,
+          },
+        });
+
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'retry edits',
+        });
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Edit retry done',
+          6_000,
+        );
+        expect(finalMessage.payload.text).toBe('Edit retry done');
+
+        expect(clone.getApiCallCount('editMessageText')).toBeGreaterThanOrEqual(2);
+      },
+    );
+  }, 12_000);
 
   test('steer command ingests with steer delivery mode', async () => {
     const runService = new StubRunService('run-steer', [
@@ -172,9 +354,64 @@ describe('TelegramPollingAdapter message flow integration', () => {
 
         const sendMessage = await clone.waitForBotCall(
           'sendMessage',
-          (call) => call.payload.text === 'Run queued as run-timeout. Still running.',
+          (call) =>
+            call.payload.text === "Run queued as run-timeout. Still running. I'll send the result when it's done.",
         );
-        expect(sendMessage.payload.text).toBe('Run queued as run-timeout. Still running.');
+        expect(sendMessage.payload.text).toBe(
+          "Run queued as run-timeout. Still running. I'll send the result when it's done.",
+        );
+      },
+    );
+  });
+
+  test('sends final output later when initial wait times out', async () => {
+    const runService = new StubRunService('run-late-complete', [
+      runRecord({
+        runId: 'run-late-complete',
+        status: 'running',
+      }),
+      runRecord({
+        runId: 'run-late-complete',
+        status: 'running',
+      }),
+      runRecord({
+        runId: 'run-late-complete',
+        status: 'running',
+      }),
+      runRecord({
+        runId: 'run-late-complete',
+        status: 'succeeded',
+        output: { text: 'Finished later' },
+      }),
+    ]);
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 15,
+        pollIntervalMs: 10,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'complete later',
+        });
+
+        const queuedMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) =>
+            call.payload.text ===
+            "Run queued as run-late-complete. Still running. I'll send the result when it's done.",
+        );
+        expect(queuedMessage.payload.text).toContain('Still running');
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Finished later',
+          3_000,
+        );
+        expect(finalMessage.payload.text).toBe('Finished later');
       },
     );
   });
@@ -205,7 +442,8 @@ describe('TelegramPollingAdapter message flow integration', () => {
         .getBotCalls()
         .filter((call) => call.method === 'sendMessage')
         .map((call) => call.payload.text)
-        .filter((text): text is string => typeof text === 'string');
+        .filter((text): text is string => typeof text === 'string')
+        .filter((text) => /^x+$/.test(text));
 
       expect(chunks).toHaveLength(2);
       expect(chunks.map((chunk) => chunk.length)).toEqual([3500, 101]);
@@ -306,10 +544,14 @@ describe('TelegramPollingAdapter message flow integration', () => {
 class StubRunService {
   readonly ingests: MessageIngest[] = [];
   private pollCount = 0;
+  private readonly runProgressListeners = new Set<(event: RunProgressEvent) => void>();
 
   constructor(
     private readonly runId: string,
     private readonly runStates: RunRecord[],
+    private readonly options: {
+      progressEventsByPoll?: Record<number, RunProgressEvent[]>;
+    } = {},
   ) {}
 
   asRunService(): RunService {
@@ -334,9 +576,114 @@ class StubRunService {
 
         const stateIndex = Math.min(this.pollCount, this.runStates.length - 1);
         this.pollCount += 1;
+
+        const progressEvents = this.options.progressEventsByPoll?.[this.pollCount] ?? [];
+        for (const event of progressEvents) {
+          this.emitRunProgress(event);
+        }
+
         return this.runStates[stateIndex] ?? null;
       },
+      subscribeRunProgress: (_runId: string, listener: (event: RunProgressEvent) => void) => {
+        this.runProgressListeners.add(listener);
+
+        return () => {
+          this.runProgressListeners.delete(listener);
+        };
+      },
     } as unknown as RunService;
+  }
+
+  private emitRunProgress(event: RunProgressEvent): void {
+    for (const listener of this.runProgressListeners) {
+      listener(event);
+    }
+  }
+}
+
+function progressEvent(
+  runId: string,
+  type: RunProgressEvent['type'],
+  extra: Record<string, unknown> = {},
+): RunProgressEvent {
+  const base = {
+    runId,
+    threadKey: 'telegram:chat:101',
+    source: 'telegram',
+    deliveryMode: 'followUp' as const,
+    timestamp: new Date().toISOString(),
+  };
+
+  switch (type) {
+    case 'queued':
+    case 'started':
+    case 'delivered':
+    case 'agent_start':
+    case 'agent_end':
+      return {
+        ...base,
+        type,
+      };
+    case 'turn_start':
+      return {
+        ...base,
+        type,
+      };
+    case 'turn_end':
+      return {
+        ...base,
+        type,
+        toolResultCount: Number(extra.toolResultCount ?? 0),
+      };
+    case 'assistant_text_delta':
+      return {
+        ...base,
+        type,
+        delta: String(extra.delta ?? ''),
+      };
+    case 'assistant_thinking_delta':
+      return {
+        ...base,
+        type,
+        delta: String(extra.delta ?? ''),
+      };
+    case 'tool_execution_start':
+      return {
+        ...base,
+        type,
+        toolCallId: String(extra.toolCallId ?? 'tool'),
+        toolName: String(extra.toolName ?? 'tool'),
+        args: extra.args ?? {},
+      };
+    case 'tool_execution_update':
+      return {
+        ...base,
+        type,
+        toolCallId: String(extra.toolCallId ?? 'tool'),
+        toolName: String(extra.toolName ?? 'tool'),
+        partialResult: extra.partialResult ?? {},
+      };
+    case 'tool_execution_end':
+      return {
+        ...base,
+        type,
+        toolCallId: String(extra.toolCallId ?? 'tool'),
+        toolName: String(extra.toolName ?? 'tool'),
+        result: extra.result ?? {},
+        isError: Boolean(extra.isError),
+      };
+    case 'succeeded':
+      return {
+        ...base,
+        type,
+        output: (extra.output ?? {}) as Record<string, unknown>,
+      };
+    case 'failed':
+      return {
+        ...base,
+        type,
+        errorMessage: String(extra.errorMessage ?? 'failed'),
+      };
   }
 }
 

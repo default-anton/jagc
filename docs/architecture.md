@@ -51,6 +51,7 @@ This doc is the implementation snapshot (not design intent).
 - Scheduler serializes dispatch per `thread_key` (FIFO at dispatch boundary), while allowing different threads to dispatch concurrently.
 - Scheduler calls `RunService.dispatchRunById(run_id)`, which starts background execution only if the run is still `running` and not already in-flight.
 - `RunExecutor.execute(run)` returns structured `RunOutput` or throws.
+- `RunService` emits run progress lifecycle events (`queued`, `started`, `succeeded`, `failed`) and forwards executor/session progress events when provided (for adapters/UIs).
 - Service finalizes with `markSucceeded` / `markFailed`.
 
 ### 3) Run polling (`GET /v1/runs/:run_id`)
@@ -100,7 +101,11 @@ Operational note:
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
 - Telegram `/new` and API `DELETE /v1/threads/:thread_key/session` abort/dispose the current thread session, clear persisted `thread_sessions` mapping, and cause the next message to create a fresh pi session.
+- Adapter starts a per-run progress reporter (in-chat status message + typing indicator) as soon as a run is ingested.
+- Progress is driven by run-level events emitted from `RunService` and pi session events forwarded by `ThreadRunController` (`assistant_text_delta`, `assistant_thinking_delta`, `tool_execution_*`, turn/agent lifecycle).
+- Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`).
 - Adapter waits for terminal run status and replies with output/error.
+- If foreground wait exceeds adapter timeout, Telegram receives a "still running" notice and the adapter continues waiting in the background, then posts final output when complete.
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
 - After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.
 - The `/settings` panel does not include a dedicated refresh button; reopening `/settings` (or returning from a change) re-fetches live state.
@@ -127,6 +132,7 @@ Operational note:
 ## Contracts + schema source of truth
 
 - API schemas: `src/shared/api-contracts.ts` (used by server + CLI)
+- Run progress event contract: `src/shared/run-progress.ts`
 - Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`
 - Migration runner: `src/server/migrations.ts` (`schema_migrations`)
 

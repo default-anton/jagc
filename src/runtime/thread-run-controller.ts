@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { RunProgressEvent } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 
 export type SessionEvent = AgentSessionEvent;
@@ -28,14 +29,32 @@ interface AssistantSnapshot {
   errorMessage: string | null;
 }
 
+interface ThreadRunControllerOptions {
+  onProgress?: (event: RunProgressEvent) => void;
+}
+
+type PendingLifecycleProgressEvent =
+  | {
+      type: 'agent_start';
+    }
+  | {
+      type: 'turn_start';
+    };
+
 export class ThreadRunController {
   private readonly pendingRuns: PendingRun[] = [];
+  private pendingLifecycleEvents: PendingLifecycleProgressEvent[] = [];
   private activeRun: PendingRun | null = null;
   private inFlight = false;
   private dispatchTail: Promise<void> = Promise.resolve();
   private readonly unsubscribe: () => void;
+  private readonly onProgress?: (event: RunProgressEvent) => void;
 
-  constructor(private readonly session: TurnSession) {
+  constructor(
+    private readonly session: TurnSession,
+    options: ThreadRunControllerOptions = {},
+  ) {
+    this.onProgress = options.onProgress;
     this.unsubscribe = session.subscribe((event) => {
       this.onSessionEvent(event);
     });
@@ -93,19 +112,77 @@ export class ThreadRunController {
     if (event.type === 'message_start') {
       if (event.message.role === 'user') {
         this.onUserMessageStart(event.message);
+      } else {
+        this.flushPendingLifecycleEventsToActiveRun();
       }
+      return;
+    }
+
+    if (event.type === 'message_update') {
+      this.onMessageUpdateEvent(event);
       return;
     }
 
     if (event.type === 'message_end') {
       if (event.message.role === 'assistant' && this.activeRun) {
+        this.flushPendingLifecycleEventsToActiveRun();
         this.activeRun.lastAssistant = assistantSnapshot(event.message);
       }
       return;
     }
 
+    if (event.type === 'tool_execution_start') {
+      this.emitForActiveRun({
+        type: 'tool_execution_start',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        args: event.args,
+      });
+      return;
+    }
+
+    if (event.type === 'tool_execution_update') {
+      this.emitForActiveRun({
+        type: 'tool_execution_update',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        partialResult: event.partialResult,
+      });
+      return;
+    }
+
+    if (event.type === 'tool_execution_end') {
+      this.emitForActiveRun({
+        type: 'tool_execution_end',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        result: event.result,
+        isError: event.isError,
+      });
+      return;
+    }
+
+    if (event.type === 'agent_start') {
+      this.queueLifecycleEvent({ type: 'agent_start' });
+      return;
+    }
+
+    if (event.type === 'turn_start') {
+      this.queueLifecycleEvent({ type: 'turn_start' });
+      return;
+    }
+
+    if (event.type === 'turn_end') {
+      this.emitForActiveRun({
+        type: 'turn_end',
+        toolResultCount: event.toolResults.length,
+      });
+      return;
+    }
+
     if (event.type === 'agent_end') {
       this.inFlight = false;
+      this.emitForActiveRun({ type: 'agent_end' });
       this.completeActiveRun('agent_end');
 
       if (this.pendingRuns.some((run) => !run.completed)) {
@@ -115,6 +192,28 @@ export class ThreadRunController {
           }
         }
       }
+
+      this.pendingLifecycleEvents = [];
+    }
+  }
+
+  private onMessageUpdateEvent(event: Extract<SessionEvent, { type: 'message_update' }>): void {
+    this.flushPendingLifecycleEventsToActiveRun();
+    const assistantMessageEvent = event.assistantMessageEvent;
+
+    if (assistantMessageEvent.type === 'text_delta') {
+      this.emitForActiveRun({
+        type: 'assistant_text_delta',
+        delta: assistantMessageEvent.delta,
+      });
+      return;
+    }
+
+    if (assistantMessageEvent.type === 'thinking_delta') {
+      this.emitForActiveRun({
+        type: 'assistant_thinking_delta',
+        delta: assistantMessageEvent.delta,
+      });
     }
   }
 
@@ -132,6 +231,8 @@ export class ThreadRunController {
     next.delivered = true;
     next.deliveredText = userMessageText(message);
     this.activeRun = next;
+    this.flushPendingLifecycleEventsForRun(next.run);
+    this.emitForRun(next.run, { type: 'delivered' });
   }
 
   private completeActiveRun(trigger: 'next_user_message' | 'agent_end'): void {
@@ -187,6 +288,144 @@ export class ThreadRunController {
 
     removePendingRun(this.pendingRuns, pending);
     pending.reject(error);
+  }
+
+  private queueLifecycleEvent(event: PendingLifecycleProgressEvent): void {
+    if (!this.onProgress) {
+      return;
+    }
+
+    this.pendingLifecycleEvents.push(event);
+  }
+
+  private flushPendingLifecycleEventsToActiveRun(): void {
+    const activeRun = this.activeRun;
+    if (!activeRun || activeRun.completed) {
+      return;
+    }
+
+    this.flushPendingLifecycleEventsForRun(activeRun.run);
+  }
+
+  private flushPendingLifecycleEventsForRun(run: RunRecord): void {
+    if (!this.onProgress || this.pendingLifecycleEvents.length === 0) {
+      return;
+    }
+
+    const queuedEvents = this.pendingLifecycleEvents;
+    this.pendingLifecycleEvents = [];
+
+    for (const event of queuedEvents) {
+      this.emitForRun(run, event);
+    }
+  }
+
+  private emitForActiveRun(
+    event:
+      | {
+          type: 'agent_end';
+        }
+      | {
+          type: 'turn_end';
+          toolResultCount: number;
+        }
+      | {
+          type: 'assistant_text_delta';
+          delta: string;
+        }
+      | {
+          type: 'assistant_thinking_delta';
+          delta: string;
+        }
+      | {
+          type: 'tool_execution_start';
+          toolCallId: string;
+          toolName: string;
+          args: unknown;
+        }
+      | {
+          type: 'tool_execution_update';
+          toolCallId: string;
+          toolName: string;
+          partialResult: unknown;
+        }
+      | {
+          type: 'tool_execution_end';
+          toolCallId: string;
+          toolName: string;
+          result: unknown;
+          isError: boolean;
+        },
+  ): void {
+    this.flushPendingLifecycleEventsToActiveRun();
+
+    const activeRun = this.activeRun;
+    if (!activeRun || activeRun.completed) {
+      return;
+    }
+
+    this.emitForRun(activeRun.run, event);
+  }
+
+  private emitForRun(
+    run: RunRecord,
+    event:
+      | {
+          type: 'delivered';
+        }
+      | {
+          type: 'agent_start';
+        }
+      | {
+          type: 'agent_end';
+        }
+      | {
+          type: 'turn_start';
+        }
+      | {
+          type: 'turn_end';
+          toolResultCount: number;
+        }
+      | {
+          type: 'assistant_text_delta';
+          delta: string;
+        }
+      | {
+          type: 'assistant_thinking_delta';
+          delta: string;
+        }
+      | {
+          type: 'tool_execution_start';
+          toolCallId: string;
+          toolName: string;
+          args: unknown;
+        }
+      | {
+          type: 'tool_execution_update';
+          toolCallId: string;
+          toolName: string;
+          partialResult: unknown;
+        }
+      | {
+          type: 'tool_execution_end';
+          toolCallId: string;
+          toolName: string;
+          result: unknown;
+          isError: boolean;
+        },
+  ): void {
+    if (!this.onProgress) {
+      return;
+    }
+
+    this.onProgress({
+      ...event,
+      runId: run.runId,
+      threadKey: run.threadKey,
+      source: run.source,
+      deliveryMode: run.deliveryMode,
+      timestamp: new Date().toISOString(),
+    });
   }
 }
 

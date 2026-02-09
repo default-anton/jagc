@@ -1,4 +1,5 @@
 import type { Context, InlineKeyboard } from 'grammy';
+import { isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
 
 export const telegramCallbackDataMaxBytes = 64;
 
@@ -10,7 +11,7 @@ export async function replyUi(ctx: Context, text: string, keyboard: InlineKeyboa
       await ctx.editMessageText(text, options);
       return;
     } catch (error) {
-      if (isMessageNotModifiedError(error)) {
+      if (isTelegramMessageNotModifiedError(error)) {
         return;
       }
     }
@@ -55,12 +56,4 @@ export function addCallbackButton(keyboard: InlineKeyboard, text: string, callba
 
   keyboard.text(text, callbackData);
   return true;
-}
-
-function isMessageNotModifiedError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return error.message.includes('message is not modified');
 }

@@ -11,6 +11,7 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import type { RunExecutor } from '../server/executor.js';
 import type { RunStore } from '../server/store.js';
+import type { RunProgressEvent, RunProgressListener } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 import { ThreadRunController } from './thread-run-controller.js';
 
@@ -60,6 +61,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
   private readonly settingsManager: SettingsManager;
   private readonly threadGeneration = new Map<string, number>();
   private readonly resetInFlight = new Map<string, Promise<void>>();
+  private runProgressListener: RunProgressListener | null = null;
 
   constructor(
     private readonly runStore: RunStore,
@@ -74,6 +76,10 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
   async execute(run: RunRecord): Promise<RunOutput> {
     const controller = await this.getController(run.threadKey);
     return controller.submit(run);
+  }
+
+  setRunProgressListener(listener: RunProgressListener | null): void {
+    this.runProgressListener = listener;
   }
 
   async getThreadRuntimeState(threadKey: string): Promise<ThreadRuntimeState> {
@@ -185,7 +191,11 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
 
     const createControllerPromise = this.getSession(threadKey)
       .then((session) => {
-        const controller = new ThreadRunController(session);
+        const controller = new ThreadRunController(session, {
+          onProgress: (event) => {
+            this.handleRunProgressEvent(event);
+          },
+        });
 
         try {
           this.assertThreadGeneration(threadKey, generation);
@@ -308,6 +318,10 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     }
 
     await this.runStore.upsertThreadSession(threadKey, sessionId, sessionFile);
+  }
+
+  private handleRunProgressEvent(event: RunProgressEvent): void {
+    this.runProgressListener?.(event);
   }
 
   private async waitForInFlightReset(threadKey: string): Promise<void> {

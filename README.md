@@ -22,6 +22,8 @@ For testing loops (including Telegram behavioral polling clone), see **[`docs/te
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread pi session controllers; run dispatch/recovery is in-process and single-server-process scoped in v0.
 - Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/new`, `/model`, `/thinking`, and `/auth`.
+- Telegram chat UX now streams live run progress in-chat (status panel edits + typing indicator + tool/thinking/text activity summaries) while preserving final run output delivery.
+- If Telegram foreground wait times out, the adapter keeps watching in the background and posts the final result when the run completes.
 - Model/thinking changes from Telegram button pickers return to the `/settings` panel with updated runtime state.
 - Outdated Telegram inline callbacks auto-recover by replacing the menu with the latest `/settings` panel.
 - Telegram callback payload limits are enforced; over-limit model/auth options are hidden with an in-chat notice.

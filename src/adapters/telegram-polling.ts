@@ -12,8 +12,11 @@ import type { ThreadControlService } from '../runtime/pi-executor.js';
 import type { RunService } from '../server/service.js';
 import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
+import type { RunProgressEvent } from '../shared/run-progress.js';
 import type { RunRecord } from '../shared/run-types.js';
+import { extractTelegramRetryAfterSeconds } from './telegram-api-errors.js';
 import { parseTelegramCallbackData } from './telegram-controls-callbacks.js';
+import { TelegramRunProgressReporter } from './telegram-progress.js';
 import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
 
 const defaultWaitTimeoutMs = 180_000;
@@ -59,6 +62,8 @@ export class TelegramPollingAdapter {
   private readonly pollIntervalMs: number;
   private readonly pollRequestTimeoutSeconds: number;
   private readonly logger: Logger;
+  private readonly backgroundRunTasks = new Set<Promise<void>>();
+  private readonly backgroundRunAbortControllers = new Set<AbortController>();
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
     const botConfig: BotConfig<Context> = {};
@@ -126,6 +131,14 @@ export class TelegramPollingAdapter {
   }
 
   async stop(): Promise<void> {
+    for (const controller of this.backgroundRunAbortControllers) {
+      controller.abort();
+    }
+
+    if (this.backgroundRunTasks.size > 0) {
+      await Promise.allSettled([...this.backgroundRunTasks]);
+    }
+
     if (!this.runner) {
       return;
     }
@@ -288,7 +301,12 @@ export class TelegramPollingAdapter {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const chatId = ctx.chat?.id;
+    if (chatId === undefined) {
+      throw new Error('telegram message has no chat id');
+    }
+
+    const threadKey = telegramThreadKey(chatId);
     const userKey = telegramUserKey(ctx.from?.id);
 
     const ingested = await this.options.runService.ingestMessage({
@@ -300,19 +318,124 @@ export class TelegramPollingAdapter {
       idempotencyKey: `telegram:update:${ctx.update.update_id}`,
     });
 
-    const completedRun = await this.waitForCompletion(ingested.run.runId);
-    if (completedRun.status === 'running') {
-      await ctx.reply(`Run queued as ${completedRun.runId}. Still running.`);
+    if (ingested.run.status !== 'running') {
+      await this.replyLong(chatId, formatRunResult(ingested.run));
       return;
     }
 
-    await this.replyLong(ctx, formatRunResult(completedRun));
+    const progressReporter = new TelegramRunProgressReporter({
+      bot: this.bot,
+      chatId,
+      runId: ingested.run.runId,
+      deliveryMode,
+      logger: this.logger,
+      messageLimit: telegramMessageLimit,
+    });
+
+    await progressReporter.start();
+
+    const unsubscribe = this.subscribeRunProgress(ingested.run.runId, (event) => {
+      progressReporter.onProgress(event);
+    });
+
+    let backgroundContinuationStarted = false;
+
+    try {
+      const completedRun = await this.waitForCompletion(ingested.run.runId, this.waitTimeoutMs);
+      if (completedRun.status === 'running') {
+        await progressReporter.markLongRunning();
+        await this.sendMessage(
+          chatId,
+          `Run queued as ${completedRun.runId}. Still running. I'll send the result when it's done.`,
+        );
+
+        backgroundContinuationStarted = true;
+
+        const backgroundAbortController = new AbortController();
+        this.backgroundRunAbortControllers.add(backgroundAbortController);
+
+        let backgroundTask: Promise<void> | null = null;
+        backgroundTask = this.continueRunInBackground({
+          chatId,
+          runId: completedRun.runId,
+          progressReporter,
+          unsubscribe,
+          signal: backgroundAbortController.signal,
+        }).finally(() => {
+          if (backgroundTask) {
+            this.backgroundRunTasks.delete(backgroundTask);
+          }
+          this.backgroundRunAbortControllers.delete(backgroundAbortController);
+        });
+
+        this.backgroundRunTasks.add(backgroundTask);
+        return;
+      }
+
+      if (completedRun.status === 'failed') {
+        await progressReporter.finishFailed(completedRun.errorMessage);
+      } else {
+        await progressReporter.finishSucceeded();
+      }
+
+      await this.replyLong(chatId, formatRunResult(completedRun));
+    } finally {
+      if (!backgroundContinuationStarted) {
+        unsubscribe();
+        await progressReporter.dispose();
+      }
+    }
   }
 
-  private async waitForCompletion(runId: string): Promise<RunRecord> {
+  private async continueRunInBackground(options: {
+    chatId: number;
+    runId: string;
+    progressReporter: TelegramRunProgressReporter;
+    unsubscribe: () => void;
+    signal: AbortSignal;
+  }): Promise<void> {
+    try {
+      const completedRun = await this.waitForCompletion(options.runId, null, options.signal);
+      if (completedRun.status === 'running') {
+        return;
+      }
+
+      if (completedRun.status === 'failed') {
+        await options.progressReporter.finishFailed(completedRun.errorMessage);
+      } else {
+        await options.progressReporter.finishSucceeded();
+      }
+
+      await this.replyLong(options.chatId, formatRunResult(completedRun));
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+
+      const message = userFacingError(error);
+      this.logger.error({
+        event: 'telegram_background_run_wait_failed',
+        run_id: options.runId,
+        chat_id: options.chatId,
+        message,
+      });
+
+      await options.progressReporter.finishFailed(message);
+      await this.sendMessage(options.chatId, `❌ ${message}`);
+    } finally {
+      options.unsubscribe();
+      await options.progressReporter.dispose();
+    }
+  }
+
+  private async waitForCompletion(runId: string, timeoutMs: number | null, signal?: AbortSignal): Promise<RunRecord> {
     const startedAt = Date.now();
 
     while (true) {
+      if (signal?.aborted) {
+        throw new Error('telegram run wait aborted');
+      }
+
       const run = await this.options.runService.getRun(runId);
       if (!run) {
         throw new Error(`run ${runId} not found while waiting for completion`);
@@ -322,7 +445,7 @@ export class TelegramPollingAdapter {
         return run;
       }
 
-      if (Date.now() - startedAt >= this.waitTimeoutMs) {
+      if (timeoutMs !== null && Date.now() - startedAt >= timeoutMs) {
         return run;
       }
 
@@ -330,9 +453,43 @@ export class TelegramPollingAdapter {
     }
   }
 
-  private async replyLong(ctx: Context, text: string): Promise<void> {
+  private subscribeRunProgress(runId: string, listener: (event: RunProgressEvent) => void): () => void {
+    const runService = this.options.runService as RunService & {
+      subscribeRunProgress?: (runId: string, listener: (event: RunProgressEvent) => void) => () => void;
+    };
+
+    if (typeof runService.subscribeRunProgress !== 'function') {
+      return () => {};
+    }
+
+    return runService.subscribeRunProgress(runId, listener);
+  }
+
+  private async replyLong(chatId: number, text: string): Promise<void> {
     for (const chunk of chunkMessage(text, telegramMessageLimit)) {
-      await ctx.reply(chunk);
+      await this.sendMessage(chatId, chunk);
+    }
+  }
+
+  private async sendMessage(chatId: number, text: string): Promise<void> {
+    await callTelegramWithRetry(() => this.bot.api.sendMessage(chatId, text));
+  }
+}
+
+async function callTelegramWithRetry<T>(operation: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await operation();
+    } catch (error) {
+      const retryAfterSeconds = extractTelegramRetryAfterSeconds(error);
+      if (retryAfterSeconds === null || attempt >= maxAttempts - 1) {
+        throw error;
+      }
+
+      attempt += 1;
+      await sleep(Math.ceil(retryAfterSeconds * 1000));
     }
   }
 }
@@ -415,6 +572,10 @@ function telegramUserKey(userId: number | undefined): string | undefined {
   }
 
   return `telegram:user:${userId}`;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'telegram run wait aborted';
 }
 
 function userFacingError(error: unknown): string {
