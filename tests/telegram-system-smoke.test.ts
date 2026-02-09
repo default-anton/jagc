@@ -1,0 +1,270 @@
+import type { AddressInfo } from 'node:net';
+import type { FastifyInstance } from 'fastify';
+import type { Pool } from 'pg';
+import { afterEach, describe, expect, test } from 'vitest';
+
+import { TelegramPollingAdapter } from '../src/adapters/telegram-polling.js';
+import { createApp } from '../src/server/app.js';
+import { EchoRunExecutor } from '../src/server/executor.js';
+import { LocalRunScheduler } from '../src/server/scheduler.js';
+import { RunService } from '../src/server/service.js';
+import { PostgresRunStore } from '../src/server/store.js';
+import { usePostgresTestDb } from './helpers/postgres-test-db.js';
+import { TelegramBotApiClone } from './helpers/telegram-bot-api-clone.js';
+import { telegramTestBotToken, telegramTestChatId, telegramTestUserId } from './helpers/telegram-test-kit.js';
+
+const testDb = usePostgresTestDb();
+
+describe('Telegram system smoke', () => {
+  const runningStacks = new Set<RunningTelegramSystemStack>();
+
+  afterEach(async () => {
+    for (const stack of [...runningStacks]) {
+      await stack.stop();
+      runningStacks.delete(stack);
+    }
+  });
+
+  test('polling update flows through run ingestion, execution, persistence, and API retrieval', async () => {
+    const stack = await startTelegramSystemStack(testDb.pool);
+    runningStacks.add(stack);
+
+    const updateId = stack.clone.injectTextMessage({
+      chatId: telegramTestChatId,
+      fromId: telegramTestUserId,
+      text: 'system smoke ping',
+    });
+
+    const botReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) => call.payload.text === 'system smoke ping',
+      5_000,
+    );
+    expect(botReply.payload.text).toBe('system smoke ping');
+
+    const persistedRun = await loadRunByTelegramUpdateId(testDb.pool, updateId);
+    expect(persistedRun).toMatchObject({
+      source: 'telegram',
+      thread_key: 'telegram:chat:101',
+      user_key: 'telegram:user:202',
+      delivery_mode: 'followUp',
+      status: 'succeeded',
+      input_text: 'system smoke ping',
+    });
+    expect(persistedRun.output).toMatchObject({
+      type: 'message',
+      text: 'system smoke ping',
+      delivery_mode: 'followUp',
+    });
+
+    const runResponse = await fetch(`${stack.apiBaseUrl}/v1/runs/${encodeURIComponent(persistedRun.run_id)}`);
+    expect(runResponse.status).toBe(200);
+
+    const runJson = (await runResponse.json()) as {
+      run_id: string;
+      status: string;
+      output: Record<string, unknown> | null;
+      error: { message: string } | null;
+    };
+    expect(runJson).toMatchObject({
+      run_id: persistedRun.run_id,
+      status: 'succeeded',
+      error: null,
+      output: {
+        type: 'message',
+        text: 'system smoke ping',
+        delivery_mode: 'followUp',
+      },
+    });
+
+    await stack.stop();
+    runningStacks.delete(stack);
+  });
+
+  test('steer command persists steer delivery mode end-to-end', async () => {
+    const stack = await startTelegramSystemStack(testDb.pool);
+    runningStacks.add(stack);
+
+    const updateId = stack.clone.injectTextMessage({
+      chatId: telegramTestChatId,
+      fromId: telegramTestUserId,
+      text: '/steer cut in now',
+    });
+
+    const botReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) => call.payload.text === 'cut in now',
+      5_000,
+    );
+    expect(botReply.payload.text).toBe('cut in now');
+
+    const persistedRun = await loadRunByTelegramUpdateId(testDb.pool, updateId);
+    expect(persistedRun.delivery_mode).toBe('steer');
+    expect(persistedRun.status).toBe('succeeded');
+    expect(persistedRun.output).toMatchObject({
+      text: 'cut in now',
+      delivery_mode: 'steer',
+    });
+
+    await stack.stop();
+    runningStacks.delete(stack);
+  });
+});
+
+interface PersistedRunRow {
+  run_id: string;
+  source: string;
+  thread_key: string;
+  user_key: string | null;
+  delivery_mode: 'followUp' | 'steer';
+  status: 'running' | 'succeeded' | 'failed';
+  input_text: string;
+  output: Record<string, unknown> | null;
+}
+
+interface RunningTelegramSystemStack {
+  clone: TelegramBotApiClone;
+  app: FastifyInstance;
+  runService: RunService;
+  apiBaseUrl: string;
+  stop(): Promise<void>;
+}
+
+async function startTelegramSystemStack(pool: Pool): Promise<RunningTelegramSystemStack> {
+  const clone = new TelegramBotApiClone({ token: telegramTestBotToken });
+  let app: FastifyInstance | null = null;
+  let runService: RunService | null = null;
+  let adapter: TelegramPollingAdapter | null = null;
+
+  try {
+    await clone.start();
+
+    const runStore = new PostgresRunStore(pool);
+
+    const runScheduler = new LocalRunScheduler({
+      dispatchRunById: async (runId) => {
+        if (!runService) {
+          throw new Error('run service is not initialized');
+        }
+
+        await runService.dispatchRunById(runId);
+      },
+    });
+
+    runService = new RunService(runStore, new EchoRunExecutor(5), runScheduler);
+    await runService.init();
+
+    app = createApp({
+      runService,
+    });
+
+    await app.listen({
+      host: '127.0.0.1',
+      port: 0,
+    });
+
+    const address = app.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('server did not bind to a TCP address');
+    }
+
+    adapter = new TelegramPollingAdapter({
+      botToken: telegramTestBotToken,
+      runService,
+      telegramApiRoot: clone.apiRoot ?? undefined,
+      pollRequestTimeoutSeconds: 1,
+      pollIntervalMs: 10,
+      waitTimeoutMs: 5_000,
+    });
+    await adapter.start();
+
+    let stopped = false;
+
+    return {
+      clone,
+      app,
+      runService,
+      apiBaseUrl: `http://127.0.0.1:${(address as AddressInfo).port}`,
+      async stop() {
+        if (stopped) {
+          return;
+        }
+
+        stopped = true;
+        await stopTelegramSystemResources({ adapter, app, runService, clone });
+      },
+    };
+  } catch (error) {
+    try {
+      await stopTelegramSystemResources({ adapter, app, runService, clone });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'failed to start telegram system stack');
+    }
+
+    throw error;
+  }
+}
+
+async function stopTelegramSystemResources(resources: {
+  adapter: TelegramPollingAdapter | null;
+  app: FastifyInstance | null;
+  runService: RunService | null;
+  clone: TelegramBotApiClone;
+}): Promise<void> {
+  const failures: unknown[] = [];
+
+  if (resources.adapter) {
+    try {
+      await resources.adapter.stop();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  if (resources.app) {
+    try {
+      await resources.app.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  if (resources.runService) {
+    try {
+      await resources.runService.shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  try {
+    await resources.clone.stop();
+  } catch (error) {
+    failures.push(error);
+  }
+
+  if (failures.length > 0) {
+    throw failures[0];
+  }
+}
+
+async function loadRunByTelegramUpdateId(pool: Pool, updateId: number): Promise<PersistedRunRow> {
+  const idempotencyKey = `telegram:update:${updateId}`;
+
+  const result = await pool.query<PersistedRunRow>(
+    `
+      SELECT r.run_id, r.source, r.thread_key, r.user_key, r.delivery_mode, r.status, r.input_text, r.output
+      FROM message_ingest mi
+      INNER JOIN runs r ON r.run_id = mi.run_id
+      WHERE mi.source = $1 AND mi.idempotency_key = $2
+    `,
+    ['telegram', idempotencyKey],
+  );
+
+  const run = result.rows[0];
+  if (!run) {
+    throw new Error(`run not found for telegram idempotency key ${idempotencyKey}`);
+  }
+
+  return run;
+}

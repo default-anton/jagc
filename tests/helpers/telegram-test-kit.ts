@@ -92,25 +92,33 @@ export async function withTelegramAdapter(
   run: (context: { clone: TelegramBotApiClone; adapter: TelegramPollingAdapter }) => Promise<void>,
 ): Promise<void> {
   const clone = new TelegramBotApiClone({ token: telegramTestBotToken });
-  await clone.start();
-
-  const adapter = new TelegramPollingAdapter({
-    botToken: telegramTestBotToken,
-    runService: options.runService ?? createRunServiceStub(),
-    authService: options.authService,
-    threadControlService: options.threadControlService,
-    telegramApiRoot: clone.apiRoot ?? undefined,
-    pollRequestTimeoutSeconds: options.pollRequestTimeoutSeconds ?? 1,
-    waitTimeoutMs: options.waitTimeoutMs,
-    pollIntervalMs: options.pollIntervalMs ?? 10,
-  });
-
-  await adapter.start();
+  let adapter: TelegramPollingAdapter | null = null;
 
   try {
+    await clone.start();
+
+    adapter = new TelegramPollingAdapter({
+      botToken: telegramTestBotToken,
+      runService: options.runService ?? createRunServiceStub(),
+      authService: options.authService,
+      threadControlService: options.threadControlService,
+      telegramApiRoot: clone.apiRoot ?? undefined,
+      pollRequestTimeoutSeconds: options.pollRequestTimeoutSeconds ?? 1,
+      waitTimeoutMs: options.waitTimeoutMs,
+      pollIntervalMs: options.pollIntervalMs ?? 10,
+    });
+
+    await adapter.start();
     await run({ clone, adapter });
   } finally {
-    await adapter.stop();
-    await clone.stop();
+    if (adapter) {
+      try {
+        await adapter.stop();
+      } finally {
+        await clone.stop();
+      }
+    } else {
+      await clone.stop();
+    }
   }
 }
