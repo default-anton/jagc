@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
-
 import type { DeliveryMode, MessageIngest, RunOutput, RunRecord } from '../shared/run-types.js';
+import type { SqliteDatabase } from './sqlite.js';
 
 interface RunRow {
   run_id: string;
@@ -11,18 +10,18 @@ interface RunRow {
   delivery_mode: DeliveryMode;
   status: 'running' | 'succeeded' | 'failed';
   input_text: string;
-  output: RunOutput | null;
+  output: string | null;
   error_message: string | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ThreadSessionRow {
   thread_key: string;
   session_id: string;
   session_file: string;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ThreadSessionRecord {
@@ -50,151 +49,158 @@ export interface RunStore {
   deleteThreadSession(threadKey: string): Promise<void>;
 }
 
-export class PostgresRunStore implements RunStore {
-  constructor(private readonly pool: Pool) {}
+export class SqliteRunStore implements RunStore {
+  constructor(private readonly database: SqliteDatabase) {}
 
   async init(): Promise<void> {}
 
   async createRun(message: MessageIngest): Promise<CreateRunResult> {
-    const client = await this.pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
-      if (message.idempotencyKey) {
-        const existingRun = await this.getRunByIdempotency(client, message.source, message.idempotencyKey);
-
+    const create = this.database.transaction((input: MessageIngest): CreateRunResult => {
+      if (input.idempotencyKey) {
+        const existingRun = this.getRunByIdempotency(input.source, input.idempotencyKey);
         if (existingRun) {
-          await client.query('COMMIT');
-          return { run: existingRun, deduplicated: true };
+          return {
+            run: existingRun,
+            deduplicated: true,
+          };
         }
       }
 
       const runId = randomUUID();
-      await client.query(
-        `
-          INSERT INTO runs (run_id, source, thread_key, user_key, delivery_mode, status, input_text)
-          VALUES ($1, $2, $3, $4, $5, 'running', $6)
-        `,
-        [runId, message.source, message.threadKey, message.userKey ?? null, message.deliveryMode, message.text],
-      );
+      const now = nowIsoTimestamp();
 
-      if (message.idempotencyKey) {
-        await client.query(
+      this.database
+        .prepare(
           `
-            INSERT INTO message_ingest (source, idempotency_key, run_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO runs (run_id, source, thread_key, user_key, delivery_mode, status, input_text, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
           `,
-          [message.source, message.idempotencyKey, runId],
-        );
+        )
+        .run(runId, input.source, input.threadKey, input.userKey ?? null, input.deliveryMode, input.text, now, now);
+
+      if (input.idempotencyKey) {
+        this.database
+          .prepare(
+            `
+              INSERT INTO message_ingest (source, idempotency_key, run_id, created_at)
+              VALUES (?, ?, ?, ?)
+            `,
+          )
+          .run(input.source, input.idempotencyKey, runId, now);
       }
 
-      const run = await this.getRunById(client, runId);
+      const run = this.getRunById(runId);
       if (!run) {
         throw new Error(`run ${runId} was inserted but could not be loaded`);
       }
 
-      await client.query('COMMIT');
-      return { run, deduplicated: false };
+      return {
+        run,
+        deduplicated: false,
+      };
+    });
+
+    try {
+      return create(message);
     } catch (error) {
-      await client.query('ROLLBACK');
-
-      if (message.idempotencyKey && isUniqueViolation(error)) {
-        const existingRun = await this.getRunByIdempotency(client, message.source, message.idempotencyKey);
-
+      if (message.idempotencyKey && isSqliteConstraintViolation(error)) {
+        const existingRun = this.getRunByIdempotency(message.source, message.idempotencyKey);
         if (existingRun) {
-          return { run: existingRun, deduplicated: true };
+          return {
+            run: existingRun,
+            deduplicated: true,
+          };
         }
       }
 
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   async getRun(runId: string): Promise<RunRecord | null> {
-    const result = await this.pool.query<RunRow>('SELECT * FROM runs WHERE run_id = $1', [runId]);
-
-    const row = result.rows[0];
-    return row ? mapRunRow(row) : null;
+    return this.getRunById(runId);
   }
 
   async listRunningRuns(limit: number = 1000): Promise<RunRecord[]> {
-    const result = await this.pool.query<RunRow>(
-      `
-        SELECT *
-        FROM runs
-        WHERE status = 'running'
-        ORDER BY created_at ASC
-        LIMIT $1
-      `,
-      [limit],
-    );
+    const rows = this.database
+      .prepare<unknown[], RunRow>(
+        `
+          SELECT *
+          FROM runs
+          WHERE status = 'running'
+          ORDER BY created_at ASC
+          LIMIT ?
+        `,
+      )
+      .all(limit);
 
-    return result.rows.map(mapRunRow);
+    return rows.map(mapRunRow);
   }
 
   async markSucceeded(runId: string, output: RunOutput): Promise<void> {
-    const result = await this.pool.query(
-      `
-        UPDATE runs
-        SET status = 'succeeded',
-            output = $2::jsonb,
-            error_message = NULL,
-            updated_at = NOW()
-        WHERE run_id = $1 AND status = 'running'
-      `,
-      [runId, JSON.stringify(output)],
-    );
+    const result = this.database
+      .prepare(
+        `
+          UPDATE runs
+          SET status = 'succeeded',
+              output = ?,
+              error_message = NULL,
+              updated_at = ?
+          WHERE run_id = ? AND status = 'running'
+        `,
+      )
+      .run(JSON.stringify(output), nowIsoTimestamp(), runId);
 
-    if (result.rowCount !== 1) {
-      throw await statusTransitionError(this.pool, runId, 'succeeded');
+    if (result.changes !== 1) {
+      throw statusTransitionError(this.database, runId, 'succeeded');
     }
   }
 
   async markFailed(runId: string, errorMessage: string): Promise<void> {
-    const result = await this.pool.query(
-      `
-        UPDATE runs
-        SET status = 'failed',
-            error_message = $2,
-            updated_at = NOW()
-        WHERE run_id = $1 AND status = 'running'
-      `,
-      [runId, errorMessage],
-    );
+    const result = this.database
+      .prepare(
+        `
+          UPDATE runs
+          SET status = 'failed',
+              error_message = ?,
+              updated_at = ?
+          WHERE run_id = ? AND status = 'running'
+        `,
+      )
+      .run(errorMessage, nowIsoTimestamp(), runId);
 
-    if (result.rowCount !== 1) {
-      throw await statusTransitionError(this.pool, runId, 'failed');
+    if (result.changes !== 1) {
+      throw statusTransitionError(this.database, runId, 'failed');
     }
   }
 
   async getThreadSession(threadKey: string): Promise<ThreadSessionRecord | null> {
-    const result = await this.pool.query<ThreadSessionRow>('SELECT * FROM thread_sessions WHERE thread_key = $1', [
-      threadKey,
-    ]);
-    const row = result.rows[0];
+    const row = this.database
+      .prepare<unknown[], ThreadSessionRow>('SELECT * FROM thread_sessions WHERE thread_key = ?')
+      .get(threadKey);
 
     return row ? mapThreadSessionRow(row) : null;
   }
 
   async upsertThreadSession(threadKey: string, sessionId: string, sessionFile: string): Promise<ThreadSessionRecord> {
-    const result = await this.pool.query<ThreadSessionRow>(
-      `
-        INSERT INTO thread_sessions (thread_key, session_id, session_file)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (thread_key)
-        DO UPDATE SET
-          session_id = EXCLUDED.session_id,
-          session_file = EXCLUDED.session_file,
-          updated_at = NOW()
-        RETURNING *
-      `,
-      [threadKey, sessionId, sessionFile],
-    );
+    this.database
+      .prepare(
+        `
+          INSERT INTO thread_sessions (thread_key, session_id, session_file, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT (thread_key)
+          DO UPDATE SET
+            session_id = excluded.session_id,
+            session_file = excluded.session_file,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run(threadKey, sessionId, sessionFile, nowIsoTimestamp(), nowIsoTimestamp());
 
-    const row = result.rows[0];
+    const row = this.database
+      .prepare<unknown[], ThreadSessionRow>('SELECT * FROM thread_sessions WHERE thread_key = ?')
+      .get(threadKey);
+
     if (!row) {
       throw new Error(`failed to upsert thread session for ${threadKey}`);
     }
@@ -203,39 +209,35 @@ export class PostgresRunStore implements RunStore {
   }
 
   async deleteThreadSession(threadKey: string): Promise<void> {
-    await this.pool.query('DELETE FROM thread_sessions WHERE thread_key = $1', [threadKey]);
+    this.database.prepare('DELETE FROM thread_sessions WHERE thread_key = ?').run(threadKey);
   }
 
-  private async getRunById(client: PoolClient, runId: string): Promise<RunRecord | null> {
-    const result = await client.query<RunRow>('SELECT * FROM runs WHERE run_id = $1', [runId]);
-    const row = result.rows[0];
+  private getRunById(runId: string): RunRecord | null {
+    const row = this.database.prepare<unknown[], RunRow>('SELECT * FROM runs WHERE run_id = ?').get(runId);
     return row ? mapRunRow(row) : null;
   }
 
-  private async getRunByIdempotency(
-    client: PoolClient,
-    source: string,
-    idempotencyKey: string,
-  ): Promise<RunRecord | null> {
-    const runResult = await client.query<RunRow>(
-      `
-        SELECT r.*
-        FROM message_ingest mi
-        INNER JOIN runs r ON r.run_id = mi.run_id
-        WHERE mi.source = $1 AND mi.idempotency_key = $2
-      `,
-      [source, idempotencyKey],
-    );
+  private getRunByIdempotency(source: string, idempotencyKey: string): RunRecord | null {
+    const row = this.database
+      .prepare<unknown[], RunRow>(
+        `
+          SELECT r.*
+          FROM message_ingest mi
+          INNER JOIN runs r ON r.run_id = mi.run_id
+          WHERE mi.source = ? AND mi.idempotency_key = ?
+        `,
+      )
+      .get(source, idempotencyKey);
 
-    const row = runResult.rows[0];
     return row ? mapRunRow(row) : null;
   }
 }
 
-async function statusTransitionError(pool: Pool, runId: string, targetStatus: 'succeeded' | 'failed'): Promise<Error> {
-  const existing = await pool.query<Pick<RunRow, 'status'>>('SELECT status FROM runs WHERE run_id = $1', [runId]);
+function statusTransitionError(database: SqliteDatabase, runId: string, targetStatus: 'succeeded' | 'failed'): Error {
+  const row = database
+    .prepare<unknown[], Pick<RunRow, 'status'>>('SELECT status FROM runs WHERE run_id = ?')
+    .get(runId);
 
-  const row = existing.rows[0];
   if (!row) {
     return new Error(`cannot mark run ${runId} as ${targetStatus}: run not found`);
   }
@@ -252,10 +254,10 @@ function mapRunRow(row: RunRow): RunRecord {
     deliveryMode: row.delivery_mode,
     status: row.status,
     inputText: row.input_text,
-    output: row.output,
+    output: parseOutput(row.run_id, row.output),
     errorMessage: row.error_message,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -264,15 +266,44 @@ function mapThreadSessionRow(row: ThreadSessionRow): ThreadSessionRecord {
     threadKey: row.thread_key,
     sessionId: row.session_id,
     sessionFile: row.session_file,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-function isUniqueViolation(error: unknown): boolean {
+function parseOutput(runId: string, serialized: string | null): RunOutput | null {
+  if (serialized === null) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(serialized);
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('run output must be a JSON object');
+    }
+
+    return parsed as RunOutput;
+  } catch (error) {
+    throw new Error(
+      `failed to parse run ${runId} output JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function isSqliteConstraintViolation(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
   }
 
-  return 'code' in error && (error as { code?: string }).code === '23505';
+  if (!('code' in error)) {
+    return false;
+  }
+
+  const code = (error as { code?: string }).code;
+  return typeof code === 'string' && code.startsWith('SQLITE_CONSTRAINT');
+}
+
+function nowIsoTimestamp(): string {
+  return new Date().toISOString();
 }

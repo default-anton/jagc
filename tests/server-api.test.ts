@@ -10,9 +10,9 @@ import { createApp } from '../src/server/app.js';
 import type { RunExecutor } from '../src/server/executor.js';
 import type { RunScheduler } from '../src/server/scheduler.js';
 import { RunService } from '../src/server/service.js';
-import { PostgresRunStore } from '../src/server/store.js';
+import { SqliteRunStore } from '../src/server/store.js';
 import type { RunOutput, RunRecord } from '../src/shared/run-types.js';
-import { usePostgresTestDb } from './helpers/postgres-test-db.js';
+import { useSqliteTestDb } from './helpers/sqlite-test-db.js';
 
 class TestExecutor implements RunExecutor {
   async execute(run: RunRecord): Promise<RunOutput> {
@@ -260,7 +260,7 @@ class FakeThreadControlService {
   }
 }
 
-const testDb = usePostgresTestDb();
+const testDb = useSqliteTestDb();
 
 describe('server API', () => {
   test('GET /healthz returns ok', async () => {
@@ -728,7 +728,7 @@ async function createTestApp(
     threadControlService?: FakeThreadControlService;
   } = {},
 ) {
-  const runStore = new PostgresRunStore(testDb.pool);
+  const runStore = new SqliteRunStore(testDb.database);
 
   let runService!: RunService;
   const runScheduler: RunScheduler = {

@@ -2,12 +2,12 @@ import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Pool } from 'pg';
+import type { SqliteDatabase } from './sqlite.js';
 
 const migrationTableSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   name TEXT PRIMARY KEY,
-  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 `;
 
@@ -18,24 +18,24 @@ interface MigrationFile {
   path: string;
 }
 
-export async function runMigrations(pool: Pool, migrationsDir: string = defaultMigrationsDir): Promise<void> {
-  await pool.query(migrationTableSql);
+interface LoadedMigration {
+  name: string;
+  sql: string;
+}
+
+export async function runMigrations(
+  database: SqliteDatabase,
+  migrationsDir: string = defaultMigrationsDir,
+): Promise<void> {
+  database.exec(migrationTableSql);
 
   const migrationFiles = await loadMigrationFiles(migrationsDir);
   if (migrationFiles.length === 0) {
     throw new Error(`no migration files found in ${migrationsDir}`);
   }
 
-  const applied = await getAppliedMigrations(pool);
-
-  for (const migration of migrationFiles) {
-    if (applied.has(migration.name)) {
-      continue;
-    }
-
-    const sql = await readFile(migration.path, 'utf8');
-    await applyMigration(pool, migration.name, sql);
-  }
+  const migrations = await loadMigrationSources(migrationFiles);
+  applyPendingMigrations(database, migrations);
 }
 
 async function loadMigrationFiles(migrationsDir: string): Promise<MigrationFile[]> {
@@ -52,23 +52,47 @@ async function loadMigrationFiles(migrationsDir: string): Promise<MigrationFile[
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-async function getAppliedMigrations(pool: Pool): Promise<Set<string>> {
-  const result = await pool.query<{ name: string }>('SELECT name FROM schema_migrations');
-  return new Set(result.rows.map((row) => row.name));
+async function loadMigrationSources(files: MigrationFile[]): Promise<LoadedMigration[]> {
+  return Promise.all(
+    files.map(async (file) => ({
+      name: file.name,
+      sql: await readFile(file.path, 'utf8'),
+    })),
+  );
 }
 
-async function applyMigration(pool: Pool, name: string, sql: string): Promise<void> {
-  const client = await pool.connect();
+function applyPendingMigrations(database: SqliteDatabase, migrations: LoadedMigration[]): void {
+  let currentMigrationName: string | undefined;
+
+  const apply = database.transaction((pendingMigrations: LoadedMigration[]) => {
+    const applied = getAppliedMigrations(database);
+
+    for (const migration of pendingMigrations) {
+      if (applied.has(migration.name)) {
+        continue;
+      }
+
+      currentMigrationName = migration.name;
+      database.exec(migration.sql);
+      database.prepare('INSERT INTO schema_migrations (name) VALUES (?)').run(migration.name);
+      applied.add(migration.name);
+    }
+  });
 
   try {
-    await client.query('BEGIN');
-    await client.query(sql);
-    await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
-    await client.query('COMMIT');
+    apply.immediate(migrations);
   } catch (error) {
-    await client.query('ROLLBACK');
-    throw new Error(`failed to apply migration ${name}: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    client.release();
+    if (currentMigrationName) {
+      throw new Error(
+        `failed to apply migration ${currentMigrationName}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    throw new Error(`failed to run migrations: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function getAppliedMigrations(database: SqliteDatabase): Set<string> {
+  const rows = database.prepare<unknown[], { name: string }>('SELECT name FROM schema_migrations').all();
+  return new Set(rows.map((row) => row.name));
 }

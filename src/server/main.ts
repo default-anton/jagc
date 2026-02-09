@@ -1,5 +1,3 @@
-import { Pool } from 'pg';
-
 import { TelegramPollingAdapter } from '../adapters/telegram-polling.js';
 import { bootstrapAgentDir } from '../runtime/agent-dir-bootstrap.js';
 import { PiAuthService } from '../runtime/pi-auth.js';
@@ -11,7 +9,8 @@ import { EchoRunExecutor, type RunExecutor } from './executor.js';
 import { runMigrations } from './migrations.js';
 import { LocalRunScheduler } from './scheduler.js';
 import { RunService } from './service.js';
-import { PostgresRunStore } from './store.js';
+import { openSqliteDatabase } from './sqlite.js';
+import { SqliteRunStore } from './store.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -27,13 +26,11 @@ async function main(): Promise<void> {
     });
   }
 
-  const pool = new Pool({
-    connectionString: config.JAGC_DATABASE_URL,
-  });
+  const database = openSqliteDatabase(config.JAGC_DATABASE_PATH);
 
-  await runMigrations(pool);
+  await runMigrations(database);
 
-  const runStore = new PostgresRunStore(pool);
+  const runStore = new SqliteRunStore(database);
 
   let runExecutor: RunExecutor;
   let threadControlService: ThreadControlService | undefined;
@@ -90,7 +87,7 @@ async function main(): Promise<void> {
     await telegramAdapter?.stop();
     await app.close();
     await runService.shutdown();
-    await pool.end();
+    database.close();
   };
 
   process.once('SIGINT', () => {

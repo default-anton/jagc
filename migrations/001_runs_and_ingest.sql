@@ -6,20 +6,17 @@ CREATE TABLE IF NOT EXISTS runs (
   delivery_mode TEXT NOT NULL DEFAULT 'followUp' CHECK (delivery_mode IN ('steer', 'followUp')),
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
   input_text TEXT NOT NULL,
-  output JSONB,
+  output TEXT,
   error_message TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
-
-ALTER TABLE runs
-  ADD COLUMN IF NOT EXISTS delivery_mode TEXT NOT NULL DEFAULT 'followUp';
 
 CREATE TABLE IF NOT EXISTS message_ingest (
   source TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   run_id TEXT NOT NULL REFERENCES runs(run_id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   PRIMARY KEY (source, idempotency_key)
 );
 

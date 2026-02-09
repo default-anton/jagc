@@ -8,10 +8,6 @@ RUNNER="${JAGC_RUNNER:-echo}"
 PORT="${JAGC_PORT:-31415}"
 HOST="${JAGC_HOST:-127.0.0.1}"
 API_URL="http://$HOST:$PORT"
-DB_HOST="${JAGC_PGHOST:-127.0.0.1}"
-DB_PORT="${JAGC_PGPORT:-5432}"
-DB_USER="${JAGC_PGUSER:-postgres}"
-DB_NAME="${JAGC_PGDATABASE:-jagc}"
 SERVER_LOG_FILE="${JAGC_SMOKE_SERVER_LOG_FILE:-/tmp/jagc-smoke-server.log}"
 
 fail() {
@@ -29,10 +25,6 @@ assert_succeeded_run() {
   fi
 }
 
-scripts/dev-postgres.sh createdb
-
-export JAGC_DATABASE_URL="postgres://$DB_USER@$DB_HOST:$DB_PORT/$DB_NAME"
-
 REMOVE_WORKSPACE_DIR=0
 SMOKE_WORKSPACE_DIR="${JAGC_WORKSPACE_DIR:-}"
 if [[ -z "$SMOKE_WORKSPACE_DIR" ]]; then
@@ -42,11 +34,14 @@ else
   mkdir -p "$SMOKE_WORKSPACE_DIR"
 fi
 
+SMOKE_DATABASE_PATH="${JAGC_DATABASE_PATH:-$SMOKE_WORKSPACE_DIR/jagc.sqlite}"
+
 INVALID_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-invalid.XXXXXX.json")"
 MISMATCH_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-idem-mismatch.XXXXXX.json")"
 MISSING_RUN_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-run-missing.XXXXXX.json")"
 
 export JAGC_WORKSPACE_DIR="$SMOKE_WORKSPACE_DIR"
+export JAGC_DATABASE_PATH="$SMOKE_DATABASE_PATH"
 export JAGC_RUNNER="$RUNNER"
 export JAGC_PORT="$PORT"
 export JAGC_API_URL="$API_URL"

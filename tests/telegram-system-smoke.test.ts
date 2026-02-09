@@ -1,6 +1,5 @@
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
-import type { Pool } from 'pg';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { TelegramPollingAdapter } from '../src/adapters/telegram-polling.js';
@@ -8,12 +7,13 @@ import { createApp } from '../src/server/app.js';
 import { EchoRunExecutor } from '../src/server/executor.js';
 import { LocalRunScheduler } from '../src/server/scheduler.js';
 import { RunService } from '../src/server/service.js';
-import { PostgresRunStore } from '../src/server/store.js';
-import { usePostgresTestDb } from './helpers/postgres-test-db.js';
+import type { SqliteDatabase } from '../src/server/sqlite.js';
+import { SqliteRunStore } from '../src/server/store.js';
+import { useSqliteTestDb } from './helpers/sqlite-test-db.js';
 import { TelegramBotApiClone } from './helpers/telegram-bot-api-clone.js';
 import { telegramTestBotToken, telegramTestChatId, telegramTestUserId } from './helpers/telegram-test-kit.js';
 
-const testDb = usePostgresTestDb();
+const testDb = useSqliteTestDb();
 
 describe('Telegram system smoke', () => {
   const runningStacks = new Set<RunningTelegramSystemStack>();
@@ -26,7 +26,7 @@ describe('Telegram system smoke', () => {
   });
 
   test('polling update flows through run ingestion, execution, persistence, and API retrieval', async () => {
-    const stack = await startTelegramSystemStack(testDb.pool);
+    const stack = await startTelegramSystemStack(testDb.database);
     runningStacks.add(stack);
 
     const updateId = stack.clone.injectTextMessage({
@@ -42,7 +42,7 @@ describe('Telegram system smoke', () => {
     );
     expect(botReply.payload.text).toBe('system smoke ping');
 
-    const persistedRun = await loadRunByTelegramUpdateId(testDb.pool, updateId);
+    const persistedRun = await loadRunByTelegramUpdateId(testDb.database, updateId);
     expect(persistedRun).toMatchObject({
       source: 'telegram',
       thread_key: 'telegram:chat:101',
@@ -82,7 +82,7 @@ describe('Telegram system smoke', () => {
   });
 
   test('steer command persists steer delivery mode end-to-end', async () => {
-    const stack = await startTelegramSystemStack(testDb.pool);
+    const stack = await startTelegramSystemStack(testDb.database);
     runningStacks.add(stack);
 
     const updateId = stack.clone.injectTextMessage({
@@ -98,7 +98,7 @@ describe('Telegram system smoke', () => {
     );
     expect(botReply.payload.text).toBe('cut in now');
 
-    const persistedRun = await loadRunByTelegramUpdateId(testDb.pool, updateId);
+    const persistedRun = await loadRunByTelegramUpdateId(testDb.database, updateId);
     expect(persistedRun.delivery_mode).toBe('steer');
     expect(persistedRun.status).toBe('succeeded');
     expect(persistedRun.output).toMatchObject({
@@ -122,6 +122,10 @@ interface PersistedRunRow {
   output: Record<string, unknown> | null;
 }
 
+interface PersistedRunRowRaw extends Omit<PersistedRunRow, 'output'> {
+  output: string | null;
+}
+
 interface RunningTelegramSystemStack {
   clone: TelegramBotApiClone;
   app: FastifyInstance;
@@ -130,7 +134,7 @@ interface RunningTelegramSystemStack {
   stop(): Promise<void>;
 }
 
-async function startTelegramSystemStack(pool: Pool): Promise<RunningTelegramSystemStack> {
+async function startTelegramSystemStack(database: SqliteDatabase): Promise<RunningTelegramSystemStack> {
   const clone = new TelegramBotApiClone({ token: telegramTestBotToken });
   let app: FastifyInstance | null = null;
   let runService: RunService | null = null;
@@ -139,7 +143,7 @@ async function startTelegramSystemStack(pool: Pool): Promise<RunningTelegramSyst
   try {
     await clone.start();
 
-    const runStore = new PostgresRunStore(pool);
+    const runStore = new SqliteRunStore(database);
 
     const runScheduler = new LocalRunScheduler({
       dispatchRunById: async (runId) => {
@@ -248,23 +252,34 @@ async function stopTelegramSystemResources(resources: {
   }
 }
 
-async function loadRunByTelegramUpdateId(pool: Pool, updateId: number): Promise<PersistedRunRow> {
+async function loadRunByTelegramUpdateId(database: SqliteDatabase, updateId: number): Promise<PersistedRunRow> {
   const idempotencyKey = `telegram:update:${updateId}`;
 
-  const result = await pool.query<PersistedRunRow>(
-    `
-      SELECT r.run_id, r.source, r.thread_key, r.user_key, r.delivery_mode, r.status, r.input_text, r.output
-      FROM message_ingest mi
-      INNER JOIN runs r ON r.run_id = mi.run_id
-      WHERE mi.source = $1 AND mi.idempotency_key = $2
-    `,
-    ['telegram', idempotencyKey],
-  );
+  const run = database
+    .prepare<unknown[], PersistedRunRowRaw>(
+      `
+        SELECT r.run_id, r.source, r.thread_key, r.user_key, r.delivery_mode, r.status, r.input_text, r.output
+        FROM message_ingest mi
+        INNER JOIN runs r ON r.run_id = mi.run_id
+        WHERE mi.source = ? AND mi.idempotency_key = ?
+      `,
+    )
+    .get('telegram', idempotencyKey);
 
-  const run = result.rows[0];
   if (!run) {
     throw new Error(`run not found for telegram idempotency key ${idempotencyKey}`);
   }
 
-  return run;
+  return {
+    ...run,
+    output: parseRunOutput(run.output),
+  };
+}
+
+function parseRunOutput(serialized: string | null): Record<string, unknown> | null {
+  if (!serialized) {
+    return null;
+  }
+
+  return JSON.parse(serialized) as Record<string, unknown>;
 }

@@ -7,7 +7,14 @@ export interface AgentDirBootstrapResult {
   createdFiles: string[];
 }
 
-const workspaceGitignoreEntries = ['.sessions/', 'auth.json', 'git/'];
+const workspaceGitignoreEntries = [
+  '.sessions/',
+  'auth.json',
+  'git/',
+  'jagc.sqlite',
+  'jagc.sqlite-shm',
+  'jagc.sqlite-wal',
+];
 const defaultWorkspaceFiles = [
   {
     name: 'SYSTEM.md',

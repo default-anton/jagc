@@ -27,8 +27,8 @@
       <key>PATH</key>
       <string>/usr/local/bin:/usr/bin:/bin</string>
 
-      <key>JAGC_DATABASE_URL</key>
-      <string>postgres://user:pass@127.0.0.1:5432/jagc</string>
+      <key>JAGC_DATABASE_PATH</key>
+      <string>/Users/you/jagc-workspace/jagc.sqlite</string>
       <key>JAGC_WORKSPACE_DIR</key>
       <string>/Users/you/jagc-workspace</string>
       <key>JAGC_PORT</key>

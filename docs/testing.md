@@ -1,5 +1,16 @@
 # Testing strategy
 
+## Database feedback loop (SQLite)
+
+DB-backed tests use `tests/helpers/sqlite-test-db.ts`:
+
+- one in-memory SQLite database per test file
+- migrations applied once in `beforeAll`
+- table reset (`DELETE`) before each test for deterministic isolation
+- no transactional test harness (`BEGIN/ROLLBACK`) and no external DB process
+
+This keeps tests fast, parallel-friendly, and hermetic under Vitest worker file parallelism.
+
 ## Telegram adapter feedback loop
 
 Telegram tests use a local behavioral Bot API clone (`tests/helpers/telegram-bot-api-clone.ts`) instead of manual `grammY` context mocks.
@@ -7,12 +18,11 @@ Telegram tests use a local behavioral Bot API clone (`tests/helpers/telegram-bot
 Primary coverage lives in:
 
 - shared harness: `tests/helpers/telegram-test-kit.ts` (common bot token/chat fixtures, adapter+clone lifecycle helper, thread control fake)
-
 - `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, progress panel + typing indicator behavior, completion states, timeout/background completion handoff, long-output chunking, and adapter-level recovery from transient polling errors)
 - `tests/telegram-runtime-controls.test.ts` (settings/model/thinking/auth callback flows)
 - `tests/telegram-polling.test.ts` (command/callback parsing and stale callback recovery)
 - `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), malformed payload handling, and urlencoded payload parsing)
-- `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + Postgres + Fastify app + polling adapter + clone)
+- `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + SQLite + Fastify app + polling adapter + clone)
 
 This clone is intentionally narrow: it only implements the polling and messaging surface that jagc uses in v0:
 
@@ -41,5 +51,5 @@ That gives us stable refactors and catches protocol-shape regressions that conte
 ### Commands
 
 - Full non-smoke suite (includes Telegram behavioral tests): `pnpm test`
-- Focused Telegram suite (optional while iterating, includes Telegram system smoke and auto-starts local Postgres): `pnpm test:telegram`
+- Focused Telegram suite (optional while iterating, includes Telegram system smoke): `pnpm test:telegram`
 - Local release gate: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`

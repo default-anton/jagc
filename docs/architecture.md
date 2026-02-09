@@ -25,7 +25,8 @@ This doc is the implementation snapshot (not design intent).
 
 - Executors: `echo` (deterministic), `pi` (real agent)
 - Telegram polling adapter (personal chats) with `/settings`, `/new`, `/model`, `/thinking`, `/auth`
-- Postgres persistence (`runs`, ingest idempotency, `thread_sessions`)
+- SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
+- SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
 - In-process run scheduler for dispatch/recovery (no external workflow engine)
 
 ## Workspace bootstrap
@@ -33,7 +34,7 @@ This doc is the implementation snapshot (not design intent).
 - Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
 - Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (never overwrites existing files).
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
-- Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, and `git/` entries.
+- Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal` entries.
 
 ## Request/execution flow
 
@@ -62,7 +63,7 @@ This doc is the implementation snapshot (not design intent).
 
 ## Durability + recovery
 
-- Source of truth is Postgres run state (`runs.status`).
+- Source of truth is SQLite run state (`runs.status`).
 - `RunService.init()` performs:
   - immediate scan of `runs.status='running'`
   - periodic recovery pass (15s) to re-enqueue missing in-process work
@@ -80,7 +81,7 @@ This doc is the implementation snapshot (not design intent).
 - Session identity is per `thread_key`.
 - `thread_sessions` persists `thread_key`, `session_id`, `session_file`.
 - `PiRunExecutor` reopens persisted sessions when possible; creates/persists when missing/invalid.
-- In-memory session cache is hot-path only; Postgres mapping is source of truth across restarts.
+- In-memory session cache is hot-path only; SQLite mapping is source of truth across restarts.
 
 ### Same-thread coordination (non-obvious)
 
@@ -93,7 +94,7 @@ This doc is the implementation snapshot (not design intent).
 Operational note:
 
 - With the in-process scheduler feeding a per-thread controller, same-thread `followUp`/`steer` messages can be delivered while a session is active.
-- If the process crashes, pending `running` rows are replayed from Postgres on recovery.
+- If the process crashes, pending `running` rows are replayed from SQLite on recovery.
 
 ## Telegram polling behavior
 
@@ -135,7 +136,7 @@ Operational note:
 - API schemas: `src/shared/api-contracts.ts` (used by server + CLI)
 - Run progress event contract: `src/shared/run-progress.ts`
 - Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`
-- Migration runner: `src/server/migrations.ts` (`schema_migrations`)
+- Migration runner: `src/server/migrations.ts` (`schema_migrations`; startup apply runs in a SQLite `BEGIN IMMEDIATE` transaction to avoid concurrent bootstrap races)
 
 ## Known gaps / intentional limitations
 

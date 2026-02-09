@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'vitest';
 
-import { PostgresRunStore } from '../src/server/store.js';
-import { usePostgresTestDb } from './helpers/postgres-test-db.js';
+import { SqliteRunStore } from '../src/server/store.js';
+import { useSqliteTestDb } from './helpers/sqlite-test-db.js';
 
-const testDb = usePostgresTestDb();
+const testDb = useSqliteTestDb();
 
-describe('PostgresRunStore', () => {
+describe('SqliteRunStore', () => {
   test('markFailed rejects when run is already succeeded', async () => {
-    const store = new PostgresRunStore(testDb.pool);
+    const store = new SqliteRunStore(testDb.database);
     await store.init();
 
     const created = await store.createRun({
@@ -25,7 +25,7 @@ describe('PostgresRunStore', () => {
   });
 
   test('markSucceeded rejects when run is missing', async () => {
-    const store = new PostgresRunStore(testDb.pool);
+    const store = new SqliteRunStore(testDb.database);
     await store.init();
 
     await expect(store.markSucceeded('missing-run-id', { type: 'message', text: 'hello' })).rejects.toThrow(
@@ -34,7 +34,7 @@ describe('PostgresRunStore', () => {
   });
 
   test('listRunningRuns returns only running runs', async () => {
-    const store = new PostgresRunStore(testDb.pool);
+    const store = new SqliteRunStore(testDb.database);
     await store.init();
 
     const first = await store.createRun({
@@ -58,7 +58,7 @@ describe('PostgresRunStore', () => {
   });
 
   test('persists thread session mapping', async () => {
-    const store = new PostgresRunStore(testDb.pool);
+    const store = new SqliteRunStore(testDb.database);
     await store.init();
 
     await store.upsertThreadSession('cli:default', 'session-1', '/tmp/session-1.jsonl');
@@ -72,7 +72,7 @@ describe('PostgresRunStore', () => {
   });
 
   test('deletes persisted thread session mapping', async () => {
-    const store = new PostgresRunStore(testDb.pool);
+    const store = new SqliteRunStore(testDb.database);
     await store.init();
 
     await store.upsertThreadSession('cli:default', 'session-1', '/tmp/session-1.jsonl');

@@ -4,7 +4,7 @@
 
 Self-hosted AI assistant to automate your life:
 - **pi-coding-agent** for agent runtime behavior (sessions, context files, skills/prompts/extensions/themes/packages)
-- **Postgres-backed run state + in-process scheduler** for durable run tracking and execution
+- **SQLite-backed run state + in-process scheduler** for durable run tracking and execution
 
 This README is intentionally short and v0-focused.
 
@@ -18,7 +18,7 @@ For testing loops (including Telegram behavioral polling clone), see **[`docs/te
 - **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating is still manual/local-only.
 - Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking,session}`).
 - CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `new`, `model list/get/set`, and `thinking get/set`.
-- Default executor runs through pi SDK sessions with Postgres-backed durable run tracking and in-process scheduling/recovery.
+- Default executor runs through pi SDK sessions with SQLite-backed durable run tracking and in-process scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread pi session controllers; run dispatch/recovery is in-process and single-server-process scoped in v0.
 - Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/new`, `/model`, `/thinking`, and `/auth`.
@@ -38,7 +38,7 @@ Source of truth: **[`AGENTS.md`](AGENTS.md)**.
 - Server/API: Fastify + Zod + Pino
 - CLI: Commander
 - Agent/runtime: pi-coding-agent
-- Durable run state: Postgres (`runs`, `message_ingest`, `thread_sessions`) + in-process scheduler
+- Durable run state: SQLite (`runs`, `message_ingest`, `thread_sessions`) + in-process scheduler
 - Telegram: grammY (polling first)
 - Quality/tooling: Biome + Vitest
 - Build: tsdown
@@ -101,14 +101,14 @@ $JAGC_WORKSPACE_DIR/
   tools/              # optional
   jagc.json           # optional
   settings.json       # auto-created on first startup (pi workspace settings + default packages)
-  .gitignore          # auto-managed: .sessions/, auth.json, git/
+  .gitignore          # auto-managed: .sessions/, auth.json, git/, jagc.sqlite*
 ```
 
 ## Configuration (v0 minimum)
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `JAGC_DATABASE_URL` | Yes | Postgres connection string |
+| `JAGC_DATABASE_PATH` | No | SQLite DB file path (default `$JAGC_WORKSPACE_DIR/jagc.sqlite`; relative paths resolve under `JAGC_WORKSPACE_DIR`) |
 | `JAGC_WORKSPACE_DIR` | No | Workspace + pi agent directory (default `~/.jagc`) |
 | `JAGC_HOST` | No | Server bind host (default `127.0.0.1`) |
 | `JAGC_PORT` | No | Server bind port (default `31415`) |
@@ -120,19 +120,17 @@ $JAGC_WORKSPACE_DIR/
 
 Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
-By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. On startup it ensures the directory exists, creates `SYSTEM.md`, `AGENTS.md`, and `settings.json` from built-in templates if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, and `git/`. The default `settings.json` pre-installs `git:github.com/default-anton/pi-librarian` and `git:github.com/default-anton/pi-subdir-context`; users can edit/remove them later. jagc still does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for workspace files and sets `JAGC_DATABASE_PATH` to `$JAGC_WORKSPACE_DIR/jagc.sqlite`. On startup it ensures the directory exists, creates `SYSTEM.md`, `AGENTS.md`, and `settings.json` from built-in templates if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal`. The default `settings.json` pre-installs `git:github.com/default-anton/pi-librarian` and `git:github.com/default-anton/pi-subdir-context`; users can edit/remove them later. jagc still does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
 
 ## Quick start (dev)
 
 1. `mise install` (rerun when required tools are missing or `.tool-versions` changes)
-2. Start Postgres (`pnpm db:start && pnpm db:createdb`)
-3. `pnpm install`
-4. Set required env vars (see `.env.example`)
-5. `pnpm dev` (applies SQL migrations from `migrations/` on startup)
-6. Verify:
+2. `pnpm install`
+3. Set required env vars (see `.env.example`)
+4. `pnpm dev` (applies SQL migrations from `migrations/` on startup)
+5. Verify:
    - `pnpm smoke`
-   - `pnpm test` (runs against real Postgres and creates worker-specific test databases on demand)
-   - optional cleanup: `pnpm db:drop:test`
+   - `pnpm test`
    - or manually: `pnpm dev:cli health --json` then `pnpm dev:cli message "ping" --json`
    - inspect provider/model catalog: `pnpm dev:cli model list --json`
    - inspect auth status / start OAuth login: `pnpm dev:cli auth providers --json` and `pnpm dev:cli auth login openai-codex`

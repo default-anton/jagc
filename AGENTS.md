@@ -10,10 +10,6 @@
 
 ## Use canonical feedback loop commands (no ad-hoc replacements)
 
-- Start local Postgres: `pnpm db:start`
-- Ensure dev DB exists: `pnpm db:createdb`
-- Check Postgres readiness: `pnpm db:status`
-- Stop local Postgres: `pnpm db:stop`
 - Fast end-to-end smoke (echo runner): `pnpm smoke`
 - Smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
 - Full non-smoke test suite (includes Telegram behavioral clone tests): `pnpm test`
@@ -26,6 +22,7 @@
 - `output` is a structured payload contract (not plain-text-only).
 - Default same-thread delivery mode is `followUp`; `steer` is explicit opt-in.
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by the per-thread pi session controller (single-process scope in v0; global multi-process locking is deferred).
+- SQLite run state defaults to `$JAGC_WORKSPACE_DIR/jagc.sqlite`; keep workspace `.gitignore` SQLite entries (`jagc.sqlite*`) intact.
 - Provider/model/thinking state lives in pi settings/session state; do not duplicate model/thinking state in jagc DB.
 - Local CLI usage is unauthenticated; webhook ingress requires token auth.
 - Primary runtime integration is pi SDK in-process (`createAgentSession`); RPC is optional/non-primary.
