@@ -54,6 +54,7 @@ export class TelegramRunProgressReporter {
   private lastThinkingAt = 0;
   private lastThinkingLoggedAt = 0;
   private thinkingPreview = '';
+  private hasPendingThinkingPreview = false;
 
   private currentTool: CurrentToolState | null = null;
   private readonly toolLabelsByCallId = new Map<string, string>();
@@ -111,6 +112,10 @@ export class TelegramRunProgressReporter {
 
     let immediateRender = false;
 
+    if (event.type !== 'assistant_thinking_delta') {
+      immediateRender = this.flushThinkingPreviewToLog() || immediateRender;
+    }
+
     switch (event.type) {
       case 'queued': {
         this.phase = 'queued';
@@ -140,11 +145,9 @@ export class TelegramRunProgressReporter {
         const delta = normalizePreviewDelta(event.delta);
         if (delta.trim().length > 0) {
           this.thinkingPreview = appendTail(this.thinkingPreview, delta.slice(-maxDeltaChars), maxThinkingPreviewChars);
+          this.hasPendingThinkingPreview = true;
           if (now - this.lastThinkingLoggedAt >= minThinkingLogIntervalMs) {
-            if (this.pushEventLogLine(`~ ${truncateLine(this.thinkingPreview, 220)}`)) {
-              immediateRender = true;
-            }
-            this.lastThinkingLoggedAt = now;
+            immediateRender = this.flushThinkingPreviewToLog(now) || immediateRender;
           }
         }
         break;
@@ -432,6 +435,39 @@ export class TelegramRunProgressReporter {
     }
 
     return this.renderTrimmedLines(lines);
+  }
+
+  private flushThinkingPreviewToLog(now = Date.now()): boolean {
+    if (!this.hasPendingThinkingPreview) {
+      return false;
+    }
+
+    const thinkingSnippet = truncateLine(this.thinkingPreview, 220);
+    if (thinkingSnippet.length === 0) {
+      this.hasPendingThinkingPreview = false;
+      this.lastThinkingLoggedAt = now;
+      return false;
+    }
+
+    const line = truncateLine(`~ ${thinkingSnippet}`, maxProgressToolLabelChars);
+    const lastIndex = this.eventLogLines.length - 1;
+    if (lastIndex >= 0 && this.eventLogLines[lastIndex]?.startsWith('~ ')) {
+      if (this.eventLogLines[lastIndex] !== line) {
+        this.eventLogLines[lastIndex] = line;
+        this.hasPendingThinkingPreview = false;
+        this.lastThinkingLoggedAt = now;
+        return true;
+      }
+
+      this.hasPendingThinkingPreview = false;
+      this.lastThinkingLoggedAt = now;
+      return false;
+    }
+
+    const appended = this.pushEventLogLine(line);
+    this.hasPendingThinkingPreview = false;
+    this.lastThinkingLoggedAt = now;
+    return appended;
   }
 
   private pushEventLogLine(line: string): boolean {

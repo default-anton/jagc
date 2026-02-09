@@ -149,6 +149,99 @@ describe('TelegramPollingAdapter message flow integration', () => {
     );
   }, 12_000);
 
+  test('flushes latest thinking preview before tool events so snippets are not left mid-token', async () => {
+    const runningState = runRecord({
+      runId: 'run-thinking-flush',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-thinking-flush',
+      status: 'succeeded',
+      output: { text: 'Thinking flush done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-thinking-flush',
+      [
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        completedState,
+      ],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-thinking-flush', 'started')],
+          2: [
+            progressEvent('run-thinking-flush', 'assistant_thinking_delta', {
+              delta: '**Listing',
+            }),
+          ],
+          3: [
+            progressEvent('run-thinking-flush', 'assistant_thinking_delta', {
+              delta: ' directories',
+            }),
+          ],
+          4: [
+            progressEvent('run-thinking-flush', 'tool_execution_start', {
+              toolCallId: 'tool-1',
+              toolName: 'bash',
+              args: { command: 'find . -maxdepth 1 -type d' },
+            }),
+          ],
+          5: [
+            progressEvent('run-thinking-flush', 'tool_execution_end', {
+              toolCallId: 'tool-1',
+              toolName: 'bash',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 200,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show latest thinking preview',
+        });
+
+        const progressEdit = await clone.waitForBotCall(
+          'editMessageText',
+          (call) =>
+            typeof call.payload.text === 'string' &&
+            call.payload.text.includes('> bash cmd="find . -maxdepth 1 -type d"'),
+          8_000,
+        );
+
+        expect(progressEdit.payload.text).toContain('~ **Listing directories');
+        expect(progressEdit.payload.text).toContain('> bash cmd="find . -maxdepth 1 -type d"');
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Thinking flush done',
+          8_000,
+        );
+        expect(finalMessage.payload.text).toBe('Thinking flush done');
+      },
+    );
+  }, 14_000);
+
   test('tool progress labels keep only useful argument snippets', async () => {
     const runningState = runRecord({
       runId: 'run-tool-snippets',

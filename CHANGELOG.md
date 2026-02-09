@@ -16,6 +16,7 @@ This project follows a readable, sectioned changelog format with a permanent **U
 
 ### Fixed
 
+- Telegram progress updates now flush the latest buffered thinking snippet before tool/text lifecycle events, preventing stale mid-token previews like `~ **Listing` when newer thinking deltas already arrived.
 - npm package contents now include `defaults/skills/**` (and `defaults/extensions/**`), restoring default skill bootstrap for fresh installs.
 
 ## [0.1.0] - 2026-02-09
