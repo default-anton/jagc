@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=jagc
 Group=jagc
-WorkingDirectory=/opt/jagc
+WorkingDirectory=/var/lib/jagc/workspace
 EnvironmentFile=/etc/jagc/jagc.env
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/env pnpm start
+ExecStart=/usr/bin/env node /usr/local/lib/node_modules/jagc/dist/server/main.mjs
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=2

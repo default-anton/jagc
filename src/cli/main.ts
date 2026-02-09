@@ -18,6 +18,8 @@ import {
   submitOAuthLoginInput,
   waitForRun,
 } from './client.js';
+import { exitWithError, parsePositiveNumber, printJson } from './common.js';
+import { registerServiceCommands } from './service-commands.js';
 
 const defaultApiUrl = process.env.JAGC_API_URL ?? 'http://127.0.0.1:31415';
 const defaultThreadKey = 'cli:default';
@@ -45,6 +47,8 @@ program
       exitWithError(error);
     }
   });
+
+registerServiceCommands(program);
 
 program
   .command('message')
@@ -311,20 +315,6 @@ function apiUrl(root: Command): string {
   return root.opts<{ apiUrl: string }>().apiUrl;
 }
 
-function printJson(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
-}
-
-function parsePositiveNumber(value: string): number {
-  const parsed = Number(value);
-
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new InvalidArgumentError('must be a positive number');
-  }
-
-  return parsed;
-}
-
 function parseProviderModel(input: string): { provider: string; modelId: string } {
   const trimmed = input.trim();
   const separatorIndex = trimmed.indexOf('/');
@@ -454,10 +444,4 @@ function isOAuthInputRaceError(error: unknown): boolean {
   }
 
   return error.message.includes('not waiting for input') || error.message.includes('expects');
-}
-
-function exitWithError(error: unknown): never {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exit(1);
 }

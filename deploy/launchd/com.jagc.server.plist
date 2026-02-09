@@ -5,15 +5,18 @@
     <key>Label</key>
     <string>com.jagc.server</string>
 
+    <!--
+      Prefer `jagc install` for managed setup.
+      This file is the manual fallback when operators need to hand-edit launchd config.
+    -->
     <key>ProgramArguments</key>
     <array>
-      <string>/usr/bin/env</string>
-      <string>pnpm</string>
-      <string>start</string>
+      <string>/opt/homebrew/bin/node</string>
+      <string>/usr/local/lib/node_modules/jagc/dist/server/main.mjs</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/opt/jagc</string>
+    <string>/Users/you/.jagc</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -21,27 +24,35 @@
     <key>KeepAlive</key>
     <true/>
 
+    <key>ProcessType</key>
+    <string>Background</string>
+
     <key>EnvironmentVariables</key>
     <dict>
-      <!-- Make sure pnpm/node are discoverable under launchd's minimal environment. -->
       <key>PATH</key>
-      <string>/usr/local/bin:/usr/bin:/bin</string>
-
-      <key>JAGC_DATABASE_PATH</key>
-      <string>/Users/you/jagc-workspace/jagc.sqlite</string>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
       <key>JAGC_WORKSPACE_DIR</key>
-      <string>/Users/you/jagc-workspace</string>
+      <string>/Users/you/.jagc</string>
+      <key>JAGC_DATABASE_PATH</key>
+      <string>/Users/you/.jagc/jagc.sqlite</string>
+      <key>JAGC_HOST</key>
+      <string>127.0.0.1</string>
       <key>JAGC_PORT</key>
       <string>31415</string>
+      <key>JAGC_RUNNER</key>
+      <string>pi</string>
+      <key>JAGC_LOG_LEVEL</key>
+      <string>info</string>
+      <!-- Optional provider env vars -->
+      <!-- <key>OPENAI_API_KEY</key><string>...</string> -->
+      <!-- Optional Telegram polling -->
+      <!-- <key>JAGC_TELEGRAM_BOT_TOKEN</key><string>...</string> -->
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/tmp/jagc.out.log</string>
+    <string>/Users/you/.jagc/logs/server.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/jagc.err.log</string>
-
-    <key>ProcessType</key>
-    <string>Background</string>
+    <string>/Users/you/.jagc/logs/server.err.log</string>
   </dict>
 </plist>
