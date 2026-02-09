@@ -31,6 +31,7 @@ This doc is the implementation snapshot (not design intent).
 ## Workspace bootstrap
 
 - Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
+- Bootstrap creates default `SYSTEM.md` and `AGENTS.md` files from repo markdown templates when missing (never overwrites existing files).
 - Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, and `git/` entries.
 
 ## Request/execution flow

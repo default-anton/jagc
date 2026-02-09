@@ -89,8 +89,8 @@ Canonical layout (v0):
 
 ```text
 $JAGC_WORKSPACE_DIR/
-  AGENTS.md           # recommended
-  SYSTEM.md           # optional
+  AGENTS.md           # auto-created on first startup (global user profile + assistant instructions)
+  SYSTEM.md           # auto-created on first startup (global assistant behavior baseline)
   APPEND_SYSTEM.md    # optional
   skills/             # optional
   prompts/            # optional
@@ -118,7 +118,7 @@ $JAGC_WORKSPACE_DIR/
 
 Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
-By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. On startup it ensures the workspace directory exists and that `.gitignore` includes `.sessions/`, `auth.json`, and `git/`. It does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. On startup it ensures the directory exists, creates `SYSTEM.md` and `AGENTS.md` from built-in markdown templates if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, and `git/`. It does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
 
 ## Quick start (dev)
 

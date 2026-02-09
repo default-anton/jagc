@@ -18,11 +18,12 @@ async function main(): Promise<void> {
   const logger = createJsonLogger({ level: config.JAGC_LOG_LEVEL });
 
   const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR);
-  if (bootstrapResult.createdDirectory) {
+  if (bootstrapResult.createdDirectory || bootstrapResult.createdFiles.length > 0) {
     logger.info({
       event: 'workspace_bootstrap',
       workspace_dir: config.JAGC_WORKSPACE_DIR,
-      created_directory: true,
+      created_directory: bootstrapResult.createdDirectory,
+      created_files: bootstrapResult.createdFiles,
     });
   }
 
