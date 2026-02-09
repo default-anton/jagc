@@ -145,7 +145,8 @@ export class RunService {
         this.logger.error({
           event: 'run_dispatch_execute_failed',
           run_id: run.runId,
-          message: toErrorMessage(error),
+          error_message: toErrorMessage(error),
+          err: toErrorForLog(error),
         });
       })
       .finally(() => {
@@ -244,7 +245,8 @@ export class RunService {
         this.logger.error({
           event: 'run_recovery_enqueue_failed',
           run_id: run.runId,
-          message: toErrorMessage(error),
+          error_message: toErrorMessage(error),
+          err: toErrorForLog(error),
         });
       }
     }
@@ -265,7 +267,8 @@ export class RunService {
       this.logger.error({
         event: 'run_enqueue_failed',
         run_id: run.runId,
-        message: toErrorMessage(error),
+        error_message: toErrorMessage(error),
+        err: toErrorForLog(error),
       });
       throw error;
     }
@@ -290,7 +293,8 @@ export class RunService {
           this.logger.warn({
             event: 'run_progress_listener_failed',
             run_id: event.runId,
-            message: toErrorMessage(error),
+            error_message: toErrorMessage(error),
+            err: toErrorForLog(error),
           });
         }
       }
@@ -327,6 +331,10 @@ export class RunService {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toErrorForLog(error: unknown): Error | undefined {
+  return error instanceof Error ? error : undefined;
 }
 
 function isAlreadyTerminalTransition(error: unknown): boolean {

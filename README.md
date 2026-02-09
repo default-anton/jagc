@@ -22,6 +22,7 @@ For testing loops (including Telegram behavioral polling clone), see **[`docs/te
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread pi session controllers; run dispatch/recovery is in-process and single-server-process scoped in v0.
 - Telegram polling adapter is implemented (personal chats), including button-based runtime controls via `/settings`, `/new`, `/model`, `/thinking`, and `/auth`.
+- Server/runtime logs are unified on structured Pino JSON with component-scoped child loggers and request completion events.
 - Telegram chat UX now streams live run progress in-chat (status panel edits + typing indicator + tool/thinking/text activity summaries) while preserving final run output delivery.
 - If Telegram foreground wait times out, the adapter keeps watching in the background and posts the final result when the run completes.
 - Model/thinking changes from Telegram button pickers return to the `/settings` panel with updated runtime state.
@@ -115,7 +116,6 @@ $JAGC_WORKSPACE_DIR/
 | `JAGC_API_URL` | No | CLI API target (default `http://127.0.0.1:31415`) |
 | `JAGC_RUNNER` | No | `pi` (default) or `echo` for deterministic local/smoke runs |
 | `JAGC_TELEGRAM_BOT_TOKEN` | No | Required only when Telegram adapter is enabled |
-| `JAGC_TELEGRAM_WEBHOOK_SECRET` | No | Required when Telegram webhook mode is enabled |
 | `JAGC_WEBHOOK_BEARER_TOKEN` | No | Required when generic `POST /v1/webhooks/:source` ingress is enabled |
 
 Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
@@ -167,7 +167,6 @@ jagc auth login openai-codex --owner-key cli:default
 - Third-party pi packages are **trusted code**; review before installing.
 - Local CLI usage requires no auth for v0.
 - Generic webhook ingress (`POST /v1/webhooks/:source`) requires bearer-token auth (`Authorization: Bearer ...`).
-- Telegram webhook mode requires `X-Telegram-Bot-Api-Secret-Token` verification.
 - Hardening path after v0: add HMAC-signed payload verification + replay protection (timestamp/nonce window).
 - Run as unprivileged user; keep secrets out of repos.
 
@@ -179,6 +178,6 @@ jagc auth login openai-codex --owner-key cli:default
 
 ## Deferred scope
 
-See **[`docs/future.md`](docs/future.md)** for the post-v0 roadmap (webhook hardening, CI automation, observability, operator UX, and deployment maturity).
+See **[`docs/future.md`](docs/future.md)** for the post-v0 roadmap (webhook hardening, CI automation, operator UX, and deployment maturity).
 
 Pre-v0 long-form draft details were intentionally removed during docs tightening; recover them from git history if needed.

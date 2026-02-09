@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type {
   OAuthLoginAttemptSnapshot,
@@ -56,11 +56,55 @@ interface AppOptions {
     setThreadThinkingLevel(threadKey: string, thinkingLevel: SupportedThinkingLevel): Promise<ThreadRuntimeState>;
     resetThreadSession(threadKey: string): Promise<void>;
   };
-  logger?: boolean | object;
+  logger?: FastifyBaseLogger;
 }
 
 export function createApp(options: AppOptions): FastifyInstance {
-  const app = Fastify({ logger: options.logger ?? false });
+  let app: FastifyInstance;
+
+  if (options.logger) {
+    app = Fastify({
+      loggerInstance: options.logger,
+      disableRequestLogging: true,
+    });
+  } else {
+    app = Fastify({ logger: false });
+  }
+
+  const requestStartedAt = new WeakMap<object, bigint>();
+
+  app.addHook('onRequest', async (request) => {
+    requestStartedAt.set(request, process.hrtime.bigint());
+  });
+
+  app.addHook('onError', async (request, reply, error) => {
+    request.log.error({
+      event: 'http_request_failed',
+      request_id: request.id,
+      method: request.method,
+      route: request.routeOptions.url,
+      url: request.url,
+      status_code: reply.statusCode,
+      err: error,
+    });
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const startedAt = requestStartedAt.get(request);
+    requestStartedAt.delete(request);
+
+    const durationMs = startedAt === undefined ? null : Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+    request.log.info({
+      event: 'http_request_completed',
+      request_id: request.id,
+      method: request.method,
+      route: request.routeOptions.url,
+      url: request.url,
+      status_code: reply.statusCode,
+      duration_ms: durationMs,
+    });
+  });
 
   app.get('/healthz', async () => {
     return { ok: true };

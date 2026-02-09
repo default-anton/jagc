@@ -27,6 +27,8 @@ This doc is the implementation snapshot (not design intent).
 - Telegram polling adapter (personal chats) with `/settings`, `/new`, `/model`, `/thinking`, `/auth`
 - SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
+- Structured Pino JSON logging with component-scoped child loggers shared across server/runtime/adapters
+- HTTP request completion/error events are emitted from Fastify hooks with request IDs and duration fields
 - In-process run scheduler for dispatch/recovery (no external workflow engine)
 
 ## Workspace bootstrap
@@ -140,7 +142,7 @@ Operational note:
 
 ## Known gaps / intentional limitations
 
-- Telegram webhook mode is not implemented (polling is implemented).
+- Telegram webhook mode is intentionally unsupported in core (polling is the only supported Telegram mode).
 - Webhook hardening beyond current baseline is pending (signatures/replay protection).
 - CI merge-gate automation is not wired yet; local release gate is the current gate (`pnpm typecheck && pnpm lint && pnpm test && pnpm build`).
 - Multi-process one-active-run-per-thread coordination is deferred.

@@ -87,7 +87,8 @@ export class LocalRunScheduler implements RunScheduler {
           this.logger.error({
             event: 'run_scheduler_dispatch_failed',
             run_id: run.runId,
-            message: toErrorMessage(error),
+            error_message: toErrorMessage(error),
+            err: toErrorForLog(error),
           });
         }
       })
@@ -113,4 +114,8 @@ export class LocalRunScheduler implements RunScheduler {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toErrorForLog(error: unknown): Error | undefined {
+  return error instanceof Error ? error : undefined;
 }

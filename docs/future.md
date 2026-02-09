@@ -31,10 +31,6 @@ Do not add implementation detail here unless it is deferred/future-looking.
    - Wire the existing local release gate command into CI:
      `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
 
-3. **Observability baseline**
-   - Structured JSON logs by default in prod.
-   - Core run metrics (latency, failures, queue depth/backlog).
-
 ### P2 — operator/developer UX
 
 1. **`jagc doctor`** for environment and config diagnostics.
@@ -49,6 +45,7 @@ Do not add implementation detail here unless it is deferred/future-looking.
 
 ## Near-term non-goals
 
+- Telegram webhook runtime mode in core (polling remains the supported Telegram mode).
 - Multi-host/distributed runtime orchestration.
 - New ingress adapters in core beyond current v0 scope.
 - Large API surface expansion before hardening current contracts.

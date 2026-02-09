@@ -3,7 +3,7 @@ import { bootstrapAgentDir } from '../runtime/agent-dir-bootstrap.js';
 import { PiAuthService } from '../runtime/pi-auth.js';
 import { PiRunExecutor, type ThreadControlService } from '../runtime/pi-executor.js';
 import { loadConfig } from '../shared/config.js';
-import { createJsonLogger, resolveLogLevel } from '../shared/logger.js';
+import { createLogger, resolveLogLevel } from '../shared/logger.js';
 import { createApp } from './app.js';
 import { EchoRunExecutor, type RunExecutor } from './executor.js';
 import { runMigrations } from './migrations.js';
@@ -14,11 +14,17 @@ import { SqliteRunStore } from './store.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const logger = createJsonLogger({ level: config.JAGC_LOG_LEVEL });
+  const rootLogger = createLogger({
+    level: config.JAGC_LOG_LEVEL,
+    bindings: {
+      service: 'jagc',
+    },
+  });
+  const mainLogger = rootLogger.child({ component: 'server_main' });
 
   const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR);
   if (bootstrapResult.createdDirectory || bootstrapResult.createdFiles.length > 0) {
-    logger.info({
+    mainLogger.info({
       event: 'workspace_bootstrap',
       workspace_dir: config.JAGC_WORKSPACE_DIR,
       created_directory: bootstrapResult.createdDirectory,
@@ -55,10 +61,10 @@ async function main(): Promise<void> {
 
       await runService.dispatchRunById(runId);
     },
-    logger,
+    logger: rootLogger.child({ component: 'run_scheduler' }),
   });
 
-  runService = new RunService(runStore, runExecutor, runScheduler, logger);
+  runService = new RunService(runStore, runExecutor, runScheduler, rootLogger.child({ component: 'run_service' }));
   await runService.init();
 
   const authService = new PiAuthService(config.JAGC_WORKSPACE_DIR);
@@ -67,9 +73,7 @@ async function main(): Promise<void> {
     runService,
     authService,
     threadControlService,
-    logger: {
-      level: config.JAGC_LOG_LEVEL,
-    },
+    logger: rootLogger.child({ component: 'http_server' }),
   });
 
   let telegramAdapter: TelegramPollingAdapter | undefined;
@@ -79,23 +83,34 @@ async function main(): Promise<void> {
       runService,
       authService,
       threadControlService,
-      logger,
+      logger: rootLogger.child({ component: 'telegram_polling' }),
     });
   }
 
-  const close = async () => {
-    await telegramAdapter?.stop();
-    await app.close();
-    await runService.shutdown();
-    database.close();
+  let closePromise: Promise<void> | null = null;
+  const close = async (signal?: string) => {
+    if (closePromise) {
+      return closePromise;
+    }
+
+    closePromise = (async () => {
+      mainLogger.info({ event: 'server_shutdown_started', signal: signal ?? null });
+      await telegramAdapter?.stop();
+      await app.close();
+      await runService.shutdown();
+      database.close();
+      mainLogger.info({ event: 'server_shutdown_completed', signal: signal ?? null });
+    })();
+
+    return closePromise;
   };
 
   process.once('SIGINT', () => {
-    void close().finally(() => process.exit(0));
+    void close('SIGINT').finally(() => process.exit(0));
   });
 
   process.once('SIGTERM', () => {
-    void close().finally(() => process.exit(0));
+    void close('SIGTERM').finally(() => process.exit(0));
   });
 
   await app.listen({
@@ -103,20 +118,29 @@ async function main(): Promise<void> {
     host: config.JAGC_HOST,
   });
 
+  mainLogger.info({
+    event: 'server_listening',
+    host: config.JAGC_HOST,
+    port: config.JAGC_PORT,
+  });
+
   if (telegramAdapter) {
     await telegramAdapter.start();
   }
 }
 
-const startupLogger = createJsonLogger({
+const startupLogger = createLogger({
   level: resolveLogLevel(process.env.JAGC_LOG_LEVEL),
+  bindings: {
+    service: 'jagc',
+    component: 'server_main',
+  },
 });
 
 main().catch((error) => {
   startupLogger.error({
     event: 'server_main_failed',
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
+    err: error instanceof Error ? error : new Error(String(error)),
   });
   process.exit(1);
 });
