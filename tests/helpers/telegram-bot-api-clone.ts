@@ -43,6 +43,24 @@ export interface TelegramBotApiCloneOptions {
   username?: string;
 }
 
+export interface TelegramCloneApiErrorSpec {
+  errorCode: number;
+  description: string;
+  parameters?: Record<string, unknown>;
+}
+
+interface QueuedApiError extends TelegramCloneApiErrorSpec {
+  remaining: number;
+}
+
+class TelegramCloneApiError extends Error {
+  constructor(readonly spec: TelegramCloneApiErrorSpec) {
+    super(spec.description);
+  }
+}
+
+class TelegramClonePayloadError extends Error {}
+
 export class TelegramBotApiClone {
   private readonly token: string;
   private readonly username: string;
@@ -51,6 +69,8 @@ export class TelegramBotApiClone {
   private readonly updateWaiters = new Set<() => void>();
   private readonly botCalls: TelegramCloneBotCall[] = [];
   private readonly pendingCallWaiters = new Set<PendingCallWaiter>();
+  private readonly queuedApiErrors = new Map<string, QueuedApiError[]>();
+  private readonly apiCallCounts = new Map<string, number>();
   private nextUpdateId = 1;
   private nextMessageId = 1;
   private nextCallbackQueryId = 1;
@@ -174,6 +194,24 @@ export class TelegramBotApiClone {
     return [...this.botCalls];
   }
 
+  failNextApiCall(method: string, spec: TelegramCloneApiErrorSpec, times = 1): void {
+    if (!Number.isInteger(times) || times <= 0) {
+      throw new Error('times must be a positive integer');
+    }
+
+    const existing = this.queuedApiErrors.get(method) ?? [];
+    existing.push({
+      ...spec,
+      remaining: times,
+    });
+    this.queuedApiErrors.set(method, existing);
+    this.notifyUpdateWaiters();
+  }
+
+  getApiCallCount(method: string): number {
+    return this.apiCallCounts.get(method) ?? 0;
+  }
+
   async waitForBotCall(
     method: string,
     predicate: (call: TelegramCloneBotCall) => boolean = () => true,
@@ -241,7 +279,17 @@ export class TelegramBotApiClone {
       return;
     }
 
-    const payload = await readPayload(request);
+    let payload: Record<string, unknown>;
+    try {
+      payload = await readPayload(request);
+    } catch {
+      this.writeJson(response, 400, {
+        ok: false,
+        error_code: 400,
+        description: 'Bad Request: invalid JSON payload',
+      });
+      return;
+    }
 
     try {
       const result = await this.handleMethodCall(methodName, payload);
@@ -250,6 +298,25 @@ export class TelegramBotApiClone {
         result,
       });
     } catch (error) {
+      if (error instanceof TelegramCloneApiError) {
+        this.writeJson(response, 200, {
+          ok: false,
+          error_code: error.spec.errorCode,
+          description: error.spec.description,
+          parameters: error.spec.parameters,
+        });
+        return;
+      }
+
+      if (error instanceof TelegramClonePayloadError) {
+        this.writeJson(response, 400, {
+          ok: false,
+          error_code: 400,
+          description: error.message,
+        });
+        return;
+      }
+
       this.writeJson(response, 500, {
         ok: false,
         error_code: 500,
@@ -259,6 +326,13 @@ export class TelegramBotApiClone {
   }
 
   private async handleMethodCall(method: string, payload: Record<string, unknown>): Promise<unknown> {
+    this.incrementApiCallCount(method);
+
+    const queuedError = this.consumeQueuedApiError(method);
+    if (queuedError) {
+      throw new TelegramCloneApiError(queuedError);
+    }
+
     switch (method) {
       case 'getMe': {
         return {
@@ -272,7 +346,7 @@ export class TelegramBotApiClone {
         };
       }
       case 'getUpdates': {
-        return this.getUpdates(payload as unknown as GetUpdatesArgs);
+        return this.getUpdates(parseGetUpdatesArgs(payload));
       }
       case 'sendMessage': {
         this.recordBotCall({ method, payload });
@@ -312,7 +386,10 @@ export class TelegramBotApiClone {
         return true;
       }
       default: {
-        throw new Error(`unsupported telegram method: ${method}`);
+        throw new TelegramCloneApiError({
+          errorCode: 404,
+          description: `Not Found: unsupported telegram method ${method}`,
+        });
       }
     }
   }
@@ -405,6 +482,38 @@ export class TelegramBotApiClone {
     }
   }
 
+  private incrementApiCallCount(method: string): void {
+    const count = this.apiCallCounts.get(method) ?? 0;
+    this.apiCallCounts.set(method, count + 1);
+  }
+
+  private consumeQueuedApiError(method: string): TelegramCloneApiErrorSpec | null {
+    const queue = this.queuedApiErrors.get(method);
+    if (!queue || queue.length === 0) {
+      return null;
+    }
+
+    const current = queue[0];
+    if (!current) {
+      return null;
+    }
+
+    current.remaining -= 1;
+    if (current.remaining <= 0) {
+      queue.shift();
+    }
+
+    if (queue.length === 0) {
+      this.queuedApiErrors.delete(method);
+    }
+
+    return {
+      errorCode: current.errorCode,
+      description: current.description,
+      parameters: current.parameters,
+    };
+  }
+
   private recordBotCall(call: TelegramCloneBotCall): void {
     this.botCalls.push(call);
 
@@ -427,4 +536,54 @@ export class TelegramBotApiClone {
     response.setHeader('content-type', 'application/json; charset=utf-8');
     response.end(JSON.stringify(body));
   }
+}
+
+function parseGetUpdatesArgs(payload: Record<string, unknown>): GetUpdatesArgs {
+  const offset = parseOptionalNonNegativeInteger(payload.offset, 'offset');
+  const limit = parseOptionalNumber(payload.limit, 'limit');
+  const timeout = parseOptionalNumber(payload.timeout, 'timeout');
+
+  const allowedUpdatesRaw = payload.allowed_updates;
+  let allowedUpdates: string[] | undefined;
+
+  if (allowedUpdatesRaw !== undefined) {
+    if (!Array.isArray(allowedUpdatesRaw) || allowedUpdatesRaw.some((value) => typeof value !== 'string')) {
+      throw new TelegramClonePayloadError('Bad Request: getUpdates.allowed_updates must be an array of strings');
+    }
+
+    allowedUpdates = [...allowedUpdatesRaw];
+  }
+
+  return {
+    offset,
+    limit,
+    timeout,
+    allowed_updates: allowedUpdates,
+  };
+}
+
+function parseOptionalNonNegativeInteger(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const numberValue = toNumber(value);
+  if (numberValue === null || !Number.isInteger(numberValue) || numberValue < 0) {
+    throw new TelegramClonePayloadError(`Bad Request: getUpdates.${fieldName} must be a non-negative integer`);
+  }
+
+  return numberValue;
+}
+
+function parseOptionalNumber(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const numberValue = toNumber(value);
+  if (numberValue === null || numberValue < 0) {
+    throw new TelegramClonePayloadError(`Bad Request: getUpdates.${fieldName} must be a non-negative number`);
+  }
+
+  return numberValue;
 }

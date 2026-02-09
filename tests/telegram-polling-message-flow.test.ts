@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import type { RunService } from '../src/server/service.js';
 import type { MessageIngest, RunRecord } from '../src/shared/run-types.js';
@@ -211,6 +211,95 @@ describe('TelegramPollingAdapter message flow integration', () => {
       expect(chunks.map((chunk) => chunk.length)).toEqual([3500, 101]);
       expect(chunks.join('')).toBe(longText);
     });
+  });
+
+  test('recovers from transient getUpdates 500 errors and still processes messages', async () => {
+    const runService = new StubRunService('run-retry', [
+      runRecord({
+        runId: 'run-retry',
+        status: 'succeeded',
+        output: { text: 'Recovered after poll errors' },
+      }),
+    ]);
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+        clone.failNextApiCall(
+          'getUpdates',
+          {
+            errorCode: 500,
+            description: 'Internal Server Error',
+          },
+          2,
+        );
+
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'resilience check',
+        });
+
+        const sendMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Recovered after poll errors',
+          8_000,
+        );
+
+        expect(sendMessage.payload.text).toBe('Recovered after poll errors');
+        expect(runService.ingests).toHaveLength(1);
+        expect(clone.getApiCallCount('getUpdates')).toBeGreaterThanOrEqual(3);
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test('recovers from transient getUpdates 429 retry_after and still processes messages', async () => {
+    const runService = new StubRunService('run-retry-after', [
+      runRecord({
+        runId: 'run-retry-after',
+        status: 'succeeded',
+        output: { text: 'Recovered after rate limit' },
+      }),
+    ]);
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+        clone.failNextApiCall('getUpdates', {
+          errorCode: 429,
+          description: 'Too Many Requests: retry later',
+          parameters: {
+            retry_after: 0.05,
+          },
+        });
+
+        const startedAt = Date.now();
+
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'retry after check',
+        });
+
+        const sendMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Recovered after rate limit',
+          8_000,
+        );
+
+        const elapsedMs = Date.now() - startedAt;
+        expect(sendMessage.payload.text).toBe('Recovered after rate limit');
+        expect(runService.ingests).toHaveLength(1);
+        expect(elapsedMs).toBeGreaterThanOrEqual(120);
+        expect(clone.getApiCallCount('getUpdates')).toBeGreaterThanOrEqual(2);
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });
 

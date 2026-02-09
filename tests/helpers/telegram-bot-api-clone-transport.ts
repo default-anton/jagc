@@ -28,8 +28,8 @@ export async function readPayload(request: IncomingMessage): Promise<Record<stri
   }
 
   const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== 'object') {
-    return {};
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('JSON payload must be an object');
   }
 
   return parsed as Record<string, unknown>;
