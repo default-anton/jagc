@@ -23,6 +23,7 @@ Primary coverage lives in:
 - `tests/telegram-polling.test.ts` (command/callback parsing and stale callback recovery)
 - `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), malformed payload handling, and urlencoded payload parsing)
 - `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + SQLite + Fastify app + polling adapter + clone)
+- `tests/cli-service-manager.test.ts` (launchd service-manager helpers: plist rendering, server entrypoint resolution, launchctl output parsing)
 
 This clone is intentionally narrow: it only implements the polling and messaging surface that jagc uses in v0:
 
@@ -52,4 +53,6 @@ That gives us stable refactors and catches protocol-shape regressions that conte
 
 - Full non-smoke suite (includes Telegram behavioral tests): `pnpm test`
 - Focused Telegram suite (optional while iterating, includes Telegram system smoke): `pnpm test:telegram`
-- Local release gate: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
+- npm package smoke (pack + install + run from tarball): `pnpm test:pack`
+- macOS launchd service smoke (manual): `jagc install --runner echo --port <port> && jagc status && jagc doctor && jagc uninstall`
+- Local release gate: `pnpm release:gate` (equivalent to `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:pack`)

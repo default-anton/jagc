@@ -1,7 +1,6 @@
 {
   "name": "jagc",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "just a good clanker",
   "type": "module",
   "engines": {
@@ -10,17 +9,35 @@
   "bin": {
     "jagc": "dist/cli/main.mjs"
   },
+  "files": [
+    "dist",
+    "defaults",
+    "migrations",
+    "README.md",
+    "docs/architecture.md",
+    "docs/auth.md",
+    "docs/testing.md",
+    "docs/future.md",
+    "deploy/launchd/com.jagc.server.plist",
+    "deploy/systemd/*.service",
+    "deploy/systemd/*.path",
+    "deploy/systemd/*.example",
+    ".env.example"
+  ],
   "scripts": {
     "dev": "tsx watch src/server/main.ts",
     "dev:cli": "tsx src/cli/main.ts",
     "smoke": "scripts/smoke.sh",
     "build": "tsdown src/server/main.ts src/cli/main.ts --format esm --out-dir dist",
+    "prepack": "pnpm build",
     "start": "node dist/server/main.mjs",
     "test": "vitest run",
     "test:telegram": "vitest run tests/telegram-bot-api-clone.test.ts tests/telegram-polling.test.ts tests/telegram-polling-message-flow.test.ts tests/telegram-runtime-controls.test.ts tests/telegram-system-smoke.test.ts",
+    "test:pack": "scripts/pack-smoke.sh",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "release:gate": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:pack"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",

@@ -15,9 +15,9 @@ For testing loops (including Telegram behavioral polling clone), see **[`docs/te
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
-- **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating is still manual/local-only.
+- **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating runs in GitHub Actions (`pnpm release:gate`).
 - Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking,session}`).
-- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `new`, `model list/get/set`, and `thinking get/set`.
+- CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `new`, `model list/get/set`, `thinking get/set`, and local service lifecycle commands (`install`, `status`, `restart`, `uninstall`, `doctor`).
 - Default executor runs through pi SDK sessions with SQLite-backed durable run tracking and in-process scheduling/recovery.
 - Same-thread queued follow-ups/steers are accepted and run completion is attributed via pi session events (not prompt promise timing).
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread pi session controllers; run dispatch/recovery is in-process and single-server-process scoped in v0.
@@ -29,7 +29,7 @@ For testing loops (including Telegram behavioral polling clone), see **[`docs/te
 - Outdated Telegram inline callbacks auto-recover by replacing the menu with the latest `/settings` panel.
 - Telegram callback payload limits are enforced; over-limit model/auth options are hidden with an in-chat notice.
 - `JAGC_RUNNER=echo` is available for deterministic smoke tests.
-- **Deployment assets under `deploy/` are drafts** (not a supported install path yet).
+- macOS single-user deployment is supported via npm global install + launchd (`jagc install` / `status` / `restart` / `uninstall`). Manual templates remain under `deploy/` as fallback examples.
 
 ## Locked v0 technology stack
 
@@ -55,6 +55,7 @@ Shipped in v0:
 - CLI:
   - `jagc message "..." --json`
   - `jagc run wait <run_id> --json`
+  - `jagc install|status|restart|uninstall|doctor` (macOS service lifecycle + diagnostics)
 - Telegram:
   - **Polling mode only** for v0
   - Personal chats only
@@ -95,9 +96,9 @@ $JAGC_WORKSPACE_DIR/
   AGENTS.md           # auto-created on first startup (global user profile + assistant instructions)
   SYSTEM.md           # auto-created on first startup (global assistant behavior baseline)
   APPEND_SYSTEM.md    # optional
-  skills/             # optional
+  skills/             # auto-seeded with bundled skills on first startup (no overwrite)
   prompts/            # optional
-  extensions/         # optional
+  extensions/         # auto-seeded with bundled extensions on first startup (no overwrite)
   themes/             # optional
   tools/              # optional
   jagc.json           # optional
@@ -115,12 +116,45 @@ $JAGC_WORKSPACE_DIR/
 | `JAGC_PORT` | No | Server bind port (default `31415`) |
 | `JAGC_API_URL` | No | CLI API target (default `http://127.0.0.1:31415`) |
 | `JAGC_RUNNER` | No | `pi` (default) or `echo` for deterministic local/smoke runs |
+| `JAGC_LOG_LEVEL` | No | `info` by default (`fatal|error|warn|info|debug|trace|silent`) |
 | `JAGC_TELEGRAM_BOT_TOKEN` | No | Required only when Telegram adapter is enabled |
 | `JAGC_WEBHOOK_BEARER_TOKEN` | No | Required when generic `POST /v1/webhooks/:source` ingress is enabled |
 
 Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
-By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for workspace files and sets `JAGC_DATABASE_PATH` to `$JAGC_WORKSPACE_DIR/jagc.sqlite`. On startup it ensures the directory exists, creates `SYSTEM.md`, `AGENTS.md`, and `settings.json` from built-in templates if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal`. The default `settings.json` pre-installs `git:github.com/default-anton/pi-librarian` and `git:github.com/default-anton/pi-subdir-context`; users can edit/remove them later. jagc still does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for workspace files and sets `JAGC_DATABASE_PATH` to `$JAGC_WORKSPACE_DIR/jagc.sqlite`. On startup it ensures the directory exists, creates `SYSTEM.md`, `AGENTS.md`, and `settings.json` from built-in templates if missing (without overwriting existing files), seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace if missing (without overwriting existing files), and keeps `.gitignore` entries for `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal`. The default `settings.json` pre-installs `git:github.com/default-anton/pi-librarian` and `git:github.com/default-anton/pi-subdir-context`; users can edit/remove them later. jagc still does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
+
+## Quick start (macOS, supported path)
+
+1. Install Node.js 20+ and npm.
+2. Install jagc globally:
+   - `npm install -g jagc@latest`
+3. Install + start the user service:
+   - `jagc install`
+4. Verify:
+   - `jagc status`
+   - `jagc health --json`
+
+Update to latest:
+
+- `npm install -g jagc@latest`
+- `jagc restart`
+
+Uninstall service (keep workspace data):
+
+- `jagc uninstall`
+
+Uninstall service and delete local workspace data (`~/.jagc` by default):
+
+- `jagc uninstall --purge-data`
+
+Remove the npm package binary as well:
+
+- `npm uninstall -g jagc`
+
+If the service fails to start, run diagnostics:
+
+- `jagc doctor`
 
 ## Quick start (dev)
 

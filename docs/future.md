@@ -11,7 +11,7 @@ This file is intentionally short.
 v0 is shipped as pre-alpha with:
 
 - Server: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth endpoints, model/runtime controls.
-- CLI: `health`, `message`, `run wait`, auth/model/thinking commands.
+- CLI: `health`, `message`, `run wait`, auth/model/thinking commands, and macOS service lifecycle (`install|status|restart|uninstall|doctor`).
 - Runtime: pi SDK in-process sessions with SQLite-backed run state + in-process scheduling.
 - Concurrency: in-process dispatch + per-thread pi session turn control (`followUp` / `steer`); multi-process/global locking deferred.
 - Telegram: polling adapter for personal chats + button-based `/settings` `/model` `/thinking` `/auth`.
@@ -27,21 +27,21 @@ Do not add implementation detail here unless it is deferred/future-looking.
    - Add per-source signature verification where available.
    - Add replay protection (timestamp + nonce window).
 
-2. **CI merge-gate automation**
-   - Wire the existing local release gate command into CI:
-     `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
+2. **npm release automation**
+   - Tag/version discipline + changelog gating.
+   - Add publish workflow (manual approval) on top of the existing CI release gate.
 
 ### P2 — operator/developer UX
 
-1. **`jagc doctor`** for environment and config diagnostics.
-2. **`jagc workspace init`** for quick workspace scaffolding.
-3. **Explicit integration test target** (e.g., `pnpm test:integration`) distinct from unit tests.
+1. **`jagc workspace init`** for quick workspace scaffolding.
+2. **Explicit integration test target** (e.g., `pnpm test:integration`) distinct from unit tests.
+3. **Service logs UX** (structured tail/filter command) to reduce launchctl/manual log digging.
 
 ### P3 — deployment maturity
 
-1. Move `deploy/` assets from draft to supported path with documented runbook.
-2. Clarify first supported target (single-host macOS first, Linux/systemd later).
-3. Add upgrade/rollback procedure docs.
+1. Add first-class Linux (`systemd`) and Windows (`SCM`) implementations behind the same `jagc install|status|restart|uninstall` interface.
+2. Add upgrade/rollback runbook docs for operators.
+3. Add backup/restore guidance for workspace + SQLite before risky upgrades.
 
 ## Near-term non-goals
 

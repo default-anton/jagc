@@ -20,6 +20,7 @@ This doc is the implementation snapshot (not design intent).
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
 - `jagc new`, `jagc model list|get|set`, `jagc thinking get|set`
+- Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
 ### Runtime/adapters
 
@@ -30,13 +31,25 @@ This doc is the implementation snapshot (not design intent).
 - Structured Pino JSON logging with component-scoped child loggers shared across server/runtime/adapters
 - HTTP request completion/error events are emitted from Fastify hooks with request IDs and duration fields
 - In-process run scheduler for dispatch/recovery (no external workflow engine)
+- CI release gate runs in GitHub Actions via `pnpm release:gate` (typecheck + lint + test + build + package smoke)
 
 ## Workspace bootstrap
 
 - Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
 - Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (never overwrites existing files).
+- Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (never overwrites existing files).
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
 - Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal` entries.
+
+## macOS service lifecycle (CLI-managed)
+
+- `jagc install` writes a per-user launch agent at `~/Library/LaunchAgents/<label>.plist` (`com.jagc.server` by default), then `launchctl bootstrap` + `kickstart` starts the service.
+- launchd runs `node <installed package>/dist/server/main.mjs` directly (no `pnpm` runtime dependency after install).
+- launchd environment variables include `JAGC_WORKSPACE_DIR`, `JAGC_DATABASE_PATH`, `JAGC_HOST`, `JAGC_PORT`, `JAGC_RUNNER`, and optional `JAGC_TELEGRAM_BOT_TOKEN`.
+- Logs default to `$JAGC_WORKSPACE_DIR/logs/server.out.log` and `server.err.log`.
+- `jagc status` inspects launchd (`launchctl print`) and API health (`/healthz`).
+- `jagc restart` issues `launchctl kickstart -k` and waits for `/healthz`.
+- `jagc uninstall` removes the launch agent and unloads it; `--purge-data` additionally deletes the workspace directory.
 
 ## Request/execution flow
 
@@ -144,5 +157,5 @@ Operational note:
 
 - Telegram webhook mode is intentionally unsupported in core (polling is the only supported Telegram mode).
 - Webhook hardening beyond current baseline is pending (signatures/replay protection).
-- CI merge-gate automation is not wired yet; local release gate is the current gate (`pnpm typecheck && pnpm lint && pnpm test && pnpm build`).
+- Linux/systemd and Windows service lifecycle commands are not implemented yet (macOS launchd is first supported target).
 - Multi-process one-active-run-per-thread coordination is deferred.

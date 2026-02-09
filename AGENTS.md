@@ -14,7 +14,7 @@
 - Smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
 - Full non-smoke test suite (includes Telegram behavioral clone tests): `pnpm test`
 - Focused Telegram loop (optional while iterating): `pnpm test:telegram`
-- Local release gate before handoff: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
+- Local release gate before handoff: `pnpm release:gate`
 
 ## Non-obvious invariants (do not change accidentally)
 
