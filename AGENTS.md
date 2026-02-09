@@ -5,6 +5,7 @@
 - Read `README.md` first for the current operator-facing contract.
 - Read `docs/architecture.md` for implemented behavior. Treat `docs/future.md` as historical/deferred notes.
 - Read `docs/testing.md` for canonical test loops (especially Telegram behavioral clone coverage).
+- Read `docs/release.md` before cutting/publishing releases.
 - Run `mise install` at repo root when tools are missing or after `.tool-versions` changes.
 - If `mise install` fails, follow `docs/tooling.md`.
 
@@ -34,7 +35,7 @@
 - `src/runtime/pi-executor.ts` + `migrations/002_thread_sessions.sql` — persisted `thread_key -> session` mapping.
 - `src/adapters/telegram-runtime-controls.ts` + `src/adapters/telegram-controls-callbacks.ts` — Telegram button controls + callback payload contract.
 - `scripts/smoke.sh` — canonical end-to-end contract assertions.
-- `deploy/` — draft assets only; not a supported install path.
+- `deploy/` — manual launchd/systemd templates; CLI service commands are the primary supported operator path.
 
 ## Docs update rule
 

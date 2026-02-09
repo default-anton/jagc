@@ -11,11 +11,14 @@ This README is intentionally short and v0-focused.
 For current implemented architecture, see **[`docs/architecture.md`](docs/architecture.md)**.
 For deferred APIs, deployment notes, and post-v0 plans, see **[`docs/future.md`](docs/future.md)**.
 For testing loops (including Telegram behavioral polling clone), see **[`docs/testing.md`](docs/testing.md)**.
+For release/publish procedure, see **[`docs/release.md`](docs/release.md)**.
+Release history lives in **[`CHANGELOG.md`](CHANGELOG.md)**.
 
 ## Status
 
 - **Pre-alpha.** Expect breaking changes.
 - **v0 scope is implemented** (server + CLI + threading semantics + Telegram polling controls). CI merge gating runs in GitHub Actions (`pnpm release:gate`).
+- npm publish is tag-driven via GitHub Actions (`vX.Y.Z` tags only, `latest` channel).
 - Core server endpoints are in place: `/healthz`, `/v1/messages`, `/v1/runs/:run_id`, auth catalog/login endpoints (`/v1/auth/providers`, `/v1/auth/providers/:provider/login`, `/v1/auth/logins/:attempt_id{,/input,/cancel}`), `/v1/models`, and thread runtime controls (`/v1/threads/:thread_key/{runtime,model,thinking,session}`).
 - CLI supports the happy path plus runtime controls: `message`, `run wait`, `health`, `auth providers`, `auth login`, `new`, `model list/get/set`, `thinking get/set`, and local service lifecycle commands (`install`, `status`, `restart`, `uninstall`, `doctor`).
 - Default executor runs through pi SDK sessions with SQLite-backed durable run tracking and in-process scheduling/recovery.
@@ -206,7 +209,7 @@ jagc auth login openai-codex --owner-key cli:default
 
 ## License
 
-**UNLICENSED** for now (all rights reserved) until a `LICENSE` file is added.
+MIT. See [`LICENSE`](./LICENSE).
 
 ---
 

@@ -27,9 +27,9 @@ Do not add implementation detail here unless it is deferred/future-looking.
    - Add per-source signature verification where available.
    - Add replay protection (timestamp + nonce window).
 
-2. **npm release automation**
-   - Tag/version discipline + changelog gating.
-   - Add publish workflow (manual approval) on top of the existing CI release gate.
+2. **Release hardening follow-ups**
+   - Add automated policy checks for changelog section quality/content.
+   - Add optional staged/canary release flow before promoting to `latest`.
 
 ### P2 — operator/developer UX
 
@@ -40,8 +40,8 @@ Do not add implementation detail here unless it is deferred/future-looking.
 ### P3 — deployment maturity
 
 1. Add first-class Linux (`systemd`) and Windows (`SCM`) implementations behind the same `jagc install|status|restart|uninstall` interface.
-2. Add upgrade/rollback runbook docs for operators.
-3. Add backup/restore guidance for workspace + SQLite before risky upgrades.
+2. Add backup/restore guidance for workspace + SQLite before risky upgrades.
+3. Add one-command operator backup verification smoke before upgrades.
 
 ## Near-term non-goals
 

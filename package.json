@@ -2,7 +2,20 @@
   "name": "jagc",
   "version": "0.1.0",
   "description": "just a good clanker",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/default-anton/jagc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/default-anton/jagc/issues"
+  },
+  "homepage": "https://github.com/default-anton/jagc#readme",
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -11,13 +24,18 @@
   },
   "files": [
     "dist",
-    "defaults",
+    "defaults/AGENTS.md",
+    "defaults/SYSTEM.md",
+    "defaults/settings.json",
     "migrations",
     "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
     "docs/architecture.md",
     "docs/auth.md",
     "docs/testing.md",
     "docs/future.md",
+    "docs/release.md",
     "deploy/launchd/com.jagc.server.plist",
     "deploy/systemd/*.service",
     "deploy/systemd/*.path",
@@ -37,6 +55,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
+    "release:verify-tag": "node scripts/verify-release-tag.mjs",
+    "release:notes": "node scripts/changelog-release-notes.mjs",
     "release:gate": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:pack"
   },
   "dependencies": {
