@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { type RunnerHandle, run } from '@grammyjs/runner';
-import { Bot, type Context } from 'grammy';
+import { Bot, type BotConfig, type Context } from 'grammy';
 import type {
   OAuthLoginAttemptSnapshot,
   OAuthLoginInputKind,
@@ -18,6 +18,7 @@ import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
 
 const defaultWaitTimeoutMs = 180_000;
 const defaultPollIntervalMs = 500;
+const defaultPollRequestTimeoutSeconds = 30;
 const telegramMessageLimit = 3500;
 
 interface TelegramPollingAdapterOptions {
@@ -39,6 +40,9 @@ interface TelegramPollingAdapterOptions {
   threadControlService?: ThreadControlService;
   waitTimeoutMs?: number;
   pollIntervalMs?: number;
+  telegramApiRoot?: string;
+  pollRequestTimeoutSeconds?: number;
+  botInfo?: BotConfig<Context>['botInfo'];
   logger?: Logger;
 }
 
@@ -53,16 +57,30 @@ export class TelegramPollingAdapter {
   private runner: RunnerHandle | null = null;
   private readonly waitTimeoutMs: number;
   private readonly pollIntervalMs: number;
+  private readonly pollRequestTimeoutSeconds: number;
   private readonly logger: Logger;
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
-    this.bot = new Bot(options.botToken);
+    const botConfig: BotConfig<Context> = {};
+
+    if (options.telegramApiRoot) {
+      botConfig.client = {
+        apiRoot: options.telegramApiRoot,
+      };
+    }
+
+    if (options.botInfo) {
+      botConfig.botInfo = options.botInfo;
+    }
+
+    this.bot = new Bot(options.botToken, botConfig);
     this.runtimeControls = new TelegramRuntimeControls({
       authService: options.authService,
       threadControlService: options.threadControlService,
     });
     this.waitTimeoutMs = options.waitTimeoutMs ?? defaultWaitTimeoutMs;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
+    this.pollRequestTimeoutSeconds = options.pollRequestTimeoutSeconds ?? defaultPollRequestTimeoutSeconds;
     this.logger = options.logger ?? noopLogger;
 
     this.bot.catch((error) => {
@@ -91,7 +109,7 @@ export class TelegramPollingAdapter {
       runner: {
         fetch: {
           allowed_updates: ['message', 'callback_query'],
-          timeout: 30,
+          timeout: this.pollRequestTimeoutSeconds,
         },
       },
     });
