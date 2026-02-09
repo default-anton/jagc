@@ -13,7 +13,11 @@ jagc uses pi SDK auth resolution order for model credentials:
 
 ## Workspace bootstrap
 
-On server startup, jagc only ensures `JAGC_WORKSPACE_DIR` exists (mode `0700`).
+On server startup, jagc ensures `JAGC_WORKSPACE_DIR` exists (mode `0700`) and ensures workspace `.gitignore` contains:
+
+- `.sessions/`
+- `auth.json`
+- `git/`
 
 It **does not copy** `~/.pi/agent/settings.json` or `~/.pi/agent/auth.json`.
 

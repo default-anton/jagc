@@ -28,6 +28,11 @@ This doc is the implementation snapshot (not design intent).
 - Postgres persistence (`runs`, ingest idempotency, `thread_sessions`)
 - In-process run scheduler for dispatch/recovery (no external workflow engine)
 
+## Workspace bootstrap
+
+- Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
+- Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, and `git/` entries.
+
 ## Request/execution flow
 
 ### 1) Message ingest (`POST /v1/messages`)

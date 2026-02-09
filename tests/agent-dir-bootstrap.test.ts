@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,9 +30,12 @@ describe('bootstrapAgentDir', () => {
 
     const mode = (await stat(workspaceDir)).mode & 0o777;
     expect(mode).toBe(0o700);
+
+    const gitignoreContent = await readFile(join(workspaceDir, '.gitignore'), 'utf8');
+    expect(gitignoreContent).toBe('.sessions/\nauth.json\ngit/\n');
   });
 
-  test('keeps existing workspace directory', async () => {
+  test('keeps existing workspace directory and still writes workspace ignores', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jagc-bootstrap-'));
     tempDirs.push(root);
 
@@ -44,5 +47,22 @@ describe('bootstrapAgentDir', () => {
     expect(result).toEqual({
       createdDirectory: false,
     });
+
+    const gitignoreContent = await readFile(join(workspaceDir, '.gitignore'), 'utf8');
+    expect(gitignoreContent).toBe('.sessions/\nauth.json\ngit/\n');
+  });
+
+  test('appends missing workspace ignore entries without duplicating existing ones', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jagc-bootstrap-'));
+    tempDirs.push(root);
+
+    const workspaceDir = join(root, 'workspace');
+    await mkdir(workspaceDir, { recursive: true, mode: 0o700 });
+    await writeFile(join(workspaceDir, '.gitignore'), 'node_modules/\nauth.json\n');
+
+    await bootstrapAgentDir(workspaceDir);
+
+    const gitignoreContent = await readFile(join(workspaceDir, '.gitignore'), 'utf8');
+    expect(gitignoreContent).toBe('node_modules/\nauth.json\n.sessions/\ngit/\n');
   });
 });

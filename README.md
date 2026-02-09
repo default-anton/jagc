@@ -99,6 +99,7 @@ $JAGC_WORKSPACE_DIR/
   tools/              # optional
   jagc.json           # optional
   settings.json       # optional (pi workspace settings)
+  .gitignore          # auto-managed: .sessions/, auth.json, git/
 ```
 
 ## Configuration (v0 minimum)
@@ -117,7 +118,7 @@ $JAGC_WORKSPACE_DIR/
 
 Auth setup and provider credential details: [`docs/auth.md`](docs/auth.md).
 
-By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. It creates the directory if needed, but does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
+By default jagc uses `JAGC_WORKSPACE_DIR=~/.jagc` for both workspace files and pi resources. On startup it ensures the workspace directory exists and that `.gitignore` includes `.sessions/`, `auth.json`, and `git/`. It does not copy `~/.pi/agent/{settings.json,auth.json}` automatically.
 
 ## Quick start (dev)
 
