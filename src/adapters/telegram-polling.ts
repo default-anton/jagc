@@ -327,7 +327,6 @@ export class TelegramPollingAdapter {
       bot: this.bot,
       chatId,
       runId: ingested.run.runId,
-      deliveryMode,
       logger: this.logger,
       messageLimit: telegramMessageLimit,
     });
@@ -344,10 +343,7 @@ export class TelegramPollingAdapter {
       const completedRun = await this.waitForCompletion(ingested.run.runId, this.waitTimeoutMs);
       if (completedRun.status === 'running') {
         await progressReporter.markLongRunning();
-        await this.sendMessage(
-          chatId,
-          `Run queued as ${completedRun.runId}. Still running. I'll send the result when it's done.`,
-        );
+        await this.sendMessage(chatId, "Still running. I'll send the result when it's done.");
 
         backgroundContinuationStarted = true;
 

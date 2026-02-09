@@ -16,15 +16,12 @@ import {
   truncateMessage,
 } from './telegram-progress-helpers.js';
 
-type DeliveryMode = 'steer' | 'followUp';
-
 type ProgressPhase = 'queued' | 'running' | 'succeeded' | 'failed';
 
 interface TelegramRunProgressReporterOptions {
   bot: Bot;
   chatId: number;
   runId: string;
-  deliveryMode: DeliveryMode;
   logger: Logger;
   messageLimit?: number;
   minEditIntervalMs?: number;
@@ -39,9 +36,10 @@ interface CurrentToolState {
 const defaultMessageLimit = 3500;
 const defaultMinEditIntervalMs = 1500;
 const defaultTypingIntervalMs = 4000;
-const maxRecentTools = 3;
-const maxPreviewChars = 320;
+const maxEventLogLines = 48;
+const maxThinkingPreviewChars = 240;
 const maxDeltaChars = 200;
+const minThinkingLogIntervalMs = 1_800;
 
 export class TelegramRunProgressReporter {
   private readonly startedAt = Date.now();
@@ -53,15 +51,13 @@ export class TelegramRunProgressReporter {
   private isLongRunning = false;
   private terminalErrorMessage: string | null = null;
 
-  private turnCount = 0;
-  private toolCount = 0;
-  private toolErrorCount = 0;
-  private thinkingDeltaChars = 0;
   private lastThinkingAt = 0;
-  private textPreview = '';
+  private lastThinkingLoggedAt = 0;
+  private thinkingPreview = '';
 
   private currentTool: CurrentToolState | null = null;
-  private recentTools: string[] = [];
+  private readonly toolLabelsByCallId = new Map<string, string>();
+  private eventLogLines: string[] = [];
 
   private progressMessageId: number | null = null;
   private lastRenderedText = '';
@@ -113,6 +109,8 @@ export class TelegramRunProgressReporter {
       return;
     }
 
+    let immediateRender = false;
+
     switch (event.type) {
       case 'queued': {
         this.phase = 'queued';
@@ -128,51 +126,53 @@ export class TelegramRunProgressReporter {
       }
       case 'turn_end': {
         this.phase = 'running';
-        this.turnCount += 1;
         break;
       }
       case 'assistant_text_delta': {
         this.phase = 'running';
-        const delta = normalizePreviewDelta(event.delta);
-        if (delta.length > 0) {
-          this.textPreview = appendTail(this.textPreview, delta.slice(-maxDeltaChars), maxPreviewChars);
-        }
         break;
       }
       case 'assistant_thinking_delta': {
         this.phase = 'running';
-        this.lastThinkingAt = Date.now();
-        this.thinkingDeltaChars += event.delta.length;
+        const now = Date.now();
+        this.lastThinkingAt = now;
+
+        const delta = normalizePreviewDelta(event.delta);
+        if (delta.trim().length > 0) {
+          this.thinkingPreview = appendTail(this.thinkingPreview, delta.slice(-maxDeltaChars), maxThinkingPreviewChars);
+          if (now - this.lastThinkingLoggedAt >= minThinkingLogIntervalMs) {
+            if (this.pushEventLogLine(`~ ${truncateLine(this.thinkingPreview, 220)}`)) {
+              immediateRender = true;
+            }
+            this.lastThinkingLoggedAt = now;
+          }
+        }
         break;
       }
       case 'tool_execution_start': {
         this.phase = 'running';
-        this.toolCount += 1;
+        const label = summarizeToolLabel(event.toolName, event.args);
+        this.toolLabelsByCallId.set(event.toolCallId, label);
         this.currentTool = {
           toolCallId: event.toolCallId,
-          label: summarizeToolLabel(event.toolName, event.args),
+          label,
         };
+        immediateRender = this.pushEventLogLine(`> ${label}`);
         break;
       }
       case 'tool_execution_update': {
         this.phase = 'running';
-        if (this.currentTool?.toolCallId === event.toolCallId) {
-          this.currentTool = {
-            toolCallId: event.toolCallId,
-            label: summarizeToolLabel(event.toolName, event.partialResult),
-          };
-        }
         break;
       }
       case 'tool_execution_end': {
         this.phase = 'running';
-        const label = summarizeToolLabel(event.toolName, event.result);
+        const label = this.toolLabelsByCallId.get(event.toolCallId) ?? summarizeToolLabel(event.toolName, undefined);
+        this.toolLabelsByCallId.delete(event.toolCallId);
 
         if (event.isError) {
-          this.toolErrorCount += 1;
-          this.pushRecentTool(`❌ ${label}`);
+          immediateRender = this.pushEventLogLine(`> ${label} failed`) || immediateRender;
         } else {
-          this.pushRecentTool(`✅ ${label}`);
+          immediateRender = this.pushEventLogLine(`> ${label} done`) || immediateRender;
         }
 
         if (this.currentTool?.toolCallId === event.toolCallId) {
@@ -182,15 +182,19 @@ export class TelegramRunProgressReporter {
       }
       case 'succeeded': {
         this.phase = 'succeeded';
+        immediateRender = true;
         this.isLongRunning = false;
         this.currentTool = null;
+        this.toolLabelsByCallId.clear();
         this.terminalErrorMessage = null;
         break;
       }
       case 'failed': {
         this.phase = 'failed';
+        immediateRender = true;
         this.isLongRunning = false;
         this.currentTool = null;
+        this.toolLabelsByCallId.clear();
         this.terminalErrorMessage = event.errorMessage;
         break;
       }
@@ -199,11 +203,12 @@ export class TelegramRunProgressReporter {
           this.phase = 'running';
         }
         this.currentTool = null;
+        this.toolLabelsByCallId.clear();
         break;
       }
     }
 
-    this.scheduleRender();
+    this.scheduleRender(immediateRender);
   }
 
   async markLongRunning(): Promise<void> {
@@ -224,6 +229,7 @@ export class TelegramRunProgressReporter {
     this.phase = 'succeeded';
     this.isLongRunning = false;
     this.currentTool = null;
+    this.toolLabelsByCallId.clear();
     await this.finish();
   }
 
@@ -235,6 +241,7 @@ export class TelegramRunProgressReporter {
     this.phase = 'failed';
     this.isLongRunning = false;
     this.currentTool = null;
+    this.toolLabelsByCallId.clear();
     this.terminalErrorMessage = errorMessage;
     await this.finish();
   }
@@ -413,50 +420,50 @@ export class TelegramRunProgressReporter {
       now,
     });
 
-    const lines: string[] = [
-      `${status.icon} Run ${this.options.runId} · ${elapsed}`,
-      `Status: ${status.text}`,
-      `Mode: ${this.options.deliveryMode}`,
-      `Turns: ${this.turnCount} · Tools: ${this.toolCount} · Tool errors: ${this.toolErrorCount}`,
-    ];
-
-    if (this.currentTool) {
-      lines.push(`Current tool: ${this.currentTool.label}`);
-    }
-
-    if (this.recentTools.length > 0) {
-      lines.push('Recent tools:');
-      for (const toolLine of this.recentTools) {
-        lines.push(`- ${toolLine}`);
-      }
-    }
-
-    if (this.textPreview.trim().length > 0) {
-      lines.push('Draft preview:');
-      lines.push(this.textPreview.trim());
-    }
-
-    if (this.phase === 'running' && this.lastThinkingAt > 0) {
-      lines.push(`Thinking activity: ${this.thinkingDeltaChars} chars`);
-    }
+    const lines: string[] = [`${status.text} · ${elapsed}`];
+    lines.push(...this.eventLogLines);
 
     if (this.isLongRunning && this.phase === 'running') {
-      lines.push('Still running in background. I will send the final response when done.');
+      lines.push("still running in background. i'll send the final response when done.");
     }
 
     if (this.phase === 'failed' && this.terminalErrorMessage) {
-      lines.push(`Error: ${truncateLine(this.terminalErrorMessage, 240)}`);
+      lines.push(`error: ${truncateLine(this.terminalErrorMessage, 240)}`);
     }
 
-    const text = lines.join('\n');
-    return truncateMessage(text, this.messageLimit);
+    return this.renderTrimmedLines(lines);
   }
 
-  private pushRecentTool(line: string): void {
-    this.recentTools.unshift(truncateLine(line, maxProgressToolLabelChars));
-    if (this.recentTools.length > maxRecentTools) {
-      this.recentTools = this.recentTools.slice(0, maxRecentTools);
+  private pushEventLogLine(line: string): boolean {
+    const normalizedLine = truncateLine(line, maxProgressToolLabelChars);
+    if (normalizedLine.length === 0) {
+      return false;
     }
+
+    const lastLine = this.eventLogLines[this.eventLogLines.length - 1];
+    if (lastLine === normalizedLine) {
+      return false;
+    }
+
+    this.eventLogLines.push(normalizedLine);
+    if (this.eventLogLines.length > maxEventLogLines) {
+      this.eventLogLines = this.eventLogLines.slice(this.eventLogLines.length - maxEventLogLines);
+    }
+
+    return true;
+  }
+
+  private renderTrimmedLines(lines: string[]): string {
+    if (lines.length === 0) {
+      return '';
+    }
+
+    const bounded = [...lines];
+    while (bounded.length > 1 && bounded.join('\n').length > this.messageLimit) {
+      bounded.splice(1, 1);
+    }
+
+    return truncateMessage(bounded.join('\n'), this.messageLimit);
   }
 
   private clearRenderTimer(): void {

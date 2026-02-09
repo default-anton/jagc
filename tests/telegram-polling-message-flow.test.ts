@@ -117,10 +117,10 @@ describe('TelegramPollingAdapter message flow integration', () => {
 
         const progressMessage = await clone.waitForBotCall(
           'sendMessage',
-          (call) => typeof call.payload.text === 'string' && call.payload.text.includes('Run run-progress'),
+          (call) => typeof call.payload.text === 'string' && call.payload.text.includes('queued'),
           4_000,
         );
-        expect(progressMessage.payload.text).toContain('Run run-progress');
+        expect(progressMessage.payload.text).toContain('queued');
 
         const typingCall = await clone.waitForBotCall('sendChatAction', () => true, 4_000);
         expect(typingCall.payload.action).toBe('typing');
@@ -129,11 +129,15 @@ describe('TelegramPollingAdapter message flow integration', () => {
           'editMessageText',
           (call) =>
             typeof call.payload.text === 'string' &&
-            call.payload.text.includes('Recent tools:') &&
-            call.payload.text.includes('✅ bash'),
+            call.payload.text.includes('> bash cmd="pnpm test"') &&
+            call.payload.text.includes('~'),
           6_000,
         );
-        expect(progressEdit.payload.text).toContain('Recent tools:');
+        expect(progressEdit.payload.text).toContain('> bash cmd="pnpm test"');
+        expect(progressEdit.payload.text).toContain('~');
+        expect(progressEdit.payload.text).not.toContain('Now:');
+        expect(progressEdit.payload.text).not.toContain('Recent tool calls:');
+        expect(progressEdit.payload.text).not.toContain('Thinking:');
 
         const finalMessage = await clone.waitForBotCall(
           'sendMessage',
@@ -144,6 +148,158 @@ describe('TelegramPollingAdapter message flow integration', () => {
       },
     );
   }, 12_000);
+
+  test('tool progress labels keep only useful argument snippets', async () => {
+    const runningState = runRecord({
+      runId: 'run-tool-snippets',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-tool-snippets',
+      status: 'succeeded',
+      output: { text: 'Tool snippets done' },
+      errorMessage: null,
+    });
+
+    const longCommand = `echo ${'x'.repeat(220)}`;
+
+    const runService = new StubRunService(
+      'run-tool-snippets',
+      [
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        completedState,
+      ],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-tool-snippets', 'started')],
+          2: [
+            progressEvent('run-tool-snippets', 'tool_execution_start', {
+              toolCallId: 'read-1',
+              toolName: 'read',
+              args: { path: 'src/runtime/pi-executor.ts' },
+            }),
+          ],
+          3: [
+            progressEvent('run-tool-snippets', 'tool_execution_end', {
+              toolCallId: 'read-1',
+              toolName: 'read',
+              result: { text: 'very long file output that should not show up here' },
+              isError: false,
+            }),
+          ],
+          4: [
+            progressEvent('run-tool-snippets', 'tool_execution_start', {
+              toolCallId: 'edit-1',
+              toolName: 'edit',
+              args: {
+                path: 'src/adapters/telegram-progress.ts',
+                oldText: 'old value',
+                newText: 'new value',
+              },
+            }),
+          ],
+          5: [
+            progressEvent('run-tool-snippets', 'tool_execution_end', {
+              toolCallId: 'edit-1',
+              toolName: 'edit',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+          6: [
+            progressEvent('run-tool-snippets', 'tool_execution_start', {
+              toolCallId: 'write-1',
+              toolName: 'write',
+              args: { path: 'notes/output.txt', content: 'some generated text' },
+            }),
+          ],
+          7: [
+            progressEvent('run-tool-snippets', 'tool_execution_end', {
+              toolCallId: 'write-1',
+              toolName: 'write',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+          8: [
+            progressEvent('run-tool-snippets', 'tool_execution_start', {
+              toolCallId: 'bash-1',
+              toolName: 'bash',
+              args: { command: longCommand },
+            }),
+          ],
+          9: [
+            progressEvent('run-tool-snippets', 'tool_execution_end', {
+              toolCallId: 'bash-1',
+              toolName: 'bash',
+              result: { stdout: 'done', stderr: '' },
+              isError: false,
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 200,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show tool snippets',
+        });
+
+        const progressEdit = await clone.waitForBotCall(
+          'editMessageText',
+          (call) =>
+            typeof call.payload.text === 'string' &&
+            call.payload.text.includes('> read path=src/runtime/pi-executor.ts') &&
+            call.payload.text.includes('> edit path=src/adapters/telegram-progress.ts') &&
+            call.payload.text.includes('> write path=notes/output.txt') &&
+            call.payload.text.includes('> bash cmd="'),
+          8_000,
+        );
+
+        const progressText = String(progressEdit.payload.text ?? '');
+        expect(progressText).toContain('> read path=src/runtime/pi-executor.ts');
+        expect(progressText).toContain('> edit path=src/adapters/telegram-progress.ts');
+        expect(progressText).toContain('> write path=notes/output.txt');
+        expect(progressText).toContain('> bash cmd="');
+        expect(progressText).not.toContain('very long file output that should not show up here');
+
+        const readIndex = progressText.indexOf('> read path=src/runtime/pi-executor.ts');
+        const editIndex = progressText.indexOf('> edit path=src/adapters/telegram-progress.ts');
+        const writeIndex = progressText.indexOf('> write path=notes/output.txt');
+        const bashIndex = progressText.indexOf('> bash cmd="');
+        expect(readIndex).toBeGreaterThan(-1);
+        expect(editIndex).toBeGreaterThan(readIndex);
+        expect(writeIndex).toBeGreaterThan(editIndex);
+        expect(bashIndex).toBeGreaterThan(writeIndex);
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Tool snippets done',
+          8_000,
+        );
+        expect(finalMessage.payload.text).toBe('Tool snippets done');
+      },
+    );
+  }, 14_000);
 
   test('retries progress edits after Telegram 429 retry_after responses', async () => {
     const runningState = runRecord({
@@ -354,12 +510,9 @@ describe('TelegramPollingAdapter message flow integration', () => {
 
         const sendMessage = await clone.waitForBotCall(
           'sendMessage',
-          (call) =>
-            call.payload.text === "Run queued as run-timeout. Still running. I'll send the result when it's done.",
+          (call) => call.payload.text === "Still running. I'll send the result when it's done.",
         );
-        expect(sendMessage.payload.text).toBe(
-          "Run queued as run-timeout. Still running. I'll send the result when it's done.",
-        );
+        expect(sendMessage.payload.text).toBe("Still running. I'll send the result when it's done.");
       },
     );
   });
@@ -400,9 +553,7 @@ describe('TelegramPollingAdapter message flow integration', () => {
 
         const queuedMessage = await clone.waitForBotCall(
           'sendMessage',
-          (call) =>
-            call.payload.text ===
-            "Run queued as run-late-complete. Still running. I'll send the result when it's done.",
+          (call) => call.payload.text === "Still running. I'll send the result when it's done.",
         );
         expect(queuedMessage.payload.text).toContain('Still running');
 
