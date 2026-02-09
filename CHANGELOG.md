@@ -1,14 +1,19 @@
 # Changelog
 
-All notable changes to jagc are documented here.
+All notable changes to `jagc` are documented here.
 
-This project follows a readable, sectioned changelog format with a permanent **Unreleased** section.
+## Format
+
+- Keep `## [Unreleased]` at the top.
+- Use release headers as `## [X.Y.Z] - YYYY-MM-DD`.
+- Group entries under `### Added`, `### Changed`, `### Fixed` (optionally `### Removed` / `### Security`).
+- Keep entries short and operator/user-facing.
 
 ## [Unreleased]
 
 ### Added
 
-- _None yet._
+- None.
 
 ### Changed
 
