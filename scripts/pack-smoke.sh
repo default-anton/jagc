@@ -34,7 +34,7 @@ if command -v rg >/dev/null 2>&1; then
     exit 1
   fi
 
-  if ! rg -q '^package/defaults/extensions/global-agents-loader\.ts$' "$TARBALL_CONTENTS_FILE"; then
+  if ! rg -q '^package/defaults/extensions/30-global-agents-loader\.ts$' "$TARBALL_CONTENTS_FILE"; then
     echo "pack smoke tarball missing defaults/extensions payload" >&2
     exit 1
   fi
@@ -44,7 +44,7 @@ else
     exit 1
   fi
 
-  if ! grep -q '^package/defaults/extensions/global-agents-loader\.ts$' "$TARBALL_CONTENTS_FILE"; then
+  if ! grep -q '^package/defaults/extensions/30-global-agents-loader\.ts$' "$TARBALL_CONTENTS_FILE"; then
     echo "pack smoke tarball missing defaults/extensions payload" >&2
     exit 1
   fi
@@ -79,7 +79,7 @@ if [[ ! -f "$WORKSPACE_DIR/skills/agents-md/SKILL.md" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$WORKSPACE_DIR/extensions/global-agents-loader.ts" ]]; then
+if [[ ! -f "$WORKSPACE_DIR/extensions/30-global-agents-loader.ts" ]]; then
   echo "pack smoke workspace bootstrap missing extensions payload" >&2
   exit 1
 fi

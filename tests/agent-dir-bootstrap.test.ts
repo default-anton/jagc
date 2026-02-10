@@ -22,7 +22,7 @@ const defaultAgentBrowserTemplateScriptPath = resolve(
 const defaultGlobalAgentsLoaderExtensionTemplatePath = resolve(
   defaultTemplatesRoot,
   'extensions',
-  'global-agents-loader.ts',
+  '30-global-agents-loader.ts',
 );
 const defaultWorkspaceTemplateFiles = ['SYSTEM.md', 'AGENTS.md', 'settings.json'] as const;
 const defaultWorkspaceTemplateDirectories = ['skills', 'extensions'] as const;
@@ -191,21 +191,21 @@ describe('bootstrapAgentDir', () => {
     const workspaceDir = join(root, 'workspace');
     await mkdir(join(workspaceDir, 'extensions'), { recursive: true, mode: 0o700 });
     await writeFile(join(workspaceDir, 'SYSTEM.md'), '# custom system\n');
-    await writeFile(join(workspaceDir, 'extensions', 'global-agents-loader.ts'), '// custom extension\n');
+    await writeFile(join(workspaceDir, 'extensions', '30-global-agents-loader.ts'), '// custom extension\n');
 
     const result = await bootstrapAgentDir(workspaceDir, {
       overwriteExistingFiles: true,
     });
 
     expect(result.createdFiles).toContain('SYSTEM.md');
-    expect(result.createdFiles).toContain('extensions/global-agents-loader.ts');
+    expect(result.createdFiles).toContain('extensions/30-global-agents-loader.ts');
 
     const expectedSystemContent = await readFile(defaultSystemTemplatePath, 'utf8');
     const systemContent = await readFile(join(workspaceDir, 'SYSTEM.md'), 'utf8');
     expect(systemContent).toBe(expectedSystemContent);
 
     const expectedExtensionContent = await readFile(defaultGlobalAgentsLoaderExtensionTemplatePath, 'utf8');
-    const extensionContent = await readFile(join(workspaceDir, 'extensions', 'global-agents-loader.ts'), 'utf8');
+    const extensionContent = await readFile(join(workspaceDir, 'extensions', '30-global-agents-loader.ts'), 'utf8');
     expect(extensionContent).toBe(expectedExtensionContent);
   });
 });
