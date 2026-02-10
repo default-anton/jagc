@@ -11,6 +11,7 @@ export const serviceEnvSnapshotFilename = 'service.env.snapshot';
 const defaultLaunchAgentsDir = join(homedir(), 'Library', 'LaunchAgents');
 
 export const supportedLogLevels = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
+export const nodeEnvFileIfExistsVersionRequirement = '>=20.19.0 <21 || >=22.9.0';
 
 export type ServiceLogLevel = (typeof supportedLogLevels)[number];
 export type ServiceRunner = 'pi' | 'echo';
@@ -160,6 +161,7 @@ const serviceEnvironmentPrefixes = [
   'POETRY_',
   'FNM_',
 ];
+const shellEnvironmentCaptureTimeoutMs = 5000;
 
 export function createServiceManager(platform: NodeJS.Platform = process.platform): PlatformServiceManager {
   if (platform === 'darwin') {
@@ -167,6 +169,32 @@ export function createServiceManager(platform: NodeJS.Platform = process.platfor
   }
 
   return new UnsupportedServiceManager(platform);
+}
+
+export function supportsNodeEnvFileIfExists(nodeVersion: string): boolean {
+  const parsedVersion = parseNodeVersion(nodeVersion);
+  if (!parsedVersion) {
+    return false;
+  }
+
+  const { major, minor } = parsedVersion;
+  if (major < 20) {
+    return false;
+  }
+
+  if (major === 20) {
+    return minor >= 19;
+  }
+
+  if (major === 21) {
+    return false;
+  }
+
+  if (major === 22) {
+    return minor >= 9;
+  }
+
+  return major >= 23;
 }
 
 export async function resolveServerEntrypoint(cliEntrypointPath: string): Promise<string> {
@@ -518,6 +546,7 @@ async function runCommand(
     allowFailure?: boolean;
     env?: NodeJS.ProcessEnv;
     trimOutput?: boolean;
+    timeoutMs?: number;
   } = {},
 ): Promise<CommandResult> {
   const trimOutput = options.trimOutput ?? true;
@@ -529,6 +558,16 @@ async function runCommand(
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+
+    const timeoutHandle =
+      options.timeoutMs && options.timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            stderr += `${stderr ? '\n' : ''}command timed out after ${options.timeoutMs}ms`;
+            child.kill('SIGKILL');
+          }, options.timeoutMs)
+        : null;
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -542,12 +581,16 @@ async function runCommand(
     });
 
     child.on('error', (error) => {
-      stderr += `${error.message}`;
+      stderr += `${stderr ? '\n' : ''}${error.message}`;
     });
 
     child.on('close', (code) => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+
       resolvePromise({
-        code: code ?? 1,
+        code: timedOut ? 124 : (code ?? 1),
         stdout: trimOutput ? stdout.trim() : stdout,
         stderr: trimOutput ? stderr.trim() : stderr,
       });
@@ -737,6 +780,7 @@ async function captureShellEnvironment(shellPath: string): Promise<NodeJS.Proces
     const result = await runCommand(shellPath, args, {
       allowFailure: true,
       trimOutput: false,
+      timeoutMs: shellEnvironmentCaptureTimeoutMs,
       env: {
         ...process.env,
         SHELL: shellPath,
@@ -802,6 +846,24 @@ function resolveUserShellPath(): string {
   }
 
   return '/bin/bash';
+}
+
+function parseNodeVersion(nodeVersion: string): { major: number; minor: number; patch: number } | null {
+  const normalized = nodeVersion.trim().replace(/^v/i, '');
+  const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) {
+    return null;
+  }
+
+  const major = Number.parseInt(match[1] ?? '', 10);
+  const minor = Number.parseInt(match[2] ?? '', 10);
+  const patch = Number.parseInt(match[3] ?? '', 10);
+
+  if (![major, minor, patch].every((value) => Number.isInteger(value) && value >= 0)) {
+    return null;
+  }
+
+  return { major, minor, patch };
 }
 
 function xmlEscape(value: string): string {

@@ -23,7 +23,7 @@ It gives you:
 > Supported service-management path today: macOS (`jagc install`). Linux/Windows service commands are not implemented yet.
 
 ### Prerequisites
-- Node.js 20+
+- Node.js `>=20.19.0 <21` or `>=22.9.0`
 - npm
 - Telegram account
 - A bot token from `@BotFather`
@@ -112,6 +112,8 @@ Most users only need the Telegram token at install time.
 - `~/.jagc/service.env` — user overrides (never overwritten by `jagc install` once created)
 
 launchd loads both files on startup (`snapshot` first, then `service.env`), so values in `service.env` win.
+
+This path depends on Node's `--env-file-if-exists` flag, so use Node `>=20.19.0 <21` or `>=22.9.0`.
 
 After editing either file, run:
 

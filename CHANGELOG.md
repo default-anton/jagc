@@ -18,12 +18,14 @@ All notable changes to `jagc` are documented here.
 ### Changed
 
 - launchd service startup now loads `service.env.snapshot` then `service.env` via Node `--env-file-if-exists`, so user overrides apply on restart without hand-editing plist files.
+- Node engine requirement is now `>=20.19.0 <21 || >=22.9.0`, and `jagc doctor` enforces the same runtime gate for launchd env-file support.
 - `jagc doctor` now checks for both service env files.
 - Workspace bootstrap `.gitignore` defaults now include `service.env` and `service.env.snapshot`.
 - Default workspace `SYSTEM.md` now explicitly states the jagc + pi harness context and points the agent to use `jagc` service commands for self-ops.
 
 ### Fixed
 
+- `jagc install` no longer risks hanging indefinitely while capturing login-shell environment; shell env capture now times out and falls back safely.
 - Workspace bootstrap now initializes `JAGC_WORKSPACE_DIR` as a local git repository (`git init`) when missing, so `jagc install` no longer leaves a non-repo `~/.jagc`.
 
 ## [0.1.8] - 2026-02-09

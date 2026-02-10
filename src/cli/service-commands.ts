@@ -11,11 +11,13 @@ import { exitWithError, parsePositiveNumber, printJson } from './common.js';
 import {
   createServiceManager,
   defaultServiceLabel,
+  nodeEnvFileIfExistsVersionRequirement,
   resolveServerEntrypoint,
   type ServiceLogLevel,
   type ServiceRunner,
   type ServiceStatus,
   supportedLogLevels,
+  supportsNodeEnvFileIfExists,
 } from './service-manager.js';
 
 const defaultWorkspaceDir = process.env.JAGC_WORKSPACE_DIR ?? join(homedir(), '.jagc');
@@ -257,11 +259,11 @@ export function registerServiceCommands(program: Command): void {
         const manager = createServiceManager();
         const checks: DoctorCheck[] = [];
 
-        const nodeMajor = Number(process.versions.node.split('.')[0]);
+        const nodeVersionSupported = supportsNodeEnvFileIfExists(process.versions.node);
         checks.push({
           name: 'node_version',
-          ok: Number.isFinite(nodeMajor) && nodeMajor >= 20,
-          detail: `node ${process.version}`,
+          ok: nodeVersionSupported,
+          detail: `node ${process.version} (requires ${nodeEnvFileIfExistsVersionRequirement})`,
         });
 
         checks.push({

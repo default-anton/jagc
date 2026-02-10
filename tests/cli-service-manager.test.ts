@@ -11,6 +11,7 @@ import {
   renderDefaultUserServiceEnvironment,
   renderLaunchAgentPlist,
   resolveServerEntrypoint,
+  supportsNodeEnvFileIfExists,
 } from '../src/cli/service-manager.js';
 
 describe('resolveServerEntrypoint', () => {
@@ -117,6 +118,17 @@ describe('buildServiceEnvironmentSnapshot', () => {
     expect(snapshot.ASDF_DIR).toBe('/Users/anton/.asdf');
     expect(snapshot.UV_TOOL_BIN_DIR).toBe('/Users/anton/.local/share/uv/tools/bin');
     expect(snapshot.OPENAI_API_KEY).toBeUndefined();
+  });
+});
+
+describe('supportsNodeEnvFileIfExists', () => {
+  test('accepts only Node versions with --env-file-if-exists support', () => {
+    expect(supportsNodeEnvFileIfExists('20.18.0')).toBe(false);
+    expect(supportsNodeEnvFileIfExists('20.19.0')).toBe(true);
+    expect(supportsNodeEnvFileIfExists('21.7.3')).toBe(false);
+    expect(supportsNodeEnvFileIfExists('22.8.0')).toBe(false);
+    expect(supportsNodeEnvFileIfExists('22.9.0')).toBe(true);
+    expect(supportsNodeEnvFileIfExists('24.0.0')).toBe(true);
   });
 });
 
