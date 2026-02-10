@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { access, chmod, copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,7 @@ const workspaceGitignoreEntries = [
   'jagc.sqlite-shm',
   'jagc.sqlite-wal',
 ];
+const defaultsRoot = resolveDefaultsRoot();
 const defaultWorkspaceFiles = [
   {
     name: 'SYSTEM.md',
@@ -245,7 +247,35 @@ async function readWorkspaceTemplate(templatePath: string): Promise<string> {
 }
 
 function workspaceTemplatePath(templateFile: string): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), '../../defaults', templateFile);
+  return join(defaultsRoot, templateFile);
+}
+
+function resolveDefaultsRoot(): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const fallbackCandidate = resolve(moduleDir, '../../defaults');
+  const directCandidates = [fallbackCandidate, resolve(moduleDir, '../defaults')];
+
+  for (const candidate of directCandidates) {
+    if (existsSync(join(candidate, 'SYSTEM.md'))) {
+      return candidate;
+    }
+  }
+
+  let currentDir = moduleDir;
+  for (let index = 0; index < 8; index += 1) {
+    const candidate = resolve(currentDir, 'defaults');
+    if (existsSync(join(candidate, 'SYSTEM.md'))) {
+      return candidate;
+    }
+
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) {
+      break;
+    }
+    currentDir = parentDir;
+  }
+
+  return fallbackCandidate;
 }
 
 async function readIfExists(path: string): Promise<string | undefined> {
