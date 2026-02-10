@@ -20,6 +20,7 @@ import {
   waitForRun,
 } from './client.js';
 import { exitWithError, parsePositiveNumber, printJson } from './common.js';
+import { registerDefaultsCommands } from './defaults-commands.js';
 import { registerServiceCommands } from './service-commands.js';
 
 const defaultApiUrl = process.env.JAGC_API_URL ?? 'http://127.0.0.1:31415';
@@ -50,6 +51,7 @@ program
   });
 
 registerServiceCommands(program);
+registerDefaultsCommands(program);
 
 program
   .command('message')

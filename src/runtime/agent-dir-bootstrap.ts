@@ -10,6 +10,9 @@ export interface AgentDirBootstrapResult {
 
 export interface AgentDirBootstrapOptions {
   overwriteExistingFiles?: boolean;
+  overwriteWorkspaceFiles?: boolean;
+  overwriteBundledFiles?: boolean;
+  overwriteWorkspaceFilesExclude?: string[];
 }
 
 interface CommandResult {
@@ -48,13 +51,19 @@ export async function bootstrapAgentDir(
   agentDir: string,
   options: AgentDirBootstrapOptions = {},
 ): Promise<AgentDirBootstrapResult> {
-  const overwriteExistingFiles = options.overwriteExistingFiles ?? false;
+  const overwriteWorkspaceFiles = options.overwriteWorkspaceFiles ?? options.overwriteExistingFiles ?? false;
+  const overwriteBundledFiles = options.overwriteBundledFiles ?? options.overwriteExistingFiles ?? false;
+  const overwriteWorkspaceFilesExclude = new Set(options.overwriteWorkspaceFilesExclude ?? []);
   const createdDirectory = !(await exists(agentDir));
   await mkdir(agentDir, { recursive: true, mode: 0o700 });
   await ensureWorkspaceGitRepository(agentDir);
   await ensureWorkspaceGitignore(agentDir);
-  const createdFiles = await ensureDefaultWorkspaceFiles(agentDir, overwriteExistingFiles);
-  const createdBundledFiles = await ensureDefaultWorkspaceDirectories(agentDir, overwriteExistingFiles);
+  const createdFiles = await ensureDefaultWorkspaceFiles(
+    agentDir,
+    overwriteWorkspaceFiles,
+    overwriteWorkspaceFilesExclude,
+  );
+  const createdBundledFiles = await ensureDefaultWorkspaceDirectories(agentDir, overwriteBundledFiles);
 
   return {
     createdDirectory,
@@ -97,14 +106,20 @@ async function ensureWorkspaceGitignore(agentDir: string): Promise<void> {
   await writeFile(gitignorePath, `${existingContent}${separator}${missingEntries.join('\n')}\n`);
 }
 
-async function ensureDefaultWorkspaceFiles(agentDir: string, overwriteExistingFiles: boolean): Promise<string[]> {
+async function ensureDefaultWorkspaceFiles(
+  agentDir: string,
+  overwriteExistingFiles: boolean,
+  overwriteExclude: Set<string>,
+): Promise<string[]> {
   const createdFiles: string[] = [];
 
   for (const file of defaultWorkspaceFiles) {
     const filePath = join(agentDir, file.name);
     const existingContent = await readIfExists(filePath);
+    const shouldSkipOverwrite =
+      existingContent !== undefined && (!overwriteExistingFiles || overwriteExclude.has(file.name));
 
-    if (existingContent !== undefined && !overwriteExistingFiles) {
+    if (shouldSkipOverwrite) {
       continue;
     }
 

@@ -22,8 +22,11 @@ async function main(): Promise<void> {
   });
   const mainLogger = rootLogger.child({ component: 'server_main' });
 
+  const overwriteDevDefaults = process.env.JAGC_DEV_OVERWRITE_DEFAULTS === '1';
   const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR, {
-    overwriteExistingFiles: process.env.JAGC_DEV_OVERWRITE_DEFAULTS === '1',
+    overwriteBundledFiles: overwriteDevDefaults,
+    overwriteWorkspaceFiles: overwriteDevDefaults,
+    overwriteWorkspaceFilesExclude: ['settings.json'],
   });
   if (bootstrapResult.createdDirectory || bootstrapResult.createdFiles.length > 0) {
     mainLogger.info({

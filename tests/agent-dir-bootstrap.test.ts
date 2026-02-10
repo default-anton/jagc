@@ -208,6 +208,63 @@ describe('bootstrapAgentDir', () => {
     const extensionContent = await readFile(join(workspaceDir, 'extensions', '30-global-agents-loader.ts'), 'utf8');
     expect(extensionContent).toBe(expectedExtensionContent);
   });
+
+  test('overwrites bundled defaults without touching workspace files when overwriteBundledFiles is enabled', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jagc-bootstrap-'));
+    tempDirs.push(root);
+
+    const workspaceDir = join(root, 'workspace');
+    await mkdir(join(workspaceDir, 'extensions'), { recursive: true, mode: 0o700 });
+    await writeFile(join(workspaceDir, 'settings.json'), '{"provider":"custom"}\n');
+    await writeFile(join(workspaceDir, 'extensions', '30-global-agents-loader.ts'), '// custom extension\n');
+
+    const result = await bootstrapAgentDir(workspaceDir, {
+      overwriteBundledFiles: true,
+      overwriteWorkspaceFiles: false,
+    });
+
+    expect(result.createdFiles).toContain('extensions/30-global-agents-loader.ts');
+    expect(result.createdFiles).not.toContain('settings.json');
+
+    const settingsContent = await readFile(join(workspaceDir, 'settings.json'), 'utf8');
+    expect(settingsContent).toBe('{"provider":"custom"}\n');
+
+    const expectedExtensionContent = await readFile(defaultGlobalAgentsLoaderExtensionTemplatePath, 'utf8');
+    const extensionContent = await readFile(join(workspaceDir, 'extensions', '30-global-agents-loader.ts'), 'utf8');
+    expect(extensionContent).toBe(expectedExtensionContent);
+  });
+
+  test('overwrites workspace files except excluded names', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jagc-bootstrap-'));
+    tempDirs.push(root);
+
+    const workspaceDir = join(root, 'workspace');
+    await mkdir(workspaceDir, { recursive: true, mode: 0o700 });
+    await writeFile(join(workspaceDir, 'SYSTEM.md'), '# custom system\n');
+    await writeFile(join(workspaceDir, 'AGENTS.md'), '# custom agents\n');
+    await writeFile(join(workspaceDir, 'settings.json'), '{"provider":"custom"}\n');
+
+    const result = await bootstrapAgentDir(workspaceDir, {
+      overwriteWorkspaceFiles: true,
+      overwriteWorkspaceFilesExclude: ['settings.json'],
+    });
+
+    expect(result.createdFiles).toContain('SYSTEM.md');
+    expect(result.createdFiles).toContain('AGENTS.md');
+    expect(result.createdFiles).not.toContain('settings.json');
+
+    const expectedSystemContent = await readFile(defaultSystemTemplatePath, 'utf8');
+    const expectedAgentsContent = await readFile(defaultAgentsTemplatePath, 'utf8');
+    const [systemContent, agentsContent, settingsContent] = await Promise.all([
+      readFile(join(workspaceDir, 'SYSTEM.md'), 'utf8'),
+      readFile(join(workspaceDir, 'AGENTS.md'), 'utf8'),
+      readFile(join(workspaceDir, 'settings.json'), 'utf8'),
+    ]);
+
+    expect(systemContent).toBe(expectedSystemContent);
+    expect(agentsContent).toBe(expectedAgentsContent);
+    expect(settingsContent).toBe('{"provider":"custom"}\n');
+  });
 });
 
 async function expectedBootstrapCreatedFiles(): Promise<string[]> {
