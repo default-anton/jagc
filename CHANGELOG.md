@@ -21,7 +21,7 @@ All notable changes to `jagc` are documented here.
 
 ### Fixed
 
-- None.
+- Workspace bootstrap now initializes `JAGC_WORKSPACE_DIR` as a local git repository (`git init`) when missing, so `jagc install` no longer leaves a non-repo `~/.jagc`.
 
 ## [0.1.8] - 2026-02-09
 

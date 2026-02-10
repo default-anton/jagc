@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { access, chmod, copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,6 +6,12 @@ import { fileURLToPath } from 'node:url';
 export interface AgentDirBootstrapResult {
   createdDirectory: boolean;
   createdFiles: string[];
+}
+
+interface CommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
 }
 
 const workspaceGitignoreEntries = [
@@ -34,6 +41,7 @@ const defaultWorkspaceDirectories = ['skills', 'extensions'] as const;
 export async function bootstrapAgentDir(agentDir: string): Promise<AgentDirBootstrapResult> {
   const createdDirectory = !(await exists(agentDir));
   await mkdir(agentDir, { recursive: true, mode: 0o700 });
+  await ensureWorkspaceGitRepository(agentDir);
   await ensureWorkspaceGitignore(agentDir);
   const createdFiles = await ensureDefaultWorkspaceFiles(agentDir);
   const createdBundledFiles = await ensureDefaultWorkspaceDirectories(agentDir);
@@ -42,6 +50,21 @@ export async function bootstrapAgentDir(agentDir: string): Promise<AgentDirBoots
     createdDirectory,
     createdFiles: [...createdFiles, ...createdBundledFiles],
   };
+}
+
+async function ensureWorkspaceGitRepository(agentDir: string): Promise<void> {
+  if (await exists(join(agentDir, '.git'))) {
+    return;
+  }
+
+  const initResult = await runCommand('git', ['-C', agentDir, 'init']);
+  if (initResult.code === 0) {
+    return;
+  }
+
+  throw new Error(
+    `failed to initialize workspace git repository at ${agentDir}: ${initResult.stderr || initResult.stdout || `exit ${initResult.code}`}`,
+  );
 }
 
 async function ensureWorkspaceGitignore(agentDir: string): Promise<void> {
@@ -147,6 +170,40 @@ async function copyMissingFilesRecursively(options: {
   }
 
   return createdFiles;
+}
+
+async function runCommand(command: string, args: string[]): Promise<CommandResult> {
+  return await new Promise<CommandResult>((resolvePromise) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on('error', (error) => {
+      stderr += `${error.message}`;
+    });
+
+    child.on('close', (code) => {
+      resolvePromise({
+        code: code ?? 1,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+      });
+    });
+  });
 }
 
 async function readWorkspaceTemplate(templatePath: string): Promise<string> {

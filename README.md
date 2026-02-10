@@ -88,7 +88,7 @@ jagc model set <provider/model> --thread-key cli:default --json
 - A **thread** is a conversation lane (`thread_key`).
 - A **run** is one assistant execution attempt (`run_id`).
 - Same thread = ordered turns; different threads can run concurrently.
-- Workspace defaults to `~/.jagc`.
+- Workspace defaults to `~/.jagc` and is auto-initialized as a local git repository.
 
 ## Minimal config
 

@@ -39,6 +39,7 @@ This doc is the implementation snapshot (not design intent).
 - Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (never overwrites existing files).
 - Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (never overwrites existing files).
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
+- Bootstrap initializes `JAGC_WORKSPACE_DIR` as a local git repository (`git init`) when `.git` is missing.
 - Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal` entries.
 
 ## macOS service lifecycle (CLI-managed)
