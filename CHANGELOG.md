@@ -17,11 +17,12 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- pi runtime session setup now disables SDK built-in AGENTS.md/skills auto-loading and relies on bundled default extensions to inject global AGENTS context, available skills metadata, and Codex `apply_patch` harness instructions into the system prompt.
+- `pnpm dev` now runs with `JAGC_DEV_OVERWRITE_DEFAULTS=1`, so workspace bootstrap overwrites default `SYSTEM.md`, `AGENTS.md`, `settings.json`, `skills/**`, and `extensions/**` templates on startup for faster local iteration.
 
 ### Fixed
 
-- None.
+- Telegram polling now deletes the startup placeholder progress message when a run finishes without any thinking snippets or tool activity, so chats no longer keep stale lines like `mapmaking...` after simple replies.
 
 ## [0.1.9] - 2026-02-09
 

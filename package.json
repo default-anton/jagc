@@ -45,7 +45,7 @@
     ".env.example"
   ],
   "scripts": {
-    "dev": "tsx watch src/server/main.ts",
+    "dev": "JAGC_DEV_OVERWRITE_DEFAULTS=1 tsx watch src/server/main.ts",
     "dev:cli": "tsx src/cli/main.ts",
     "smoke": "scripts/smoke.sh",
     "build": "tsdown src/server/main.ts src/cli/main.ts --format esm --out-dir dist",

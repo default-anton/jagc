@@ -22,7 +22,9 @@ async function main(): Promise<void> {
   });
   const mainLogger = rootLogger.child({ component: 'server_main' });
 
-  const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR);
+  const bootstrapResult = await bootstrapAgentDir(config.JAGC_WORKSPACE_DIR, {
+    overwriteExistingFiles: process.env.JAGC_DEV_OVERWRITE_DEFAULTS === '1',
+  });
   if (bootstrapResult.createdDirectory || bootstrapResult.createdFiles.length > 0) {
     mainLogger.info({
       event: 'workspace_bootstrap',

@@ -8,6 +8,10 @@ export interface AgentDirBootstrapResult {
   createdFiles: string[];
 }
 
+export interface AgentDirBootstrapOptions {
+  overwriteExistingFiles?: boolean;
+}
+
 interface CommandResult {
   code: number;
   stdout: string;
@@ -40,13 +44,17 @@ const defaultWorkspaceFiles = [
 ] as const;
 const defaultWorkspaceDirectories = ['skills', 'extensions'] as const;
 
-export async function bootstrapAgentDir(agentDir: string): Promise<AgentDirBootstrapResult> {
+export async function bootstrapAgentDir(
+  agentDir: string,
+  options: AgentDirBootstrapOptions = {},
+): Promise<AgentDirBootstrapResult> {
+  const overwriteExistingFiles = options.overwriteExistingFiles ?? false;
   const createdDirectory = !(await exists(agentDir));
   await mkdir(agentDir, { recursive: true, mode: 0o700 });
   await ensureWorkspaceGitRepository(agentDir);
   await ensureWorkspaceGitignore(agentDir);
-  const createdFiles = await ensureDefaultWorkspaceFiles(agentDir);
-  const createdBundledFiles = await ensureDefaultWorkspaceDirectories(agentDir);
+  const createdFiles = await ensureDefaultWorkspaceFiles(agentDir, overwriteExistingFiles);
+  const createdBundledFiles = await ensureDefaultWorkspaceDirectories(agentDir, overwriteExistingFiles);
 
   return {
     createdDirectory,
@@ -89,14 +97,14 @@ async function ensureWorkspaceGitignore(agentDir: string): Promise<void> {
   await writeFile(gitignorePath, `${existingContent}${separator}${missingEntries.join('\n')}\n`);
 }
 
-async function ensureDefaultWorkspaceFiles(agentDir: string): Promise<string[]> {
+async function ensureDefaultWorkspaceFiles(agentDir: string, overwriteExistingFiles: boolean): Promise<string[]> {
   const createdFiles: string[] = [];
 
   for (const file of defaultWorkspaceFiles) {
     const filePath = join(agentDir, file.name);
     const existingContent = await readIfExists(filePath);
 
-    if (existingContent !== undefined) {
+    if (existingContent !== undefined && !overwriteExistingFiles) {
       continue;
     }
 
@@ -108,7 +116,7 @@ async function ensureDefaultWorkspaceFiles(agentDir: string): Promise<string[]> 
   return createdFiles;
 }
 
-async function ensureDefaultWorkspaceDirectories(agentDir: string): Promise<string[]> {
+async function ensureDefaultWorkspaceDirectories(agentDir: string, overwriteExistingFiles: boolean): Promise<string[]> {
   const createdFiles: string[] = [];
 
   for (const directory of defaultWorkspaceDirectories) {
@@ -124,6 +132,7 @@ async function ensureDefaultWorkspaceDirectories(agentDir: string): Promise<stri
       sourceDirectoryPath,
       targetDirectoryPath,
       relativePath: directory,
+      overwriteExistingFiles,
     });
 
     createdFiles.push(...copiedFiles);
@@ -136,6 +145,7 @@ async function copyMissingFilesRecursively(options: {
   sourceDirectoryPath: string;
   targetDirectoryPath: string;
   relativePath: string;
+  overwriteExistingFiles: boolean;
 }): Promise<string[]> {
   const createdFiles: string[] = [];
   const entries = await readdir(options.sourceDirectoryPath, { withFileTypes: true });
@@ -152,6 +162,7 @@ async function copyMissingFilesRecursively(options: {
         sourceDirectoryPath: sourcePath,
         targetDirectoryPath: targetPath,
         relativePath,
+        overwriteExistingFiles: options.overwriteExistingFiles,
       });
       createdFiles.push(...nestedCreatedFiles);
       continue;
@@ -161,7 +172,7 @@ async function copyMissingFilesRecursively(options: {
       throw new Error(`workspace bootstrap template contains unsupported entry: ${sourcePath}`);
     }
 
-    if (await exists(targetPath)) {
+    if (!options.overwriteExistingFiles && (await exists(targetPath))) {
       continue;
     }
 

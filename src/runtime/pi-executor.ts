@@ -7,6 +7,7 @@ import {
   type AgentSession,
   AuthStorage,
   createAgentSession,
+  DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
   SettingsManager,
@@ -327,6 +328,17 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
   }
 
   private async createSession(sessionManager: SessionManager): Promise<AgentSession> {
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: this.options.workspaceDir,
+      agentDir: this.options.workspaceDir,
+      settingsManager: this.settingsManager,
+      noSkills: true,
+      agentsFilesOverride: () => ({
+        agentsFiles: [],
+      }),
+    });
+    await resourceLoader.reload();
+
     const result = await createAgentSession({
       cwd: this.options.workspaceDir,
       agentDir: this.options.workspaceDir,
@@ -334,6 +346,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
       settingsManager: this.settingsManager,
+      resourceLoader,
     });
 
     return result.session;
