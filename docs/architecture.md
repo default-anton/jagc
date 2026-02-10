@@ -127,7 +127,7 @@ Operational note:
 - Telegram `/share` and API `POST /v1/threads/:thread_key/share` export the current thread session to HTML and upload it as a secret GitHub gist; response includes both gist URL and share-viewer URL.
 - Adapter starts a per-run progress reporter (in-chat append-style progress message + typing indicator) as soon as a run is ingested.
 - Progress is driven by run-level events emitted from `RunService` and pi session events forwarded by `ThreadRunController` (`assistant_text_delta`, `assistant_thinking_delta`, `tool_execution_*`, turn/agent lifecycle), rendered as compact append-log lines (`>` for tool calls with args-focused snippets, `~` for short thinking snippets).
-- Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed.
+- Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed, and if the run finishes without any snippets, the placeholder message is deleted.
 - Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`).
 - Adapter waits for terminal run status and replies with output/error.
 - If foreground wait exceeds adapter timeout, Telegram receives a "still running" notice and the adapter continues waiting in the background, then posts final output when complete.

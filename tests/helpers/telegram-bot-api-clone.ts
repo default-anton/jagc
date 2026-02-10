@@ -389,6 +389,10 @@ export class TelegramBotApiClone {
         this.recordBotCall({ method, payload });
         return true;
       }
+      case 'deleteMessage': {
+        this.recordBotCall({ method, payload });
+        return true;
+      }
       default: {
         throw new TelegramCloneApiError({
           errorCode: 404,

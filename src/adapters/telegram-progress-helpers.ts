@@ -101,6 +101,19 @@ export function isEditMessageGoneError(error: unknown): boolean {
   return message.includes('message to edit not found') || message.includes("message can't be edited");
 }
 
+export function isDeleteMessageGoneError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('message to delete not found') ||
+    message.includes('message identifier is not specified') ||
+    message.includes("message can't be deleted")
+  );
+}
+
 function summarizeToolArgs(toolName: string, payload: unknown): string | null {
   if (!isRecord(payload)) {
     return null;

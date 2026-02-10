@@ -32,6 +32,7 @@ This clone is intentionally narrow: it only implements the polling and messaging
 - `sendMessage`
 - `editMessageText`
 - `sendChatAction`
+- `deleteMessage`
 - `answerCallbackQuery`
 
 ### Why

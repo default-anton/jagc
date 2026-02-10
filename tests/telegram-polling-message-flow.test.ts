@@ -152,6 +152,71 @@ describe('TelegramPollingAdapter message flow integration', () => {
     );
   }, 12_000);
 
+  test('deletes startup progress placeholder when run has no thinking/tool snippets', async () => {
+    const runningState = runRecord({
+      runId: 'run-no-snippets',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-no-snippets',
+      status: 'succeeded',
+      output: { text: 'hello back' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService('run-no-snippets', [runningState, runningState, completedState]);
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 100,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'hi',
+        });
+
+        const startupMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => isFunnyProgressLine(call.payload.text),
+          4_000,
+        );
+        expect(isFunnyProgressLine(startupMessage.payload.text)).toBe(true);
+
+        const deleteCall = await clone.waitForBotCall(
+          'deleteMessage',
+          (call) => call.payload.chat_id === testChatId,
+          4_000,
+        );
+        expect(deleteCall.payload.chat_id).toBe(testChatId);
+        expect(typeof deleteCall.payload.message_id).toBe('number');
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'hello back',
+          4_000,
+        );
+        expect(finalMessage.payload.text).toBe('hello back');
+
+        expect(clone.getApiCallCount('editMessageText')).toBe(0);
+
+        const botCalls = clone.getBotCalls();
+        const deleteIndex = botCalls.findIndex((call) => call.method === 'deleteMessage');
+        const finalMessageIndex = botCalls.findIndex(
+          (call) => call.method === 'sendMessage' && call.payload.text === 'hello back',
+        );
+
+        expect(deleteIndex).toBeGreaterThan(-1);
+        expect(finalMessageIndex).toBeGreaterThan(deleteIndex);
+      },
+    );
+  });
+
   test('flushes latest thinking preview before tool events so snippets are not left mid-token', async () => {
     const runningState = runRecord({
       runId: 'run-thinking-flush',

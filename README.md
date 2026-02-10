@@ -82,8 +82,9 @@ jagc share --thread-key cli:default --json
 - Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `POST /v1/threads/:thread_key/share`
 - CLI: `health`, `message`, `run wait`, `new`, `share`, `model list|get|set`, `thinking get|set`, `auth providers|login`
 - Telegram polling adapter (personal chats) with `/settings`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
-- Telegram progress stream shows tool/thinking snippets; before the first snippet, a short placeholder line (for faster feedback)
+- Telegram progress stream shows tool/thinking snippets; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive
 - Runtime semantics: same-thread `followUp` (default) and explicit `steer`
+- System-prompt context is extension-driven: global `AGENTS.md`, available skills, and Codex harness notes are injected by default workspace extensions (SDK built-in AGENTS/skills auto-loading is disabled)
 - In-process scheduling + SQLite-backed recovery after restart
 
 ## Mental model (important)

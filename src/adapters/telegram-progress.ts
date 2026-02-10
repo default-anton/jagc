@@ -6,6 +6,7 @@ import type { RunProgressEvent } from '../shared/run-progress.js';
 import { extractTelegramRetryAfterSeconds, isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
 import {
   appendTail,
+  isDeleteMessageGoneError,
   isEditMessageGoneError,
   maxProgressToolLabelChars,
   normalizePreviewDelta,
@@ -258,10 +259,54 @@ export class TelegramRunProgressReporter {
 
   private async finish(): Promise<void> {
     this.stopTypingHeartbeat();
+
+    if (this.shouldDeleteStartupOnlyProgressMessage()) {
+      await this.deleteProgressMessage();
+      this.pendingRender = false;
+      this.stopped = true;
+      this.clearRenderTimer();
+      return;
+    }
+
     this.scheduleRender(true);
     await this.flushRenderIfIdle();
     this.stopped = true;
     this.clearRenderTimer();
+  }
+
+  private shouldDeleteStartupOnlyProgressMessage(): boolean {
+    return (
+      this.phase === 'succeeded' &&
+      this.progressMessageId !== null &&
+      this.showStartupLine &&
+      this.eventLogLines.length === 0 &&
+      !this.hasPendingThinkingPreview
+    );
+  }
+
+  private async deleteProgressMessage(): Promise<void> {
+    const messageId = this.progressMessageId;
+    if (messageId === null) {
+      return;
+    }
+
+    try {
+      await this.callWithRetry(() => this.options.bot.api.deleteMessage(this.options.chatId, messageId));
+    } catch (error) {
+      if (!isDeleteMessageGoneError(error)) {
+        this.options.logger.warn({
+          event: 'telegram_progress_delete_failed',
+          run_id: this.options.runId,
+          chat_id: this.options.chatId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } finally {
+      if (this.progressMessageId === messageId) {
+        this.progressMessageId = null;
+      }
+      this.lastRenderedText = '';
+    }
   }
 
   private scheduleRender(immediate = false): void {
