@@ -64,7 +64,7 @@ jobs:
           fi
 
           unset NODE_AUTH_TOKEN NPM_TOKEN
-          npm publish --access public --provenance
+          NPM_CONFIG_PROVENANCE=false npm publish --access public
 
       - name: Build release notes from changelog
         run: |

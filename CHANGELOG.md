@@ -17,7 +17,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Release workflow now publishes with `NPM_CONFIG_PROVENANCE=false npm publish --access public` because npm does not support provenance for private GitHub source repositories.
 
 ### Fixed
 
