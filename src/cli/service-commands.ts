@@ -1,3 +1,4 @@
+import { access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -128,6 +129,9 @@ export function registerServiceCommands(program: Command): void {
         process.stdout.write(`service: ${renderServiceState(installResult.status)}\n`);
         process.stdout.write(`api: ${apiUrl}\n`);
         process.stdout.write(`logs: ${installResult.status.stdoutPath} | ${installResult.status.stderrPath}\n`);
+        process.stdout.write(
+          `env: ${installResult.status.serviceEnvSnapshotPath} (managed) | ${installResult.status.serviceEnvPath} (user)\n`,
+        );
       }),
     );
 
@@ -165,6 +169,7 @@ export function registerServiceCommands(program: Command): void {
         process.stdout.write(`${renderServiceState(status)}\n`);
         process.stdout.write(`api: ${apiUrl} (${health.ok ? 'healthy' : `unreachable: ${health.error}`})\n`);
         process.stdout.write(`logs: ${status.stdoutPath} | ${status.stderrPath}\n`);
+        process.stdout.write(`env: ${status.serviceEnvSnapshotPath} (managed) | ${status.serviceEnvPath} (user)\n`);
       }),
     );
 
@@ -205,6 +210,7 @@ export function registerServiceCommands(program: Command): void {
         process.stdout.write(`restarted ${options.label}\n`);
         process.stdout.write(`${renderServiceState(status)}\n`);
         process.stdout.write(`api: ${apiUrl}\n`);
+        process.stdout.write(`env: ${status.serviceEnvSnapshotPath} (managed) | ${status.serviceEnvPath} (user)\n`);
       }),
     );
 
@@ -300,6 +306,20 @@ export function registerServiceCommands(program: Command): void {
           name: 'service_running',
           ok: serviceStatus.running,
           detail: serviceStatus.pid ? `pid ${serviceStatus.pid}` : 'not running',
+        });
+
+        const managedEnvExists = await fileExists(serviceStatus.serviceEnvSnapshotPath);
+        checks.push({
+          name: 'service_env_snapshot',
+          ok: managedEnvExists,
+          detail: serviceStatus.serviceEnvSnapshotPath,
+        });
+
+        const userEnvExists = await fileExists(serviceStatus.serviceEnvPath);
+        checks.push({
+          name: 'service_env_user',
+          ok: userEnvExists,
+          detail: serviceStatus.serviceEnvPath,
         });
 
         const fallbackApiUrl = apiUrlFromProgram(program);
@@ -418,6 +438,15 @@ function renderServiceState(status: ServiceStatus): string {
   const pid = status.pid ? ` pid=${status.pid}` : '';
   const state = status.running ? 'running' : status.loaded ? 'loaded' : 'stopped';
   return `service ${status.label} ${state}${pid} installed=${status.installed ? 'yes' : 'no'}`;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parsePositiveNumberFromEnv(value: string | undefined, fallback: number): number {

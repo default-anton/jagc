@@ -12,6 +12,8 @@
     <key>ProgramArguments</key>
     <array>
       <string>/opt/homebrew/bin/node</string>
+      <string>--env-file-if-exists=/Users/you/.jagc/service.env.snapshot</string>
+      <string>--env-file-if-exists=/Users/you/.jagc/service.env</string>
       <string>/usr/local/lib/node_modules/jagc/dist/server/main.mjs</string>
     </array>
 
@@ -29,8 +31,6 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-      <key>PATH</key>
-      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
       <key>JAGC_WORKSPACE_DIR</key>
       <string>/Users/you/.jagc</string>
       <key>JAGC_DATABASE_PATH</key>
@@ -43,10 +43,12 @@
       <string>pi</string>
       <key>JAGC_LOG_LEVEL</key>
       <string>info</string>
-      <!-- Optional provider env vars -->
-      <!-- <key>OPENAI_API_KEY</key><string>...</string> -->
       <!-- Optional Telegram polling -->
       <!-- <key>JAGC_TELEGRAM_BOT_TOKEN</key><string>...</string> -->
+      <!--
+        Preferred env injection path for tools/providers/custom CLIs:
+        /Users/you/.jagc/service.env.snapshot (managed) + /Users/you/.jagc/service.env (user overrides)
+      -->
     </dict>
 
     <key>StandardOutPath</key>

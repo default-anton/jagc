@@ -18,6 +18,8 @@ const workspaceGitignoreEntries = [
   '.sessions/',
   'auth.json',
   'git/',
+  'service.env',
+  'service.env.snapshot',
   'jagc.sqlite',
   'jagc.sqlite-shm',
   'jagc.sqlite-wal',

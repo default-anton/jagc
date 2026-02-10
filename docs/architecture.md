@@ -40,12 +40,14 @@ This doc is the implementation snapshot (not design intent).
 - Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (never overwrites existing files).
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
 - Bootstrap initializes `JAGC_WORKSPACE_DIR` as a local git repository (`git init`) when `.git` is missing.
-- Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, `git/`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal` entries.
+- Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, `git/`, `service.env`, `service.env.snapshot`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal` entries.
 
 ## macOS service lifecycle (CLI-managed)
 
 - `jagc install` writes a per-user launch agent at `~/Library/LaunchAgents/<label>.plist` (`com.jagc.server` by default), then `launchctl bootstrap` + `kickstart` starts the service.
-- launchd runs `node <installed package>/dist/server/main.mjs` directly (no `pnpm` runtime dependency after install).
+- launchd runs `node --env-file-if-exists=<workspace>/service.env.snapshot --env-file-if-exists=<workspace>/service.env <installed package>/dist/server/main.mjs`.
+- `jagc install` always regenerates `<workspace>/service.env.snapshot` from the user's login shell (PATH/tooling env) and creates `<workspace>/service.env` when missing.
+- `service.env` is never overwritten by `jagc install` once it exists; user edits are picked up after `jagc restart`.
 - launchd environment variables include `JAGC_WORKSPACE_DIR`, `JAGC_DATABASE_PATH`, `JAGC_HOST`, `JAGC_PORT`, `JAGC_RUNNER`, and optional `JAGC_TELEGRAM_BOT_TOKEN`.
 - Logs default to `$JAGC_WORKSPACE_DIR/logs/server.out.log` and `server.err.log`.
 - `jagc status` inspects launchd (`launchctl print`) and API health (`/healthz`).

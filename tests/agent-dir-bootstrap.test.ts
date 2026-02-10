@@ -53,7 +53,9 @@ describe('bootstrapAgentDir', () => {
     expect(gitDirectoryStat.isDirectory()).toBe(true);
 
     const gitignoreContent = await readFile(join(workspaceDir, '.gitignore'), 'utf8');
-    expect(gitignoreContent).toBe('.sessions/\nauth.json\ngit/\njagc.sqlite\njagc.sqlite-shm\njagc.sqlite-wal\n');
+    expect(gitignoreContent).toBe(
+      '.sessions/\nauth.json\ngit/\nservice.env\nservice.env.snapshot\njagc.sqlite\njagc.sqlite-shm\njagc.sqlite-wal\n',
+    );
 
     const [expectedSystemContent, expectedAgentsContent, expectedSettingsContent] = await Promise.all([
       readFile(defaultSystemTemplatePath, 'utf8'),
@@ -109,7 +111,9 @@ describe('bootstrapAgentDir', () => {
     expect(gitDirectoryStat.isDirectory()).toBe(true);
 
     const gitignoreContent = await readFile(join(workspaceDir, '.gitignore'), 'utf8');
-    expect(gitignoreContent).toBe('.sessions/\nauth.json\ngit/\njagc.sqlite\njagc.sqlite-shm\njagc.sqlite-wal\n');
+    expect(gitignoreContent).toBe(
+      '.sessions/\nauth.json\ngit/\nservice.env\nservice.env.snapshot\njagc.sqlite\njagc.sqlite-shm\njagc.sqlite-wal\n',
+    );
   });
 
   test('appends missing workspace ignore entries without duplicating existing ones', async () => {
@@ -124,7 +128,7 @@ describe('bootstrapAgentDir', () => {
 
     const gitignoreContent = await readFile(join(workspaceDir, '.gitignore'), 'utf8');
     expect(gitignoreContent).toBe(
-      'node_modules/\nauth.json\n.sessions/\ngit/\njagc.sqlite\njagc.sqlite-shm\njagc.sqlite-wal\n',
+      'node_modules/\nauth.json\n.sessions/\ngit/\nservice.env\nservice.env.snapshot\njagc.sqlite\njagc.sqlite-shm\njagc.sqlite-wal\n',
     );
   });
 

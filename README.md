@@ -104,6 +104,21 @@ Most users only need the Telegram token at install time.
 | `JAGC_API_URL` | `http://127.0.0.1:31415` | Point CLI at another server |
 | `JAGC_RUNNER` | `pi` | Use `echo` for deterministic smoke/testing |
 
+### Service environment (macOS launchd)
+
+`jagc install` creates two workspace env files for launchd:
+
+- `~/.jagc/service.env.snapshot` — managed by jagc (captured from your login shell; includes PATH/tooling env for brew/mise/uv/asdf/etc.)
+- `~/.jagc/service.env` — user overrides (never overwritten by `jagc install` once created)
+
+launchd loads both files on startup (`snapshot` first, then `service.env`), so values in `service.env` win.
+
+After editing either file, run:
+
+```bash
+jagc restart
+```
+
 Auth provider setup details: [`docs/auth.md`](docs/auth.md)
 
 ## Security baseline

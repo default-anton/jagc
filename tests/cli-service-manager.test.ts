@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
+  buildServiceEnvironmentSnapshot,
   parseLaunchAgentServiceConnection,
   parseLaunchctlPrintOutput,
+  renderDefaultUserServiceEnvironment,
   renderLaunchAgentPlist,
   resolveServerEntrypoint,
 } from '../src/cli/service-manager.js';
@@ -77,6 +79,8 @@ describe('renderLaunchAgentPlist', () => {
       logLevel: 'info',
       stdoutPath: '/tmp/jagc/logs/server.out.log',
       stderrPath: '/tmp/jagc/logs/server.err.log',
+      serviceEnvPath: '/tmp/jagc/service.env',
+      serviceEnvSnapshotPath: '/tmp/jagc/service.env.snapshot',
       telegramBotToken: 'abc<def>',
     });
 
@@ -86,7 +90,42 @@ describe('renderLaunchAgentPlist', () => {
     expect(plist).toContain('<string>echo</string>');
     expect(plist).toContain('/tmp/jagc/&lt;workspace&gt;');
     expect(plist).toContain('/tmp/jagc/db&amp;name.sqlite');
+    expect(plist).toContain('--env-file-if-exists=/tmp/jagc/service.env.snapshot');
+    expect(plist).toContain('--env-file-if-exists=/tmp/jagc/service.env');
     expect(plist).toContain('abc&lt;def&gt;');
+    expect(plist).not.toContain('<key>PATH</key>');
+  });
+});
+
+describe('buildServiceEnvironmentSnapshot', () => {
+  test('keeps popular toolchain env vars and merges PATH with node dir first', () => {
+    const snapshot = buildServiceEnvironmentSnapshot(
+      {
+        PATH: '/Users/anton/.local/bin:/opt/homebrew/bin:/usr/bin',
+        HOME: '/Users/anton',
+        SHELL: '/bin/bash',
+        ASDF_DIR: '/Users/anton/.asdf',
+        UV_TOOL_BIN_DIR: '/Users/anton/.local/share/uv/tools/bin',
+        OPENAI_API_KEY: 'secret-should-not-be-copied',
+      },
+      '/opt/homebrew/Cellar/node/24.2.0/bin/node',
+    );
+
+    expect(snapshot.PATH).toBe(
+      '/opt/homebrew/Cellar/node/24.2.0/bin:/Users/anton/.local/bin:/opt/homebrew/bin:/usr/bin:/usr/local/bin:/bin',
+    );
+    expect(snapshot.ASDF_DIR).toBe('/Users/anton/.asdf');
+    expect(snapshot.UV_TOOL_BIN_DIR).toBe('/Users/anton/.local/share/uv/tools/bin');
+    expect(snapshot.OPENAI_API_KEY).toBeUndefined();
+  });
+});
+
+describe('renderDefaultUserServiceEnvironment', () => {
+  test('documents user override file semantics', () => {
+    const content = renderDefaultUserServiceEnvironment();
+
+    expect(content).toContain('Loaded after service.env.snapshot; values here win.');
+    expect(content).toContain('PATH=/Users/you/.local/bin');
   });
 });
 
@@ -104,6 +143,8 @@ describe('parseLaunchAgentServiceConnection', () => {
       logLevel: 'info',
       stdoutPath: '/tmp/jagc/logs/server.out.log',
       stderrPath: '/tmp/jagc/logs/server.err.log',
+      serviceEnvPath: '/tmp/jagc/service.env',
+      serviceEnvSnapshotPath: '/tmp/jagc/service.env.snapshot',
     });
 
     expect(parseLaunchAgentServiceConnection(plist)).toEqual({

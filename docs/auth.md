@@ -44,7 +44,9 @@ Start from Telegram:
 
 ### Path B: provide env vars to the jagc process
 
-Set provider vars in the environment where the server runs (shell, launchd env, systemd env file).
+Set provider vars in the environment where the server runs (for macOS launchd: `~/.jagc/service.env`; for Linux/systemd: env file).
+
+On macOS, `jagc install` also writes `~/.jagc/service.env.snapshot` (managed). `~/.jagc/service.env` loads after snapshot and is the right place for persistent overrides.
 
 Examples:
 

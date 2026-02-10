@@ -13,11 +13,14 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- macOS service install now creates workspace env files: `service.env.snapshot` (managed shell snapshot) and `service.env` (user overrides), and `jagc status`/`jagc restart` now print both paths.
 
 ### Changed
 
-- None.
+- launchd service startup now loads `service.env.snapshot` then `service.env` via Node `--env-file-if-exists`, so user overrides apply on restart without hand-editing plist files.
+- `jagc doctor` now checks for both service env files.
+- Workspace bootstrap `.gitignore` defaults now include `service.env` and `service.env.snapshot`.
+- Default workspace `SYSTEM.md` now explicitly states the jagc + pi harness context and points the agent to use `jagc` service commands for self-ops.
 
 ### Fixed
 

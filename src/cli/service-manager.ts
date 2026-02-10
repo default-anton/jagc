@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 export const defaultServiceLabel = 'com.jagc.server';
+export const serviceEnvFilename = 'service.env';
+export const serviceEnvSnapshotFilename = 'service.env.snapshot';
 const defaultLaunchAgentsDir = join(homedir(), 'Library', 'LaunchAgents');
 
 export const supportedLogLevels = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -52,6 +54,8 @@ export interface ServiceStatus {
   apiPort: number | null;
   stdoutPath: string;
   stderrPath: string;
+  serviceEnvPath: string;
+  serviceEnvSnapshotPath: string;
 }
 
 export interface ServiceInstallResult {
@@ -84,6 +88,8 @@ interface LaunchAgentConfig {
   logLevel: ServiceLogLevel;
   stdoutPath: string;
   stderrPath: string;
+  serviceEnvPath: string;
+  serviceEnvSnapshotPath: string;
   telegramBotToken?: string;
 }
 
@@ -98,6 +104,62 @@ interface CommandResult {
   stdout: string;
   stderr: string;
 }
+
+const serviceEnvironmentExplicitKeys = new Set([
+  'HOME',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LC_MESSAGES',
+  'TMPDIR',
+  'HOMEBREW_PREFIX',
+  'HOMEBREW_CELLAR',
+  'HOMEBREW_REPOSITORY',
+  'ASDF_DIR',
+  'ASDF_DATA_DIR',
+  'MISE_DATA_DIR',
+  'MISE_CONFIG_DIR',
+  'MISE_CACHE_DIR',
+  'MISE_INSTALL_PATH',
+  'UV_CACHE_DIR',
+  'UV_TOOL_BIN_DIR',
+  'UV_PYTHON_INSTALL_DIR',
+  'PNPM_HOME',
+  'NVM_DIR',
+  'VOLTA_HOME',
+  'PYENV_ROOT',
+  'RBENV_ROOT',
+  'CARGO_HOME',
+  'RUSTUP_HOME',
+  'GOPATH',
+  'GOROOT',
+  'JAVA_HOME',
+  'PIPX_HOME',
+  'PIPX_BIN_DIR',
+  'POETRY_HOME',
+  'FNM_DIR',
+]);
+
+const serviceEnvironmentPrefixes = [
+  'LC_',
+  'HOMEBREW_',
+  'MISE_',
+  'ASDF_',
+  'UV_',
+  'PNPM_',
+  'NPM_CONFIG_',
+  'NVM_',
+  'VOLTA_',
+  'PYENV_',
+  'RBENV_',
+  'CARGO_',
+  'RUSTUP_',
+  'GOENV_',
+  'PIPX_',
+  'POETRY_',
+  'FNM_',
+];
 
 export function createServiceManager(platform: NodeJS.Platform = process.platform): PlatformServiceManager {
   if (platform === 'darwin') {
@@ -124,7 +186,6 @@ export async function resolveServerEntrypoint(cliEntrypointPath: string): Promis
 
 export function renderLaunchAgentPlist(config: LaunchAgentConfig): string {
   const environmentVariables: Record<string, string> = {
-    PATH: buildLaunchdPath(config.nodePath),
     JAGC_WORKSPACE_DIR: config.workspaceDir,
     JAGC_DATABASE_PATH: config.databasePath,
     JAGC_HOST: config.host,
@@ -151,6 +212,8 @@ export function renderLaunchAgentPlist(config: LaunchAgentConfig): string {
     <key>ProgramArguments</key>
     <array>
       <string>${xmlEscape(config.nodePath)}</string>
+      <string>${xmlEscape(`--env-file-if-exists=${config.serviceEnvSnapshotPath}`)}</string>
+      <string>${xmlEscape(`--env-file-if-exists=${config.serviceEnvPath}`)}</string>
       <string>${xmlEscape(config.serverEntrypoint)}</string>
     </array>
 
@@ -242,10 +305,18 @@ class MacOsServiceManager implements PlatformServiceManager {
     const logsDir = join(options.workspaceDir, 'logs');
     const stdoutPath = join(logsDir, 'server.out.log');
     const stderrPath = join(logsDir, 'server.err.log');
+    const serviceEnvPath = join(options.workspaceDir, serviceEnvFilename);
+    const serviceEnvSnapshotPath = join(options.workspaceDir, serviceEnvSnapshotFilename);
 
     await mkdir(launchAgentsDir, { recursive: true });
     await mkdir(options.workspaceDir, { recursive: true, mode: 0o700 });
     await mkdir(logsDir, { recursive: true, mode: 0o700 });
+
+    await ensureServiceEnvironmentFiles({
+      serviceEnvPath,
+      serviceEnvSnapshotPath,
+      nodePath: process.execPath,
+    });
 
     const serverEntrypoint = await resolveServerEntrypoint(fileURLToPath(import.meta.url));
     const plist = renderLaunchAgentPlist({
@@ -261,6 +332,8 @@ class MacOsServiceManager implements PlatformServiceManager {
       telegramBotToken: options.telegramBotToken,
       stdoutPath,
       stderrPath,
+      serviceEnvPath,
+      serviceEnvSnapshotPath,
     });
 
     await writeFile(plistPath, plist, { mode: 0o644 });
@@ -311,6 +384,8 @@ class MacOsServiceManager implements PlatformServiceManager {
       apiPort: serviceConnection.port,
       stdoutPath: join(options.workspaceDir ?? defaultWorkspaceDir(), 'logs', 'server.out.log'),
       stderrPath: join(options.workspaceDir ?? defaultWorkspaceDir(), 'logs', 'server.err.log'),
+      serviceEnvPath: join(options.workspaceDir ?? defaultWorkspaceDir(), serviceEnvFilename),
+      serviceEnvSnapshotPath: join(options.workspaceDir ?? defaultWorkspaceDir(), serviceEnvSnapshotFilename),
     };
   }
 
@@ -422,6 +497,8 @@ class UnsupportedServiceManager implements PlatformServiceManager {
       apiPort: null,
       stdoutPath: '',
       stderrPath: '',
+      serviceEnvPath: '',
+      serviceEnvSnapshotPath: '',
     };
   }
 
@@ -437,11 +514,17 @@ class UnsupportedServiceManager implements PlatformServiceManager {
 async function runCommand(
   command: string,
   args: string[],
-  options: { allowFailure?: boolean } = {},
+  options: {
+    allowFailure?: boolean;
+    env?: NodeJS.ProcessEnv;
+    trimOutput?: boolean;
+  } = {},
 ): Promise<CommandResult> {
+  const trimOutput = options.trimOutput ?? true;
   const result = await new Promise<CommandResult>((resolvePromise) => {
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: options.env,
     });
 
     let stdout = '';
@@ -465,8 +548,8 @@ async function runCommand(
     child.on('close', (code) => {
       resolvePromise({
         code: code ?? 1,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        stdout: trimOutput ? stdout.trim() : stdout,
+        stderr: trimOutput ? stderr.trim() : stderr,
       });
     });
   });
@@ -526,6 +609,199 @@ function buildLaunchdPath(nodePath: string): string {
       return true;
     })
     .join(':');
+}
+
+async function ensureServiceEnvironmentFiles(options: {
+  serviceEnvPath: string;
+  serviceEnvSnapshotPath: string;
+  nodePath: string;
+}): Promise<void> {
+  const shellPath = resolveUserShellPath();
+  const shellEnvironment = (await captureShellEnvironment(shellPath)) ?? process.env;
+  const snapshotEnvironment = buildServiceEnvironmentSnapshot(shellEnvironment, options.nodePath);
+
+  const snapshotContent = renderEnvironmentFile({
+    header: [
+      '# jagc managed file',
+      '# Regenerated by: jagc install',
+      '# Captured from your login shell for package-manager/tooling PATH parity.',
+      '# Edit service.env for custom overrides; this file may be replaced.',
+    ],
+    variables: snapshotEnvironment,
+  });
+
+  await writeFile(options.serviceEnvSnapshotPath, snapshotContent, { mode: 0o600 });
+  await chmod(options.serviceEnvSnapshotPath, 0o600);
+
+  if (!(await fileExists(options.serviceEnvPath))) {
+    await writeFile(options.serviceEnvPath, renderDefaultUserServiceEnvironment(), { mode: 0o600 });
+  }
+
+  await chmod(options.serviceEnvPath, 0o600);
+}
+
+export function buildServiceEnvironmentSnapshot(shellEnv: NodeJS.ProcessEnv, nodePath: string): Record<string, string> {
+  const snapshot: Record<string, string> = {};
+
+  const shellPath = shellEnv.PATH;
+  snapshot.PATH = mergePath(shellPath, nodePath);
+
+  for (const [key, value] of Object.entries(shellEnv)) {
+    if (!value) {
+      continue;
+    }
+
+    if (!shouldCaptureServiceEnvironmentKey(key)) {
+      continue;
+    }
+
+    snapshot[key] = value;
+  }
+
+  return sortEnvironmentEntries(snapshot);
+}
+
+function mergePath(shellPath: string | undefined, nodePath: string): string {
+  const entries = [
+    dirname(nodePath),
+    ...(shellPath ? shellPath.split(delimiter) : []),
+    ...buildLaunchdPath(nodePath).split(delimiter),
+  ];
+
+  const seen = new Set<string>();
+
+  return entries
+    .map((entry) => entry.trim())
+    .filter((entry) => {
+      if (entry.length === 0 || seen.has(entry)) {
+        return false;
+      }
+
+      seen.add(entry);
+      return true;
+    })
+    .join(delimiter);
+}
+
+function sortEnvironmentEntries(entries: Record<string, string>): Record<string, string> {
+  const sorted = Object.entries(entries).sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(sorted);
+}
+
+function shouldCaptureServiceEnvironmentKey(key: string): boolean {
+  if (serviceEnvironmentExplicitKeys.has(key)) {
+    return true;
+  }
+
+  return serviceEnvironmentPrefixes.some((prefix) => key.startsWith(prefix));
+}
+
+function renderEnvironmentFile(options: { header: string[]; variables: Record<string, string> }): string {
+  const lines = [...options.header, ''];
+
+  for (const [key, value] of Object.entries(options.variables)) {
+    lines.push(`${key}=${formatEnvFileValue(value)}`);
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderDefaultUserServiceEnvironment(): string {
+  return [
+    '# jagc user overrides',
+    '# Loaded after service.env.snapshot; values here win.',
+    '#',
+    '# Supported format: KEY=value (dotenv style).',
+    '# Node does not expand shell vars here; use absolute paths.',
+    '#',
+    '# Example tool paths (uncomment + adjust):',
+    '# PATH=/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+    '# UV_TOOL_BIN_DIR=/Users/you/.local/share/uv/tools/bin',
+    '# PNPM_HOME=/Users/you/Library/pnpm',
+    '# ASDF_DATA_DIR=/Users/you/.asdf',
+    '# MISE_DATA_DIR=/Users/you/.local/share/mise',
+    '',
+  ].join('\n');
+}
+
+function formatEnvFileValue(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+,-]+$/.test(value)) {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+async function captureShellEnvironment(shellPath: string): Promise<NodeJS.ProcessEnv | null> {
+  for (const args of shellCaptureArgs(shellPath)) {
+    const result = await runCommand(shellPath, args, {
+      allowFailure: true,
+      trimOutput: false,
+      env: {
+        ...process.env,
+        SHELL: shellPath,
+      },
+    });
+
+    if (result.code !== 0) {
+      continue;
+    }
+
+    const parsed = parseNullDelimitedEnvironment(result.stdout);
+    if (Object.keys(parsed).length > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function shellCaptureArgs(shellPath: string): string[][] {
+  const shellName = basename(shellPath);
+
+  if (shellName === 'bash' || shellName === 'zsh') {
+    return [
+      ['-ilc', 'env -0'],
+      ['-lc', 'env -0'],
+    ];
+  }
+
+  return [['-lc', 'env -0']];
+}
+
+function parseNullDelimitedEnvironment(output: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+
+  for (const entry of output.split('\u0000')) {
+    const separatorIndex = entry.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = entry.slice(0, separatorIndex).trim();
+    const value = entry.slice(separatorIndex + 1);
+
+    if (!isValidEnvironmentKey(key)) {
+      continue;
+    }
+
+    env[key] = value;
+  }
+
+  return env;
+}
+
+function isValidEnvironmentKey(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
+}
+
+function resolveUserShellPath(): string {
+  const shell = process.env.SHELL?.trim();
+  if (shell?.startsWith('/')) {
+    return shell;
+  }
+
+  return '/bin/bash';
 }
 
 function xmlEscape(value: string): string {
