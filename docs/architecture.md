@@ -19,13 +19,13 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc new`, `jagc share`, `jagc model list|get|set`, `jagc thinking get|set`
+- `jagc new`, `jagc share`, `jagc defaults sync`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
 ### Runtime/adapters
 
 - Executors: `echo` (deterministic), `pi` (real agent)
-- `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts`
+- `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts` (runtime/harness context, global AGENTS hierarchy, available skills metadata, local pi docs/examples paths, and Codex harness notes)
 - Telegram polling adapter (personal chats) with `/settings`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
 - SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
@@ -38,8 +38,8 @@ This doc is the implementation snapshot (not design intent).
 
 - Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
 - Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (does not overwrite by default).
-- Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (does not overwrite by default), including context-injection extensions for global AGENTS.md, skills listing, and Codex harness instructions.
-- Dev-only overwrite mode (`JAGC_DEV_OVERWRITE_DEFAULTS=1`, enabled by `pnpm dev`) rewrites these default templates on each startup to simplify local prompt/skill/extension iteration.
+- Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (does not overwrite by default), including context-injection extensions for runtime/harness context, global AGENTS.md, skills listing, local pi docs/examples references, and Codex harness instructions.
+- Dev-only overwrite mode (`JAGC_DEV_OVERWRITE_DEFAULTS=1`, enabled by `pnpm dev`) rewrites workspace `SYSTEM.md`, `AGENTS.md`, bundled `defaults/skills/**`, and bundled `defaults/extensions/**` on each startup, while preserving existing `settings.json`.
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
 - Bootstrap initializes `JAGC_WORKSPACE_DIR` as a local git repository (`git init`) when `.git` is missing.
 - Bootstrap also ensures workspace `.gitignore` has `.sessions/`, `auth.json`, `git/`, `service.env`, `service.env.snapshot`, `jagc.sqlite`, `jagc.sqlite-shm`, and `jagc.sqlite-wal` entries.

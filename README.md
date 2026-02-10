@@ -63,6 +63,14 @@ jagc doctor
 jagc status
 ```
 
+### 5) Sync bundled defaults after upgrading jagc
+
+```bash
+jagc defaults sync
+```
+
+This updates bundled `skills/**` and `extensions/**` in your workspace to the latest shipped defaults without deleting your custom files.
+
 ## CLI/API are still useful (but secondary)
 
 Use CLI when you need explicit control:
@@ -80,11 +88,12 @@ jagc share --thread-key cli:default --json
 ## What works in v0
 
 - Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `POST /v1/threads/:thread_key/share`
-- CLI: `health`, `message`, `run wait`, `new`, `share`, `model list|get|set`, `thinking get|set`, `auth providers|login`
+- CLI: `health`, `message`, `run wait`, `new`, `share`, `defaults sync`, `model list|get|set`, `thinking get|set`, `auth providers|login`
 - Telegram polling adapter (personal chats) with `/settings`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
 - Telegram progress stream shows tool/thinking snippets; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive
 - Runtime semantics: same-thread `followUp` (default) and explicit `steer`
-- System-prompt context is extension-driven: global `AGENTS.md`, available skills, and Codex harness notes are injected by default workspace extensions (SDK built-in AGENTS/skills auto-loading is disabled)
+- System-prompt context is extension-driven: runtime/harness context (jagc+pi), global `AGENTS.md`, available skills metadata, local pi docs/examples paths, and Codex harness notes are injected by default workspace extensions (SDK built-in AGENTS/skills auto-loading is disabled)
+- jagc wraps pi coding agent; extension surfaces (custom tools, commands, event handlers) and packages are pi-native capabilities
 - In-process scheduling + SQLite-backed recovery after restart
 
 ## Mental model (important)
