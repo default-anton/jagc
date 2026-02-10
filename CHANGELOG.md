@@ -13,6 +13,20 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+## [0.2.0] - 2026-02-10
+
+### Added
+
 - Added end-to-end thread session sharing via secret GitHub gists: API `POST /v1/threads/:thread_key/share`, CLI `jagc share`, and Telegram `/share`.
 - Added CLI command `jagc defaults sync` to update bundled workspace defaults (`skills/**`, `extensions/**`) in place without deleting user-created files.
 
@@ -25,6 +39,7 @@ All notable changes to `jagc` are documented here.
 
 ### Fixed
 
+- Packaged runtime now resolves bundled default template paths correctly when running from npm installs, restoring package smoke server startup.
 - Telegram polling now deletes the startup placeholder progress message when a run finishes without any thinking snippets or tool activity, so chats no longer keep stale lines like `mapmaking...` after simple replies.
 
 ## [0.1.9] - 2026-02-09
