@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { resetThreadSession, startOAuthLogin, waitForRun } from '../src/cli/client.js';
+import { resetThreadSession, shareThreadSession, startOAuthLogin, waitForRun } from '../src/cli/client.js';
 import { oauthOwnerHeaderName } from '../src/shared/api-contracts.js';
 
 describe('waitForRun', () => {
@@ -124,6 +124,39 @@ describe('resetThreadSession', () => {
     expect(response).toEqual({
       thread_key: 'cli:default',
       reset: true,
+    });
+  });
+});
+
+describe('shareThreadSession', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('calls thread session share endpoint', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          thread_key: 'cli:default',
+          gist_url: 'https://gist.github.com/test/abc',
+          share_url: 'https://pi.dev/session/#abc',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    const response = await shareThreadSession('http://127.0.0.1:31415', 'cli:default');
+
+    expect(fetchSpy).toHaveBeenCalledWith('http://127.0.0.1:31415/v1/threads/cli%3Adefault/share', {
+      method: 'POST',
+    });
+    expect(response).toEqual({
+      thread_key: 'cli:default',
+      gist_url: 'https://gist.github.com/test/abc',
+      share_url: 'https://pi.dev/session/#abc',
     });
   });
 });

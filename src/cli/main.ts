@@ -14,6 +14,7 @@ import {
   sendMessage,
   setThreadModel,
   setThreadThinkingLevel,
+  shareThreadSession,
   startOAuthLogin,
   submitOAuthLoginInput,
   waitForRun,
@@ -97,6 +98,27 @@ program
         printJson(response);
       } else {
         console.log(`thread:${response.thread_key} session reset`);
+      }
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+program
+  .command('share')
+  .description('export thread session HTML and upload as a secret GitHub gist')
+  .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
+  .option('--json', 'JSON output')
+  .action(async (options) => {
+    try {
+      const response = await shareThreadSession(apiUrl(program), options.threadKey);
+
+      if (options.json) {
+        printJson(response);
+      } else {
+        console.log(`thread:${response.thread_key}`);
+        console.log(`share:${response.share_url}`);
+        console.log(`gist:${response.gist_url}`);
       }
     } catch (error) {
       exitWithError(error);

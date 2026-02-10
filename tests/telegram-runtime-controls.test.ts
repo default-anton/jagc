@@ -169,6 +169,36 @@ describe('Telegram runtime controls integration', () => {
     });
   });
 
+  test('share command exports session and returns share links', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+
+    await withTelegramAdapter({ threadControlService }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/share',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toContain('Share URL: https://pi.dev/session/#telegram%3Achat%3A101');
+      expect(sendMessage.payload.text).toContain('Gist: https://gist.github.com/test/telegram%3Achat%3A101');
+      expect(threadControlService.shareCalls).toEqual(['telegram:chat:101']);
+    });
+  });
+
+  test('share command reports unavailable when pi thread controls are not configured', async () => {
+    await withTelegramAdapter({}, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/share',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('Session sharing is unavailable when JAGC_RUNNER is not pi.');
+    });
+  });
+
   test('settings keyboard omits refresh button', async () => {
     const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
     const authService = new FakeAuthService();

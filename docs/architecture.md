@@ -11,7 +11,7 @@ This doc is the implementation snapshot (not design intent).
 
 - Core run lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
 - OAuth broker: `GET /v1/auth/providers`, `POST /v1/auth/providers/:provider/login`, `GET /v1/auth/logins/:attempt_id`, `POST /v1/auth/logins/:attempt_id/input`, `POST /v1/auth/logins/:attempt_id/cancel`
-- Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`, `DELETE /v1/threads/:thread_key/session`
+- Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`, `DELETE /v1/threads/:thread_key/session`, `POST /v1/threads/:thread_key/share`
 
 ### CLI
 
@@ -19,13 +19,13 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc new`, `jagc model list|get|set`, `jagc thinking get|set`
+- `jagc new`, `jagc share`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
 ### Runtime/adapters
 
 - Executors: `echo` (deterministic), `pi` (real agent)
-- Telegram polling adapter (personal chats) with `/settings`, `/new`, `/model`, `/thinking`, `/auth`
+- Telegram polling adapter (personal chats) with `/settings`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
 - SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
 - Structured Pino JSON logging with component-scoped child loggers shared across server/runtime/adapters
@@ -122,6 +122,7 @@ Operational note:
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
 - Telegram `/new` and API `DELETE /v1/threads/:thread_key/session` abort/dispose the current thread session, clear persisted `thread_sessions` mapping, and cause the next message to create a fresh pi session.
+- Telegram `/share` and API `POST /v1/threads/:thread_key/share` export the current thread session to HTML and upload it as a secret GitHub gist; response includes both gist URL and share-viewer URL.
 - Adapter starts a per-run progress reporter (in-chat append-style progress message + typing indicator) as soon as a run is ingested.
 - Progress is driven by run-level events emitted from `RunService` and pi session events forwarded by `ThreadRunController` (`assistant_text_delta`, `assistant_thinking_delta`, `tool_execution_*`, turn/agent lifecycle), rendered as compact append-log lines (`>` for tool calls with args-focused snippets, `~` for short thinking snippets).
 - Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed.
@@ -144,11 +145,14 @@ Operational note:
 - Capacity behavior: if active attempts fill broker capacity, new starts return `429 auth_login_capacity_exceeded` (no eviction of active attempts).
 - Successful credentials persist via pi `AuthStorage` to workspace `auth.json`.
 
-### Runtime controls (model/thinking)
+### Runtime controls (model/thinking/share)
 
 - `PiRunExecutor` is source of truth for per-thread runtime state.
 - Model updates call `AgentSession.setModel(...)` (validated via pi `ModelRegistry`, persisted via `SettingsManager`).
 - Thinking updates call `AgentSession.setThinkingLevel(...)` and return effective/clamped level + available levels.
+- Share operations call `AgentSession.exportToHtml(...)`, then run `gh gist create` (secret gist by default) and return `{ gistUrl, shareUrl }`.
+- Share-viewer URL uses `PI_SHARE_VIEWER_URL` when set to an absolute URL, else defaults to `https://pi.dev/session/`.
+- Share operations require GitHub CLI (`gh`) installed and authenticated (`gh auth login`).
 - jagc does not duplicate model/thinking state in its own DB.
 
 ## Contracts + schema source of truth

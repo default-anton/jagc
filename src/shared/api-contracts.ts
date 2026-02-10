@@ -141,6 +141,12 @@ export const resetThreadSessionResponseSchema = z.object({
   reset: z.literal(true),
 });
 
+export const shareThreadSessionResponseSchema = z.object({
+  thread_key: z.string(),
+  gist_url: z.string().trim().min(1),
+  share_url: z.string().trim().min(1),
+});
+
 export type PostMessageRequest = z.infer<typeof postMessageRequestSchema>;
 export type RunResponse = z.infer<typeof runResponseSchema>;
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
@@ -153,3 +159,4 @@ export type ThreadRuntimeStateResponse = z.infer<typeof threadRuntimeStateSchema
 export type SetThreadModelRequest = z.infer<typeof setThreadModelRequestSchema>;
 export type SetThreadThinkingRequest = z.infer<typeof setThreadThinkingRequestSchema>;
 export type ResetThreadSessionResponse = z.infer<typeof resetThreadSessionResponseSchema>;
+export type ShareThreadSessionResponse = z.infer<typeof shareThreadSessionResponseSchema>;

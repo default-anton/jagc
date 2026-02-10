@@ -237,6 +237,14 @@ class FakeThreadControlService {
     this.byThread.delete(threadKey);
   }
 
+  async shareThreadSession(threadKey: string) {
+    return {
+      threadKey,
+      gistUrl: `https://gist.github.com/test/${threadKey}`,
+      shareUrl: `https://pi.dev/session/#${threadKey}`,
+    };
+  }
+
   private ensure(threadKey: string) {
     const existing = this.byThread.get(threadKey);
     if (existing) {
@@ -643,6 +651,13 @@ describe('server API', () => {
 
     expect(resetResponse.statusCode).toBe(501);
 
+    const shareResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/share',
+    });
+
+    expect(shareResponse.statusCode).toBe(501);
+
     await app.close();
   });
 
@@ -715,6 +730,18 @@ describe('server API', () => {
       thread_key: 'cli:default',
       model: { provider: 'openai', model_id: 'gpt-4o-mini' },
       thinking_level: 'medium',
+    });
+
+    const shareResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/share',
+    });
+
+    expect(shareResponse.statusCode).toBe(200);
+    expect(shareResponse.json()).toEqual({
+      thread_key: 'cli:default',
+      gist_url: 'https://gist.github.com/test/cli:default',
+      share_url: 'https://pi.dev/session/#cli:default',
     });
 
     await app.close();

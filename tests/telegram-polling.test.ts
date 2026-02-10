@@ -96,6 +96,19 @@ describe('TelegramPollingAdapter commands', () => {
       expect(threadControlService.resetCalls).toEqual(['telegram:chat:101']);
     });
   });
+
+  test('/help includes /share command', async () => {
+    await withTelegramAdapter({}, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: telegramTestChatId,
+        fromId: telegramTestUserId,
+        text: '/help',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toContain('/share — export this chat session and upload a secret gist');
+    });
+  });
 });
 
 describe('TelegramPollingAdapter callback recovery', () => {

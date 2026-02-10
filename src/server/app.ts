@@ -14,7 +14,7 @@ import {
   OAuthLoginInvalidStateError,
   OAuthLoginProviderNotFoundError,
 } from '../runtime/pi-auth.js';
-import type { SupportedThinkingLevel, ThreadRuntimeState } from '../runtime/pi-executor.js';
+import type { ThreadControlService, ThreadRuntimeState } from '../runtime/pi-executor.js';
 import {
   type ApiErrorResponse,
   authLoginAttemptParamsSchema,
@@ -26,6 +26,7 @@ import {
   runParamsSchema,
   setThreadModelRequestSchema,
   setThreadThinkingRequestSchema,
+  shareThreadSessionResponseSchema,
   submitOAuthLoginInputRequestSchema,
   threadParamsSchema,
 } from '../shared/api-contracts.js';
@@ -50,12 +51,7 @@ interface AppOptions {
     ): OAuthLoginAttemptSnapshot;
     cancelOAuthLogin?(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
-  threadControlService?: {
-    getThreadRuntimeState(threadKey: string): Promise<ThreadRuntimeState>;
-    setThreadModel(threadKey: string, provider: string, modelId: string): Promise<ThreadRuntimeState>;
-    setThreadThinkingLevel(threadKey: string, thinkingLevel: SupportedThinkingLevel): Promise<ThreadRuntimeState>;
-    resetThreadSession(threadKey: string): Promise<void>;
-  };
+  threadControlService?: ThreadControlService;
   logger?: FastifyBaseLogger;
 }
 
@@ -388,6 +384,32 @@ export function createApp(options: AppOptions): FastifyInstance {
       );
     } catch (error) {
       return reply.status(400).send(errorResponse('thread_session_reset_error', toErrorMessage(error)));
+    }
+  });
+
+  app.post('/v1/threads/:thread_key/share', async (request, reply) => {
+    if (!options.threadControlService) {
+      return reply
+        .status(501)
+        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
+    }
+
+    const paramsResult = threadParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
+    }
+
+    try {
+      const shared = await options.threadControlService.shareThreadSession(paramsResult.data.thread_key);
+      return reply.send(
+        shareThreadSessionResponseSchema.parse({
+          thread_key: shared.threadKey,
+          gist_url: shared.gistUrl,
+          share_url: shared.shareUrl,
+        }),
+      );
+    } catch (error) {
+      return reply.status(400).send(errorResponse('thread_session_share_error', toErrorMessage(error)));
     }
   });
 

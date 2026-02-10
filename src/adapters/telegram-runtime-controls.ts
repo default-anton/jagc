@@ -64,6 +64,18 @@ export class TelegramRuntimeControls {
     await ctx.reply('✅ Session reset. Your next message will start a new pi session.');
   }
 
+  async handleShareCommand(ctx: Context): Promise<void> {
+    const threadControlService = this.options.threadControlService;
+    if (!threadControlService) {
+      await ctx.reply('Session sharing is unavailable when JAGC_RUNNER is not pi.');
+      return;
+    }
+
+    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const shared = await threadControlService.shareThreadSession(threadKey);
+    await ctx.reply(`Share URL: ${shared.shareUrl}\nGist: ${shared.gistUrl}`);
+  }
+
   async handleStaleCallback(ctx: Context): Promise<void> {
     await this.showSettingsPanel(ctx, '⚠️ This menu is outdated. Showing latest settings.');
   }

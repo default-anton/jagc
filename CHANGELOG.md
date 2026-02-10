@@ -13,7 +13,7 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added end-to-end thread session sharing via secret GitHub gists: API `POST /v1/threads/:thread_key/share`, CLI `jagc share`, and Telegram `/share`.
 
 ### Changed
 

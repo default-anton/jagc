@@ -1,4 +1,6 @@
-import { access } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { access, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
@@ -35,11 +37,18 @@ export interface ThreadRuntimeState {
   availableThinkingLevels: SupportedThinkingLevel[];
 }
 
+export interface ThreadShareResult {
+  threadKey: string;
+  gistUrl: string;
+  shareUrl: string;
+}
+
 export interface ThreadControlService {
   getThreadRuntimeState(threadKey: string): Promise<ThreadRuntimeState>;
   setThreadModel(threadKey: string, provider: string, modelId: string): Promise<ThreadRuntimeState>;
   setThreadThinkingLevel(threadKey: string, thinkingLevel: SupportedThinkingLevel): Promise<ThreadRuntimeState>;
   resetThreadSession(threadKey: string): Promise<void>;
+  shareThreadSession(threadKey: string): Promise<ThreadShareResult>;
 }
 
 const threadResetTimeoutMs = 10_000;
@@ -171,6 +180,31 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     } finally {
       this.resetInFlight.delete(threadKey);
       resolveReset();
+    }
+  }
+
+  async shareThreadSession(threadKey: string): Promise<ThreadShareResult> {
+    await ensureGitHubCliAuthenticated();
+    const shareViewerBaseUrl = resolveShareViewerBaseUrl();
+    const session = await this.getSession(threadKey);
+
+    const tempDirectory = await mkdtemp(join(tmpdir(), 'jagc-share-'));
+    const tempFile = join(tempDirectory, 'session.html');
+
+    try {
+      await session.exportToHtml(tempFile);
+
+      const gistUrl = await createSecretGist(tempFile);
+      const gistId = extractGistId(gistUrl);
+      const shareUrl = getShareViewerUrl(shareViewerBaseUrl, gistId);
+
+      return {
+        threadKey,
+        gistUrl,
+        shareUrl,
+      };
+    } finally {
+      await rm(tempDirectory, { recursive: true, force: true });
     }
   }
 
@@ -352,6 +386,196 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       throw new ThreadGenerationMismatchError(threadKey);
     }
   }
+}
+
+const defaultShareViewerUrl = 'https://pi.dev/session/';
+const ghAuthStatusTimeoutMs = 10_000;
+const ghGistCreateTimeoutMs = 30_000;
+
+function resolveShareViewerBaseUrl(): URL {
+  const configured = process.env.PI_SHARE_VIEWER_URL?.trim();
+  const rawBaseUrl = configured && configured.length > 0 ? configured : defaultShareViewerUrl;
+
+  try {
+    return new URL(rawBaseUrl);
+  } catch {
+    throw new Error(`PI_SHARE_VIEWER_URL must be an absolute URL. Received: ${rawBaseUrl}`);
+  }
+}
+
+function getShareViewerUrl(baseUrl: URL, gistId: string): string {
+  const shareUrl = new URL(baseUrl.toString());
+  shareUrl.hash = gistId;
+  return shareUrl.toString();
+}
+
+async function ensureGitHubCliAuthenticated(): Promise<void> {
+  const authResult = await runCommand('gh', ['auth', 'status'], {
+    timeoutMs: ghAuthStatusTimeoutMs,
+    env: {
+      GH_PROMPT_DISABLED: '1',
+    },
+  });
+
+  if (authResult.error) {
+    if (authResult.error.code === 'ENOENT') {
+      throw new Error('GitHub CLI (gh) is not installed. Install it from https://cli.github.com/');
+    }
+
+    throw new Error(`failed to run GitHub CLI auth check: ${authResult.error.message}`);
+  }
+
+  if (authResult.timedOut) {
+    throw new Error(`timed out checking GitHub CLI auth status after ${ghAuthStatusTimeoutMs}ms`);
+  }
+
+  if (authResult.code !== 0) {
+    const details = authResult.stderr || authResult.stdout;
+    if (details.length > 0) {
+      throw new Error(`GitHub CLI auth check failed. ${details}`);
+    }
+
+    throw new Error("GitHub CLI is not logged in. Run 'gh auth login' first.");
+  }
+}
+
+async function createSecretGist(filePath: string): Promise<string> {
+  const result = await runCommand('gh', ['gist', 'create', filePath], {
+    timeoutMs: ghGistCreateTimeoutMs,
+    env: {
+      GH_PROMPT_DISABLED: '1',
+    },
+  });
+
+  if (result.error) {
+    if (result.error.code === 'ENOENT') {
+      throw new Error('GitHub CLI (gh) is not installed. Install it from https://cli.github.com/');
+    }
+
+    throw new Error(`failed to run GitHub CLI gist create: ${result.error.message}`);
+  }
+
+  if (result.timedOut) {
+    throw new Error(`timed out creating secret gist after ${ghGistCreateTimeoutMs}ms`);
+  }
+
+  if (result.code !== 0) {
+    throw new Error(`failed to create secret gist: ${result.stderr || 'Unknown error'}`);
+  }
+
+  const gistUrl = extractFirstUrl(result.stdout);
+  if (!gistUrl) {
+    throw new Error('failed to create secret gist: no URL in gh output');
+  }
+
+  return gistUrl;
+}
+
+interface RunCommandOptions {
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+}
+
+interface RunCommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  error: NodeJS.ErrnoException | null;
+}
+
+async function runCommand(command: string, args: string[], options: RunCommandOptions = {}): Promise<RunCommandResult> {
+  const timeoutMs = options.timeoutMs;
+  const env = options.env ? { ...process.env, ...options.env } : undefined;
+
+  return await new Promise<RunCommandResult>((resolvePromise) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let error: NodeJS.ErrnoException | null = null;
+    let settled = false;
+
+    const finish = (code: number | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+
+      resolvePromise({
+        code: timedOut ? 124 : (code ?? 1),
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        timedOut,
+        error,
+      });
+    };
+
+    const timeoutHandle =
+      timeoutMs && timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            stderr += `${stderr ? '\n' : ''}command timed out after ${timeoutMs}ms`;
+            child.kill('SIGKILL');
+          }, timeoutMs)
+        : null;
+
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk;
+    });
+
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on('error', (spawnError) => {
+      error = spawnError as NodeJS.ErrnoException;
+      finish(1);
+    });
+
+    child.on('close', (code) => {
+      finish(code);
+    });
+  });
+}
+
+function extractFirstUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/\S+/);
+  if (!match) {
+    return null;
+  }
+
+  return match[0] ?? null;
+}
+
+function extractGistId(gistUrl: string): string {
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(gistUrl);
+  } catch {
+    throw new Error(`failed to parse gist URL from gh output: ${gistUrl}`);
+  }
+
+  const segments = parsedUrl.pathname.split('/').filter((segment) => segment.length > 0);
+  const gistId = segments[segments.length - 1];
+
+  if (!gistId) {
+    throw new Error(`failed to parse gist ID from gh output: ${gistUrl}`);
+  }
+
+  return gistId;
 }
 
 function stateFromSession(threadKey: string, session: AgentSession): ThreadRuntimeState {

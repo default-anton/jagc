@@ -15,6 +15,7 @@ export class FakeThreadControlService implements ThreadControlService {
   readonly modelSetCalls: Array<{ threadKey: string; provider: string; modelId: string }> = [];
   readonly thinkingSetCalls: Array<{ threadKey: string; thinkingLevel: ThreadRuntimeState['thinkingLevel'] }> = [];
   readonly resetCalls: string[] = [];
+  readonly shareCalls: string[] = [];
 
   constructor(private state: ThreadRuntimeState) {}
 
@@ -51,6 +52,15 @@ export class FakeThreadControlService implements ThreadControlService {
 
   async resetThreadSession(threadKey: string): Promise<void> {
     this.resetCalls.push(threadKey);
+  }
+
+  async shareThreadSession(threadKey: string): Promise<{ threadKey: string; gistUrl: string; shareUrl: string }> {
+    this.shareCalls.push(threadKey);
+    return {
+      threadKey,
+      gistUrl: `https://gist.github.com/test/${encodeURIComponent(threadKey)}`,
+      shareUrl: `https://pi.dev/session/#${encodeURIComponent(threadKey)}`,
+    };
   }
 }
 

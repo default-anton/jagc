@@ -184,6 +184,10 @@ export class TelegramPollingAdapter {
           await this.runtimeControls.handleNewCommand(ctx);
           return;
         }
+        case 'share': {
+          await this.runtimeControls.handleShareCommand(ctx);
+          return;
+        }
         case 'model': {
           await this.runtimeControls.handleModelCommand(ctx, command.args);
           return;
@@ -524,6 +528,7 @@ function helpText(): string {
     'jagc Telegram commands:',
     '/settings — open runtime settings',
     '/new — reset this chat session (next message starts fresh)',
+    '/share — export this chat session and upload a secret gist',
     '/model — open model picker',
     '/thinking — open thinking picker',
     '/auth — open provider login controls',

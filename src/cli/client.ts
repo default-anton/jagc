@@ -15,7 +15,9 @@ import {
   runResponseSchema,
   type SetThreadModelRequest,
   type SetThreadThinkingRequest,
+  type ShareThreadSessionResponse,
   type SubmitOAuthLoginInputRequest,
+  shareThreadSessionResponseSchema,
   submitOAuthLoginInputRequestSchema,
   type ThreadRuntimeStateResponse,
   threadRuntimeStateSchema,
@@ -27,6 +29,7 @@ export type ApiModelCatalogResponse = ModelCatalogResponse;
 export type ApiThreadRuntimeStateResponse = ThreadRuntimeStateResponse;
 export type ApiOAuthLoginAttemptResponse = OAuthLoginAttemptResponse;
 export type ApiResetThreadSessionResponse = ResetThreadSessionResponse;
+export type ApiShareThreadSessionResponse = ShareThreadSessionResponse;
 export type MessageRequest = PostMessageRequest;
 
 export async function sendMessage(apiUrl: string, payload: MessageRequest): Promise<ApiRunResponse> {
@@ -215,6 +218,14 @@ export async function resetThreadSession(apiUrl: string, threadKey: string): Pro
   return parseResetThreadSessionResponse(response);
 }
 
+export async function shareThreadSession(apiUrl: string, threadKey: string): Promise<ApiShareThreadSessionResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/share`, {
+    method: 'POST',
+  });
+
+  return parseShareThreadSessionResponse(response);
+}
+
 function oauthOwnerHeader(ownerKey: string): Record<string, string> {
   return {
     [oauthOwnerHeaderName]: ownerKey,
@@ -275,6 +286,20 @@ async function parseResetThreadSessionResponse(response: Response): Promise<ApiR
   }
 
   return resetThreadSessionResponseSchema.parse(responseBody);
+}
+
+async function parseShareThreadSessionResponse(response: Response): Promise<ApiShareThreadSessionResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return shareThreadSessionResponseSchema.parse(responseBody);
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {
