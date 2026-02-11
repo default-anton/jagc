@@ -5,6 +5,7 @@ import { PiRunExecutor, type ThreadControlService } from '../runtime/pi-executor
 import { loadConfig } from '../shared/config.js';
 import { createLogger, resolveLogLevel } from '../shared/logger.js';
 import { createApp } from './app.js';
+import { applyNodeEnvFileOverrides } from './env-file-overrides.js';
 import { EchoRunExecutor, type RunExecutor } from './executor.js';
 import { runMigrations } from './migrations.js';
 import { LocalRunScheduler } from './scheduler.js';
@@ -13,6 +14,8 @@ import { openSqliteDatabase } from './sqlite.js';
 import { SqliteRunStore } from './store.js';
 
 async function main(): Promise<void> {
+  applyNodeEnvFileOverrides();
+
   const config = loadConfig();
   const rootLogger = createLogger({
     level: config.JAGC_LOG_LEVEL,

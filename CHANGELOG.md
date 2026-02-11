@@ -21,7 +21,7 @@ All notable changes to `jagc` are documented here.
 
 ### Fixed
 
-- None.
+- macOS launchd services now re-apply `service.env.snapshot` + `service.env` at server startup with override semantics, so launchd's default `PATH` no longer hides `gh` and other user-installed CLIs.
 
 ## [0.2.0] - 2026-02-10
 

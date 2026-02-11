@@ -136,7 +136,7 @@ Most users only need the Telegram token at install time.
 - `~/.jagc/service.env.snapshot` — managed by jagc (captured from your login shell; includes PATH/tooling env for brew/mise/uv/asdf/etc.)
 - `~/.jagc/service.env` — user overrides (never overwritten by `jagc install` once created)
 
-launchd loads both files on startup (`snapshot` first, then `service.env`), so values in `service.env` win.
+launchd points Node at both files on startup (`snapshot` first, then `service.env`), and jagc reapplies them in that same order so values in `service.env` win (including `PATH`, which launchd otherwise hardcodes).
 
 This path depends on Node's `--env-file-if-exists` flag, so use Node `>=20.19.0 <21` or `>=22.9.0`.
 

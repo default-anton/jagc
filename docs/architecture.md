@@ -49,6 +49,7 @@ This doc is the implementation snapshot (not design intent).
 
 - `jagc install` writes a per-user launch agent at `~/Library/LaunchAgents/<label>.plist` (`com.jagc.server` by default), then `launchctl bootstrap` + `kickstart` starts the service.
 - launchd runs `node --env-file-if-exists=<workspace>/service.env.snapshot --env-file-if-exists=<workspace>/service.env <installed package>/dist/server/main.mjs`.
+- Server startup re-applies those same env files in-order with explicit override semantics so launchd defaults (notably `PATH`) do not mask workspace env entries.
 - Node runtime requirement for this launch path is `>=20.19.0 <21` or `>=22.9.0`.
 - `jagc install` always regenerates `<workspace>/service.env.snapshot` from the user's login shell (PATH/tooling env) and creates `<workspace>/service.env` when missing.
 - `service.env` is never overwritten by `jagc install` once it exists; user edits are picked up after `jagc restart`.
