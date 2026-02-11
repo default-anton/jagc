@@ -17,7 +17,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Telegram progress tool-call lines now update in place on completion and append status/duration suffixes like `[✓] done (0.4s)` and `[✗] failed (0.4s)`, instead of printing the same command twice.
 
 ### Fixed
 

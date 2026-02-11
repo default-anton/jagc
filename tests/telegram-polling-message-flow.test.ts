@@ -152,6 +152,160 @@ describe('TelegramPollingAdapter message flow integration', () => {
     );
   }, 12_000);
 
+  test('edits tool progress in place with done marker and duration', async () => {
+    const runningState = runRecord({
+      runId: 'run-tool-inline-status',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-tool-inline-status',
+      status: 'succeeded',
+      output: { text: 'Inline status done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-tool-inline-status',
+      [runningState, runningState, runningState, runningState, runningState, completedState],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-tool-inline-status', 'started')],
+          2: [
+            progressEvent('run-tool-inline-status', 'tool_execution_start', {
+              toolCallId: 'tool-inline-1',
+              toolName: 'bash',
+              args: { command: 'pwd; ls -la' },
+            }),
+          ],
+          3: [
+            progressEvent('run-tool-inline-status', 'tool_execution_end', {
+              toolCallId: 'tool-inline-1',
+              toolName: 'bash',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 150,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show inline status',
+        });
+
+        const progressEdit = await clone.waitForBotCall(
+          'editMessageText',
+          (call) =>
+            typeof call.payload.text === 'string' && call.payload.text.includes('> bash cmd="pwd; ls -la" [✓] done ('),
+          8_000,
+        );
+
+        const progressText = String(progressEdit.payload.text ?? '');
+        const commandPrefix = '> bash cmd="pwd; ls -la"';
+        const commandOccurrenceCount = progressText.split(commandPrefix).length - 1;
+
+        expect(commandOccurrenceCount).toBe(1);
+        expect(progressText).toMatch(/> bash cmd="pwd; ls -la" \[✓\] done \(\d+\.\ds\)/u);
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Inline status done',
+          8_000,
+        );
+        expect(finalMessage.payload.text).toBe('Inline status done');
+      },
+    );
+  }, 14_000);
+
+  test('edits tool progress in place with failed marker and duration', async () => {
+    const runningState = runRecord({
+      runId: 'run-tool-inline-failed-status',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-tool-inline-failed-status',
+      status: 'succeeded',
+      output: { text: 'Inline failed status done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-tool-inline-failed-status',
+      [runningState, runningState, runningState, runningState, runningState, completedState],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-tool-inline-failed-status', 'started')],
+          2: [
+            progressEvent('run-tool-inline-failed-status', 'tool_execution_start', {
+              toolCallId: 'tool-inline-fail-1',
+              toolName: 'bash',
+              args: { command: 'cat missing.txt' },
+            }),
+          ],
+          3: [
+            progressEvent('run-tool-inline-failed-status', 'tool_execution_end', {
+              toolCallId: 'tool-inline-fail-1',
+              toolName: 'bash',
+              result: { stderr: 'No such file' },
+              isError: true,
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        waitTimeoutMs: 4_000,
+        pollIntervalMs: 150,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show inline failed status',
+        });
+
+        const progressEdit = await clone.waitForBotCall(
+          'editMessageText',
+          (call) =>
+            typeof call.payload.text === 'string' &&
+            call.payload.text.includes('> bash cmd="cat missing.txt" [✗] failed ('),
+          8_000,
+        );
+
+        const progressText = String(progressEdit.payload.text ?? '');
+        const commandPrefix = '> bash cmd="cat missing.txt"';
+        const commandOccurrenceCount = progressText.split(commandPrefix).length - 1;
+
+        expect(commandOccurrenceCount).toBe(1);
+        expect(progressText).toMatch(/> bash cmd="cat missing.txt" \[✗\] failed \(\d+\.\ds\)/u);
+        expect(progressText).not.toContain('[✓] done');
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Inline failed status done',
+          8_000,
+        );
+        expect(finalMessage.payload.text).toBe('Inline failed status done');
+      },
+    );
+  }, 14_000);
+
   test('deletes startup progress placeholder when run has no thinking/tool snippets', async () => {
     const runningState = runRecord({
       runId: 'run-no-snippets',

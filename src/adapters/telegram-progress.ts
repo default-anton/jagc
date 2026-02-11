@@ -28,9 +28,10 @@ interface TelegramRunProgressReporterOptions {
   typingIntervalMs?: number;
 }
 
-interface CurrentToolState {
-  toolCallId: string;
+interface ToolProgressState {
   label: string;
+  startedAtMs: number;
+  lineIndex: number | null;
 }
 
 const defaultMessageLimit = 3500;
@@ -40,6 +41,18 @@ const maxEventLogLines = 48;
 const maxThinkingPreviewChars = 240;
 const maxDeltaChars = 200;
 const minThinkingLogIntervalMs = 1_800;
+
+function formatToolCompletionLabel(options: { label: string; isError: boolean; durationMs: number | null }): string {
+  const status = options.isError ? '[✗] failed' : '[✓] done';
+  const duration = options.durationMs === null ? null : formatToolDuration(options.durationMs);
+  const durationSuffix = duration ? ` (${duration})` : '';
+  return `> ${options.label} ${status}${durationSuffix}`;
+}
+
+function formatToolDuration(durationMs: number): string {
+  const seconds = Math.max(0, durationMs) / 1000;
+  return `${seconds.toFixed(1)}s`;
+}
 
 export class TelegramRunProgressReporter {
   private readonly messageLimit: number;
@@ -56,8 +69,7 @@ export class TelegramRunProgressReporter {
   private thinkingPreview = '';
   private hasPendingThinkingPreview = false;
 
-  private currentTool: CurrentToolState | null = null;
-  private readonly toolLabelsByCallId = new Map<string, string>();
+  private readonly toolProgressByCallId = new Map<string, ToolProgressState>();
   private eventLogLines: string[] = [];
 
   private progressMessageId: number | null = null;
@@ -156,12 +168,13 @@ export class TelegramRunProgressReporter {
         this.phase = 'running';
         this.showStartupLine = false;
         const label = summarizeToolLabel(event.toolName, event.args);
-        this.toolLabelsByCallId.set(event.toolCallId, label);
-        this.currentTool = {
-          toolCallId: event.toolCallId,
+        const lineIndex = this.appendEventLogLine(`> ${label}`);
+        this.toolProgressByCallId.set(event.toolCallId, {
           label,
-        };
-        immediateRender = this.pushEventLogLine(`> ${label}`);
+          startedAtMs: Date.now(),
+          lineIndex,
+        });
+        immediateRender = lineIndex !== null || immediateRender;
         break;
       }
       case 'tool_execution_update': {
@@ -171,17 +184,22 @@ export class TelegramRunProgressReporter {
       case 'tool_execution_end': {
         this.phase = 'running';
         this.showStartupLine = false;
-        const label = this.toolLabelsByCallId.get(event.toolCallId) ?? summarizeToolLabel(event.toolName, undefined);
-        this.toolLabelsByCallId.delete(event.toolCallId);
 
-        if (event.isError) {
-          immediateRender = this.pushEventLogLine(`> ${label} failed`) || immediateRender;
+        const toolState = this.toolProgressByCallId.get(event.toolCallId);
+        const label = toolState?.label ?? summarizeToolLabel(event.toolName, undefined);
+        const durationMs = toolState ? Date.now() - toolState.startedAtMs : null;
+        this.toolProgressByCallId.delete(event.toolCallId);
+
+        const completionLabel = formatToolCompletionLabel({
+          label,
+          isError: event.isError,
+          durationMs,
+        });
+
+        if (typeof toolState?.lineIndex === 'number') {
+          immediateRender = this.replaceEventLogLine(toolState.lineIndex, completionLabel) || immediateRender;
         } else {
-          immediateRender = this.pushEventLogLine(`> ${label} done`) || immediateRender;
-        }
-
-        if (this.currentTool?.toolCallId === event.toolCallId) {
-          this.currentTool = null;
+          immediateRender = this.pushEventLogLine(completionLabel) || immediateRender;
         }
         break;
       }
@@ -189,8 +207,7 @@ export class TelegramRunProgressReporter {
         this.phase = 'succeeded';
         immediateRender = true;
         this.isLongRunning = false;
-        this.currentTool = null;
-        this.toolLabelsByCallId.clear();
+        this.toolProgressByCallId.clear();
         this.terminalErrorMessage = null;
         break;
       }
@@ -198,8 +215,7 @@ export class TelegramRunProgressReporter {
         this.phase = 'failed';
         immediateRender = true;
         this.isLongRunning = false;
-        this.currentTool = null;
-        this.toolLabelsByCallId.clear();
+        this.toolProgressByCallId.clear();
         this.terminalErrorMessage = event.errorMessage;
         break;
       }
@@ -207,8 +223,7 @@ export class TelegramRunProgressReporter {
         if (this.phase !== 'succeeded' && this.phase !== 'failed') {
           this.phase = 'running';
         }
-        this.currentTool = null;
-        this.toolLabelsByCallId.clear();
+        this.toolProgressByCallId.clear();
         break;
       }
     }
@@ -233,8 +248,7 @@ export class TelegramRunProgressReporter {
 
     this.phase = 'succeeded';
     this.isLongRunning = false;
-    this.currentTool = null;
-    this.toolLabelsByCallId.clear();
+    this.toolProgressByCallId.clear();
     await this.finish();
   }
 
@@ -245,8 +259,7 @@ export class TelegramRunProgressReporter {
 
     this.phase = 'failed';
     this.isLongRunning = false;
-    this.currentTool = null;
-    this.toolLabelsByCallId.clear();
+    this.toolProgressByCallId.clear();
     this.terminalErrorMessage = errorMessage;
     await this.finish();
   }
@@ -516,22 +529,59 @@ export class TelegramRunProgressReporter {
   }
 
   private pushEventLogLine(line: string): boolean {
+    return this.appendEventLogLine(line) !== null;
+  }
+
+  private appendEventLogLine(line: string): number | null {
+    const normalizedLine = truncateLine(line, maxProgressToolLabelChars);
+    if (normalizedLine.length === 0) {
+      return null;
+    }
+
+    const lastLine = this.eventLogLines[this.eventLogLines.length - 1];
+    if (lastLine === normalizedLine) {
+      return null;
+    }
+
+    this.eventLogLines.push(normalizedLine);
+    this.trimEventLogLines();
+    return this.eventLogLines.length - 1;
+  }
+
+  private replaceEventLogLine(index: number, line: string): boolean {
+    if (index < 0 || index >= this.eventLogLines.length) {
+      return false;
+    }
+
     const normalizedLine = truncateLine(line, maxProgressToolLabelChars);
     if (normalizedLine.length === 0) {
       return false;
     }
 
-    const lastLine = this.eventLogLines[this.eventLogLines.length - 1];
-    if (lastLine === normalizedLine) {
+    if (this.eventLogLines[index] === normalizedLine) {
       return false;
     }
 
-    this.eventLogLines.push(normalizedLine);
-    if (this.eventLogLines.length > maxEventLogLines) {
-      this.eventLogLines = this.eventLogLines.slice(this.eventLogLines.length - maxEventLogLines);
+    this.eventLogLines[index] = normalizedLine;
+    return true;
+  }
+
+  private trimEventLogLines(): void {
+    if (this.eventLogLines.length <= maxEventLogLines) {
+      return;
     }
 
-    return true;
+    const removeCount = this.eventLogLines.length - maxEventLogLines;
+    this.eventLogLines = this.eventLogLines.slice(removeCount);
+
+    for (const toolState of this.toolProgressByCallId.values()) {
+      if (toolState.lineIndex === null) {
+        continue;
+      }
+
+      const shiftedIndex = toolState.lineIndex - removeCount;
+      toolState.lineIndex = shiftedIndex >= 0 ? shiftedIndex : null;
+    }
   }
 
   private renderTrimmedLines(lines: string[]): string {
