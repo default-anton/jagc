@@ -91,7 +91,6 @@ interface LaunchAgentConfig {
   stderrPath: string;
   serviceEnvPath: string;
   serviceEnvSnapshotPath: string;
-  telegramBotToken?: string;
 }
 
 interface LaunchctlPrintState {
@@ -222,10 +221,6 @@ export function renderLaunchAgentPlist(config: LaunchAgentConfig): string {
     JAGC_LOG_LEVEL: config.logLevel,
   };
 
-  if (config.telegramBotToken) {
-    environmentVariables.JAGC_TELEGRAM_BOT_TOKEN = config.telegramBotToken;
-  }
-
   const envLines = Object.entries(environmentVariables)
     .map(([key, value]) => `      <key>${xmlEscape(key)}</key>\n      <string>${xmlEscape(value)}</string>`)
     .join('\n');
@@ -344,6 +339,7 @@ class MacOsServiceManager implements PlatformServiceManager {
       serviceEnvPath,
       serviceEnvSnapshotPath,
       nodePath: process.execPath,
+      telegramBotToken: options.telegramBotToken,
     });
 
     const serverEntrypoint = await resolveServerEntrypoint(fileURLToPath(import.meta.url));
@@ -357,7 +353,6 @@ class MacOsServiceManager implements PlatformServiceManager {
       port: options.port,
       runner: options.runner,
       logLevel: options.logLevel,
-      telegramBotToken: options.telegramBotToken,
       stdoutPath,
       stderrPath,
       serviceEnvPath,
@@ -658,6 +653,7 @@ async function ensureServiceEnvironmentFiles(options: {
   serviceEnvPath: string;
   serviceEnvSnapshotPath: string;
   nodePath: string;
+  telegramBotToken?: string;
 }): Promise<void> {
   const shellPath = resolveUserShellPath();
   const shellEnvironment = (await captureShellEnvironment(shellPath)) ?? process.env;
@@ -678,6 +674,15 @@ async function ensureServiceEnvironmentFiles(options: {
 
   if (!(await fileExists(options.serviceEnvPath))) {
     await writeFile(options.serviceEnvPath, renderDefaultUserServiceEnvironment(), { mode: 0o600 });
+  }
+
+  const serviceEnvContent = await readFile(options.serviceEnvPath, 'utf8');
+  const updatedServiceEnvContent = applyServiceInstallEnvironmentOverrides(serviceEnvContent, {
+    telegramBotToken: options.telegramBotToken,
+  });
+
+  if (updatedServiceEnvContent !== serviceEnvContent) {
+    await writeFile(options.serviceEnvPath, updatedServiceEnvContent, { mode: 0o600 });
   }
 
   await chmod(options.serviceEnvPath, 0o600);
@@ -747,6 +752,45 @@ function renderEnvironmentFile(options: { header: string[]; variables: Record<st
   }
 
   return `${lines.join('\n')}\n`;
+}
+
+export function applyServiceInstallEnvironmentOverrides(
+  content: string,
+  options: { telegramBotToken?: string },
+): string {
+  let updatedContent = content;
+
+  if (options.telegramBotToken) {
+    updatedContent = upsertEnvironmentFileVariable(updatedContent, 'JAGC_TELEGRAM_BOT_TOKEN', options.telegramBotToken);
+  }
+
+  return updatedContent;
+}
+
+export function upsertEnvironmentFileVariable(content: string, key: string, value: string): string {
+  const normalizedLines = content.replaceAll('\r\n', '\n').split('\n');
+  if (normalizedLines.at(-1) === '') {
+    normalizedLines.pop();
+  }
+
+  const entry = `${key}=${formatEnvFileValue(value)}`;
+  let replaced = false;
+
+  const updatedLines = normalizedLines.map((line) => {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (!match || match[1] !== key) {
+      return line;
+    }
+
+    replaced = true;
+    return entry;
+  });
+
+  if (!replaced) {
+    updatedLines.push(entry);
+  }
+
+  return `${updatedLines.join('\n')}\n`;
 }
 
 export function renderDefaultUserServiceEnvironment(): string {

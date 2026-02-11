@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
+  applyServiceInstallEnvironmentOverrides,
   buildServiceEnvironmentSnapshot,
   parseLaunchAgentServiceConnection,
   parseLaunchctlPrintOutput,
@@ -12,6 +13,7 @@ import {
   renderLaunchAgentPlist,
   resolveServerEntrypoint,
   supportsNodeEnvFileIfExists,
+  upsertEnvironmentFileVariable,
 } from '../src/cli/service-manager.js';
 
 describe('resolveServerEntrypoint', () => {
@@ -82,7 +84,6 @@ describe('renderLaunchAgentPlist', () => {
       stderrPath: '/tmp/jagc/logs/server.err.log',
       serviceEnvPath: '/tmp/jagc/service.env',
       serviceEnvSnapshotPath: '/tmp/jagc/service.env.snapshot',
-      telegramBotToken: 'abc<def>',
     });
 
     expect(plist).toContain('<key>Label</key>');
@@ -93,7 +94,7 @@ describe('renderLaunchAgentPlist', () => {
     expect(plist).toContain('/tmp/jagc/db&amp;name.sqlite');
     expect(plist).toContain('--env-file-if-exists=/tmp/jagc/service.env.snapshot');
     expect(plist).toContain('--env-file-if-exists=/tmp/jagc/service.env');
-    expect(plist).toContain('abc&lt;def&gt;');
+    expect(plist).not.toContain('JAGC_TELEGRAM_BOT_TOKEN');
     expect(plist).not.toContain('<key>PATH</key>');
   });
 });
@@ -138,6 +139,42 @@ describe('renderDefaultUserServiceEnvironment', () => {
 
     expect(content).toContain('Loaded after service.env.snapshot; values here win.');
     expect(content).toContain('PATH=/Users/you/.local/bin');
+  });
+});
+
+describe('applyServiceInstallEnvironmentOverrides', () => {
+  test('preserves existing telegram token when install is rerun without token flag', () => {
+    const content = '# comment\nJAGC_TELEGRAM_BOT_TOKEN=existing-token\n';
+
+    expect(applyServiceInstallEnvironmentOverrides(content, {})).toBe(content);
+  });
+
+  test('upserts telegram token when token flag is provided', () => {
+    const content = '# comment\nJAGC_LOG_LEVEL=info\n';
+
+    expect(
+      applyServiceInstallEnvironmentOverrides(content, {
+        telegramBotToken: 'new token',
+      }),
+    ).toBe('# comment\nJAGC_LOG_LEVEL=info\nJAGC_TELEGRAM_BOT_TOKEN="new token"\n');
+  });
+});
+
+describe('upsertEnvironmentFileVariable', () => {
+  test('appends a missing key at end of file', () => {
+    const content = '# comment\nJAGC_LOG_LEVEL=info\n';
+
+    expect(upsertEnvironmentFileVariable(content, 'JAGC_TELEGRAM_BOT_TOKEN', '123:abc')).toBe(
+      '# comment\nJAGC_LOG_LEVEL=info\nJAGC_TELEGRAM_BOT_TOKEN=123:abc\n',
+    );
+  });
+
+  test('replaces existing key value and preserves quoting for special characters', () => {
+    const content = '# comment\nJAGC_TELEGRAM_BOT_TOKEN=old\n';
+
+    expect(upsertEnvironmentFileVariable(content, 'JAGC_TELEGRAM_BOT_TOKEN', 'abc def')).toBe(
+      '# comment\nJAGC_TELEGRAM_BOT_TOKEN="abc def"\n',
+    );
   });
 });
 

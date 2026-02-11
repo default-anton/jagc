@@ -13,7 +13,7 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added top-level CLI version flags: `jagc -v` and `jagc --version`.
 
 ### Changed
 
@@ -21,7 +21,7 @@ All notable changes to `jagc` are documented here.
 
 ### Fixed
 
-- None.
+- `jagc install` now stores Telegram bot tokens in `<workspace>/service.env` (`JAGC_TELEGRAM_BOT_TOKEN`) instead of embedding them in the launchd plist, so rerunning `jagc install` without `--telegram-bot-token` preserves an existing token already present in `service.env`.
 
 ## [0.3.0] - 2026-02-11
 

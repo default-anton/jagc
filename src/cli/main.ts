@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs';
 import { createInterface, type Interface } from 'node:readline/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Command, InvalidArgumentError, Option } from 'commander';
+
 import { type OAuthLoginAttemptResponse, type OAuthLoginPromptKind, thinkingLevels } from '../shared/api-contracts.js';
 import {
   cancelThreadRun,
@@ -25,6 +27,10 @@ import { registerDefaultsCommands } from './defaults-commands.js';
 import { registerPackagesCommands } from './packages-commands.js';
 import { registerServiceCommands } from './service-commands.js';
 
+const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf-8')) as {
+  version: string;
+};
+const version = packageJson.version;
 const defaultApiUrl = process.env.JAGC_API_URL ?? 'http://127.0.0.1:31415';
 const defaultThreadKey = 'cli:default';
 
@@ -32,6 +38,7 @@ const program = new Command();
 program
   .name('jagc')
   .description('jagc command line interface')
+  .version(version, '-v, --version', 'output the version number')
   .showHelpAfterError()
   .option('--api-url <url>', 'jagc server API URL', defaultApiUrl);
 

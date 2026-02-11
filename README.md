@@ -86,6 +86,7 @@ These commands wrap the pi package manager from jagc's bundled dependency and sc
 Use CLI when you need explicit control:
 
 ```bash
+jagc --version
 jagc message "ping" --json
 jagc run wait <run_id> --json
 jagc cancel --thread-key cli:default --json
@@ -101,7 +102,7 @@ jagc share --thread-key cli:default --json
 ## What works in v0
 
 - Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `POST /v1/threads/:thread_key/cancel`, `POST /v1/threads/:thread_key/share`
-- CLI: `health`, `message`, `run wait`, `cancel`, `new`, `share`, `defaults sync`, `packages install|remove|update|list|config`, `model list|get|set`, `thinking get|set`, `auth providers|login`
+- CLI: `-v|--version`, `health`, `message`, `run wait`, `cancel`, `new`, `share`, `defaults sync`, `packages install|remove|update|list|config`, `model list|get|set`, `thinking get|set`, `auth providers|login`
 - Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
 - Telegram progress stream shows tool/thinking snippets; tool calls start as `> tool ...` and are edited in place to append `[✓] done (0.4s)` / `[✗] failed (0.4s)` style suffixes; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive; when progress exceeds one Telegram message, older lines are flushed into additional `progress log (continued):` messages so visibility is preserved for long runs
 - Runtime semantics: same-thread `followUp` (default) and explicit `steer`
@@ -118,7 +119,7 @@ jagc share --thread-key cli:default --json
 
 ## Minimal config
 
-Most users only need the Telegram token at install time.
+Most users only need to provide the Telegram token once at install time.
 
 | Variable | Default | Why you might set it |
 | --- | --- | --- |
@@ -136,9 +137,11 @@ Most users only need the Telegram token at install time.
 `jagc install` creates two workspace env files for launchd:
 
 - `~/.jagc/service.env.snapshot` — managed by jagc (captured from your login shell; includes PATH/tooling env for brew/mise/uv/asdf/etc.)
-- `~/.jagc/service.env` — user overrides (never overwritten by `jagc install` once created)
+- `~/.jagc/service.env` — user overrides (never overwritten by `jagc install` once created; `jagc install --telegram-bot-token ...` upserts `JAGC_TELEGRAM_BOT_TOKEN` here)
 
 launchd points Node at both files on startup (`snapshot` first, then `service.env`), and jagc reapplies them in that same order so values in `service.env` win (including `PATH`, which launchd otherwise hardcodes).
+
+If you rerun `jagc install` without `--telegram-bot-token`, jagc keeps any existing `JAGC_TELEGRAM_BOT_TOKEN` already in `service.env`.
 
 This path depends on Node's `--env-file-if-exists` flag, so use Node `>=20.19.0 <21` or `>=22.9.0`.
 

@@ -14,6 +14,7 @@ This doc is the implementation snapshot (not design intent).
 
 ### CLI
 
+- `jagc -v`, `jagc --version`
 - `jagc health`
 - `jagc message`
 - `jagc run wait`
@@ -51,8 +52,9 @@ This doc is the implementation snapshot (not design intent).
 - Server startup re-applies those same env files in-order with explicit override semantics so launchd defaults (notably `PATH`) do not mask workspace env entries.
 - Node runtime requirement for this launch path is `>=20.19.0 <21` or `>=22.9.0`.
 - `jagc install` always regenerates `<workspace>/service.env.snapshot` from the user's login shell (PATH/tooling env) and creates `<workspace>/service.env` when missing.
-- `service.env` is never overwritten by `jagc install` once it exists; user edits are picked up after `jagc restart`.
-- launchd environment variables include `JAGC_WORKSPACE_DIR`, `JAGC_DATABASE_PATH`, `JAGC_HOST`, `JAGC_PORT`, `JAGC_RUNNER`, and optional `JAGC_TELEGRAM_BOT_TOKEN`.
+- `service.env` is never wholesale-overwritten by `jagc install` once it exists; user edits are picked up after `jagc restart`.
+- `jagc install --telegram-bot-token ...` upserts `JAGC_TELEGRAM_BOT_TOKEN` into `<workspace>/service.env`; rerunning install without that flag preserves any existing token in `service.env`.
+- launchd plist environment variables include `JAGC_WORKSPACE_DIR`, `JAGC_DATABASE_PATH`, `JAGC_HOST`, `JAGC_PORT`, `JAGC_RUNNER`, and `JAGC_LOG_LEVEL` (Telegram token comes from env files).
 - Logs default to `$JAGC_WORKSPACE_DIR/logs/server.out.log` and `server.err.log`.
 - `jagc status` inspects launchd (`launchctl print`) and API health (`/healthz`).
 - `jagc restart` issues `launchctl kickstart -k` and waits for `/healthz`.
