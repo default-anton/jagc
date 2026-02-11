@@ -2,9 +2,9 @@
 
 ## Start here
 
-- Read `README.md` first for the current operator-facing contract.
-- Read `docs/architecture.md` for implemented behavior. Treat `docs/future.md` as historical/deferred notes.
-- Read `docs/testing.md` for canonical test loops (especially Telegram behavioral clone coverage).
+- Keep the operator-facing contract in mind: Telegram is primary UX; CLI/API are for setup, control, and debugging.
+- Read `docs/architecture.md` when changing implemented behavior.
+- Read `docs/testing.md` when changing test loops or validating Telegram behavioral clone coverage.
 - Read `docs/release.md` before cutting/publishing releases.
 - Run `mise install` at repo root when tools are missing or after `.tool-versions` changes.
 - If `mise install` fails, follow `docs/tooling.md`.

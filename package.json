@@ -36,7 +36,6 @@
     "docs/architecture.md",
     "docs/auth.md",
     "docs/testing.md",
-    "docs/future.md",
     "docs/release.md",
     "deploy/launchd/com.jagc.server.plist",
     "deploy/systemd/*.service",

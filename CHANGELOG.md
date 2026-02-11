@@ -17,7 +17,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Removed the deferred roadmap doc and cleaned up all in-repo/package references.
 
 ### Fixed
 

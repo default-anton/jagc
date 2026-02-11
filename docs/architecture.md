@@ -3,7 +3,6 @@
 This doc is the implementation snapshot (not design intent).
 
 - Current operator-facing contract: [`README.md`](../README.md)
-- Deferred/historical notes: [`docs/future.md`](./future.md)
 
 ## Implemented surface (v0)
 

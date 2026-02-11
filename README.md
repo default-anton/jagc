@@ -175,7 +175,6 @@ jagc uninstall --purge-data
 - Architecture (implemented behavior): [`docs/architecture.md`](docs/architecture.md)
 - Testing loops: [`docs/testing.md`](docs/testing.md)
 - Release process: [`docs/release.md`](docs/release.md)
-- Deferred roadmap: [`docs/future.md`](docs/future.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License
