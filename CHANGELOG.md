@@ -13,6 +13,20 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+## [0.3.0] - 2026-02-11
+
+### Added
+
 - Added thread-run cancellation controls without session reset across all primary surfaces: API `POST /v1/threads/:thread_key/cancel`, CLI `jagc cancel`, and Telegram `/cancel`.
 - Added first-class workspace package management commands: `jagc packages install|remove|update|list|config` (with `jagc package` alias), wrapping jagc's bundled pi dependency so operators can manage workspace package sources without relying on a globally installed `pi` binary.
 
