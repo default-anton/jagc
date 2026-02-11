@@ -13,6 +13,20 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+## [0.3.1] - 2026-02-11
+
+### Added
+
 - Added top-level CLI version flags: `jagc -v` and `jagc --version`.
 
 ### Changed
