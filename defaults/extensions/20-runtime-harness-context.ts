@@ -82,9 +82,10 @@ export default function runtimeHarnessContextExtension(pi: {
     handler: (event: { systemPrompt: string }, ctx: { cwd: string }) => Promise<{ systemPrompt: string } | undefined>,
   ) => void;
 }) {
-  pi.on('before_agent_start', async (event) => {
+  pi.on('before_agent_start', async (event, ctx) => {
     const sections: string[] = [];
 
+    const agentDir = ctx.cwd;
     const runtimeContextMarker = 'Runtime/harness context (jagc + pi):';
     if (!event.systemPrompt.includes(runtimeContextMarker)) {
       const runtimeContextLines = [
@@ -95,6 +96,12 @@ export default function runtimeHarnessContextExtension(pi: {
         '- Use the `jagc` CLI when helpful (`jagc status`, `jagc doctor`, `jagc restart`, `jagc install`, etc.) to inspect or adjust your own runtime.',
         '- Treat jagc service health and operability as part of task ownership.',
         '- AGENTS.md: obey local, hierarchical instructions in AGENTS.md files when they are present in context.',
+        '- Workspace model: `ctx.cwd` is the jagc workspace root (`JAGC_WORKSPACE_DIR`, default `~/.jagc`) and also the pi agent dir.',
+        '- Purpose: keep prompts, config, extensions, auth, sessions, DB, and service env in one portable state root for deterministic CLI/service behavior.',
+        '- User-owned config: `SYSTEM.md`, `AGENTS.md`, `settings.json`, `extensions/`, `skills/`, `service.env`.',
+        '- Runtime state (usually do not edit directly): `service.env.snapshot`, `auth.json`, `.sessions/`, `jagc.sqlite*`, `logs/`.',
+        `Your skills are located in: ${formatPathForPrompt(path.join(agentDir, 'skills'))}/`,
+        `Your extensions are located in: ${formatPathForPrompt(path.join(agentDir, 'extensions'))}/`,
         '- Themes/TUI/keybindings are usually irrelevant for jagc runtime work unless explicitly requested.',
       ];
       sections.push(runtimeContextLines.join('\n'));

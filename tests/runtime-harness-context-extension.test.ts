@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { describe, expect, test } from 'vitest';
 
 import runtimeHarnessContextExtension from '../defaults/extensions/20-runtime-harness-context.js';
@@ -20,13 +22,16 @@ describe('runtimeHarnessContextExtension', () => {
 
     expect(handler).toBeDefined();
 
-    const result = await handler?.({ systemPrompt: 'Base system prompt.' }, { cwd: process.cwd() });
+    const fakeCwd = path.resolve('/tmp/jagc-runtime-context-extension');
+    const result = await handler?.({ systemPrompt: 'Base system prompt.' }, { cwd: fakeCwd });
 
     expect(result).toBeDefined();
     expect(result?.systemPrompt).toContain('Runtime/harness context (jagc + pi):');
     expect(result?.systemPrompt).toContain('Your harness is [jagc]');
     expect(result?.systemPrompt).toContain('jagc wraps pi coding agent');
     expect(result?.systemPrompt).toContain('Use the `jagc` CLI when helpful');
+    expect(result?.systemPrompt).toContain(`Your skills are located in: ${path.join(fakeCwd, 'skills')}/`);
+    expect(result?.systemPrompt).toContain(`Your extensions are located in: ${path.join(fakeCwd, 'extensions')}/`);
     expect(result?.systemPrompt).toContain('Pi documentation (consult when needed for jagc/pi implementation work):');
     expect(result?.systemPrompt).toContain('docs/extensions.md');
     expect(result?.systemPrompt).toContain('docs/packages.md');

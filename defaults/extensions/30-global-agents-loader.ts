@@ -49,8 +49,6 @@ export default function globalAgentsLoaderExtension(pi: {
       '- Subdir AGENTS.md files are auto-loaded when you use the read tool on files in that subtree.',
       '',
       `Global AGENTS.md: ${formatPathForPrompt(globalAgentsPath)} (applies to all projects)`,
-      `Your skills are located in: ${formatPathForPrompt(path.join(agentDir, 'skills'))}/`,
-      `Your extensions are located in: ${formatPathForPrompt(path.join(agentDir, 'extensions'))}/`,
       '',
       'AGENTS.md files:',
       '<agents_files>',
