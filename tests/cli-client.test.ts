@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { resetThreadSession, shareThreadSession, startOAuthLogin, waitForRun } from '../src/cli/client.js';
+import {
+  cancelThreadRun,
+  resetThreadSession,
+  shareThreadSession,
+  startOAuthLogin,
+  waitForRun,
+} from '../src/cli/client.js';
 import { oauthOwnerHeaderName } from '../src/shared/api-contracts.js';
 
 describe('waitForRun', () => {
@@ -94,6 +100,37 @@ describe('startOAuthLogin', () => {
         },
       }),
     );
+  });
+});
+
+describe('cancelThreadRun', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('calls thread run cancel endpoint', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          thread_key: 'cli:default',
+          cancelled: true,
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    const response = await cancelThreadRun('http://127.0.0.1:31415', 'cli:default');
+
+    expect(fetchSpy).toHaveBeenCalledWith('http://127.0.0.1:31415/v1/threads/cli%3Adefault/cancel', {
+      method: 'POST',
+    });
+    expect(response).toEqual({
+      thread_key: 'cli:default',
+      cancelled: true,
+    });
   });
 });
 

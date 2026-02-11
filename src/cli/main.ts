@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Command, InvalidArgumentError, Option } from 'commander';
 import { type OAuthLoginAttemptResponse, type OAuthLoginPromptKind, thinkingLevels } from '../shared/api-contracts.js';
 import {
+  cancelThreadRun,
   getAuthProviders,
   getModelCatalog,
   getOAuthLoginAttempt,
@@ -83,6 +84,27 @@ program
         printJson(run);
       } else {
         console.log(run.run_id);
+      }
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+program
+  .command('cancel')
+  .description('cancel active thread run without resetting session context')
+  .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
+  .option('--json', 'JSON output')
+  .action(async (options) => {
+    try {
+      const response = await cancelThreadRun(apiUrl(program), options.threadKey);
+
+      if (options.json) {
+        printJson(response);
+      } else if (response.cancelled) {
+        console.log(`thread:${response.thread_key} run stopped (session preserved)`);
+      } else {
+        console.log(`thread:${response.thread_key} no active run to stop (session preserved)`);
       }
     } catch (error) {
       exitWithError(error);

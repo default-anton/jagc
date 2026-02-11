@@ -19,6 +19,7 @@ import {
   type ApiErrorResponse,
   authLoginAttemptParamsSchema,
   authProviderParamsSchema,
+  cancelThreadRunResponseSchema,
   oauthOwnerHeaderName,
   postMessageRequestSchema,
   type RunResponse,
@@ -359,6 +360,31 @@ export function createApp(options: AppOptions): FastifyInstance {
       return reply.send(threadRuntimeStateResponse(state));
     } catch (error) {
       return reply.status(400).send(errorResponse('thread_thinking_error', toErrorMessage(error)));
+    }
+  });
+
+  app.post('/v1/threads/:thread_key/cancel', async (request, reply) => {
+    if (!options.threadControlService) {
+      return reply
+        .status(501)
+        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
+    }
+
+    const paramsResult = threadParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
+    }
+
+    try {
+      const cancelled = await options.threadControlService.cancelThreadRun(paramsResult.data.thread_key);
+      return reply.send(
+        cancelThreadRunResponseSchema.parse({
+          thread_key: cancelled.threadKey,
+          cancelled: cancelled.cancelled,
+        }),
+      );
+    } catch (error) {
+      return reply.status(400).send(errorResponse('thread_run_cancel_error', toErrorMessage(error)));
     }
   });
 

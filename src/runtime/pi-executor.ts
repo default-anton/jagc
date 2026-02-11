@@ -44,10 +44,16 @@ export interface ThreadShareResult {
   shareUrl: string;
 }
 
+export interface ThreadCancelResult {
+  threadKey: string;
+  cancelled: boolean;
+}
+
 export interface ThreadControlService {
   getThreadRuntimeState(threadKey: string): Promise<ThreadRuntimeState>;
   setThreadModel(threadKey: string, provider: string, modelId: string): Promise<ThreadRuntimeState>;
   setThreadThinkingLevel(threadKey: string, thinkingLevel: SupportedThinkingLevel): Promise<ThreadRuntimeState>;
+  cancelThreadRun(threadKey: string): Promise<ThreadCancelResult>;
   resetThreadSession(threadKey: string): Promise<void>;
   shareThreadSession(threadKey: string): Promise<ThreadShareResult>;
 }
@@ -117,6 +123,50 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     session.setThinkingLevel(thinkingLevel);
 
     return stateFromSession(threadKey, session);
+  }
+
+  async cancelThreadRun(threadKey: string): Promise<ThreadCancelResult> {
+    await this.waitForInFlightReset(threadKey);
+
+    const pendingSession = this.sessionCreation.get(threadKey);
+    if (pendingSession) {
+      await awaitWithTimeout(
+        pendingSession.catch(() => undefined),
+        threadResetTimeoutMs,
+        `timed out waiting for session creation before cancelling thread ${threadKey}`,
+      );
+    }
+
+    const session = this.sessions.get(threadKey);
+    if (!session) {
+      return {
+        threadKey,
+        cancelled: false,
+      };
+    }
+
+    const hasActiveWork = session.isStreaming || session.pendingMessageCount > 0;
+    if (!hasActiveWork) {
+      return {
+        threadKey,
+        cancelled: false,
+      };
+    }
+
+    try {
+      await awaitWithTimeout(
+        session.abort(),
+        threadResetTimeoutMs,
+        `timed out aborting active run for thread ${threadKey}`,
+      );
+    } catch (error) {
+      throw new Error(`failed to cancel active run for thread ${threadKey}: ${errorMessage(error)}`);
+    }
+
+    return {
+      threadKey,
+      cancelled: true,
+    };
   }
 
   async resetThreadSession(threadKey: string): Promise<void> {
@@ -589,6 +639,14 @@ function extractGistId(gistUrl: string): string {
   }
 
   return gistId;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 function stateFromSession(threadKey: string, session: AgentSession): ThreadRuntimeState {

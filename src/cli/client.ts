@@ -3,6 +3,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type AuthProvidersResponse,
   authProvidersResponseSchema,
+  type CancelThreadRunResponse,
+  cancelThreadRunResponseSchema,
   type ModelCatalogResponse,
   modelCatalogResponseSchema,
   type OAuthLoginAttemptResponse,
@@ -28,6 +30,7 @@ export type ApiAuthProvidersResponse = AuthProvidersResponse;
 export type ApiModelCatalogResponse = ModelCatalogResponse;
 export type ApiThreadRuntimeStateResponse = ThreadRuntimeStateResponse;
 export type ApiOAuthLoginAttemptResponse = OAuthLoginAttemptResponse;
+export type ApiCancelThreadRunResponse = CancelThreadRunResponse;
 export type ApiResetThreadSessionResponse = ResetThreadSessionResponse;
 export type ApiShareThreadSessionResponse = ShareThreadSessionResponse;
 export type MessageRequest = PostMessageRequest;
@@ -210,6 +213,14 @@ export async function setThreadThinkingLevel(
   return parseThreadRuntimeResponse(response);
 }
 
+export async function cancelThreadRun(apiUrl: string, threadKey: string): Promise<ApiCancelThreadRunResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/cancel`, {
+    method: 'POST',
+  });
+
+  return parseCancelThreadRunResponse(response);
+}
+
 export async function resetThreadSession(apiUrl: string, threadKey: string): Promise<ApiResetThreadSessionResponse> {
   const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/session`, {
     method: 'DELETE',
@@ -272,6 +283,20 @@ async function parseThreadRuntimeResponse(response: Response): Promise<ApiThread
   }
 
   return threadRuntimeStateSchema.parse(responseBody);
+}
+
+async function parseCancelThreadRunResponse(response: Response): Promise<ApiCancelThreadRunResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return cancelThreadRunResponseSchema.parse(responseBody);
 }
 
 async function parseResetThreadSessionResponse(response: Response): Promise<ApiResetThreadSessionResponse> {

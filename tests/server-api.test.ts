@@ -233,6 +233,13 @@ class FakeThreadControlService {
     return state;
   }
 
+  async cancelThreadRun(threadKey: string) {
+    return {
+      threadKey,
+      cancelled: true,
+    };
+  }
+
   async resetThreadSession(threadKey: string) {
     this.byThread.delete(threadKey);
   }
@@ -611,7 +618,7 @@ describe('server API', () => {
     await app.close();
   });
 
-  test('thread model/thinking/session endpoints return 501 without thread control service', async () => {
+  test('thread model/thinking/cancel/session endpoints return 501 without thread control service', async () => {
     const { app } = await createTestApp(new TestExecutor(), {
       authService: new FakeAuthService(),
     });
@@ -644,6 +651,13 @@ describe('server API', () => {
 
     expect(thinkingResponse.statusCode).toBe(501);
 
+    const cancelResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/cancel',
+    });
+
+    expect(cancelResponse.statusCode).toBe(501);
+
     const resetResponse = await app.inject({
       method: 'DELETE',
       url: '/v1/threads/cli%3Adefault/session',
@@ -661,7 +675,7 @@ describe('server API', () => {
     await app.close();
   });
 
-  test('thread model/thinking/session endpoints update runtime state', async () => {
+  test('thread model/thinking/cancel/session endpoints update runtime state', async () => {
     const { app } = await createTestApp(new TestExecutor(), {
       authService: new FakeAuthService(),
       threadControlService: new FakeThreadControlService(),
@@ -707,6 +721,17 @@ describe('server API', () => {
     expect(setThinkingResponse.statusCode).toBe(200);
     expect(setThinkingResponse.json()).toMatchObject({
       thinking_level: 'high',
+    });
+
+    const cancelResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/cancel',
+    });
+
+    expect(cancelResponse.statusCode).toBe(200);
+    expect(cancelResponse.json()).toEqual({
+      thread_key: 'cli:default',
+      cancelled: true,
     });
 
     const resetResponse = await app.inject({
