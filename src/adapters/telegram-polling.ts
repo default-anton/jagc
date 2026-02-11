@@ -19,7 +19,6 @@ import { parseTelegramCallbackData } from './telegram-controls-callbacks.js';
 import { TelegramRunProgressReporter } from './telegram-progress.js';
 import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
 
-const defaultWaitTimeoutMs = 180_000;
 const defaultPollIntervalMs = 500;
 const defaultPollRequestTimeoutSeconds = 30;
 const telegramMessageLimit = 3500;
@@ -41,7 +40,6 @@ interface TelegramPollingAdapterOptions {
     cancelOAuthLogin(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
   threadControlService?: ThreadControlService;
-  waitTimeoutMs?: number;
   pollIntervalMs?: number;
   telegramApiRoot?: string;
   pollRequestTimeoutSeconds?: number;
@@ -58,12 +56,12 @@ export class TelegramPollingAdapter {
   private readonly bot: Bot;
   private readonly runtimeControls: TelegramRuntimeControls;
   private runner: RunnerHandle | null = null;
-  private readonly waitTimeoutMs: number;
   private readonly pollIntervalMs: number;
   private readonly pollRequestTimeoutSeconds: number;
   private readonly logger: Logger;
   private readonly backgroundRunTasks = new Set<Promise<void>>();
   private readonly backgroundRunAbortControllers = new Set<AbortController>();
+  private readonly backgroundRunAbortControllersByThread = new Map<string, Set<AbortController>>();
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
     const botConfig: BotConfig<Context> = {};
@@ -83,7 +81,6 @@ export class TelegramPollingAdapter {
       authService: options.authService,
       threadControlService: options.threadControlService,
     });
-    this.waitTimeoutMs = options.waitTimeoutMs ?? defaultWaitTimeoutMs;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
     this.pollRequestTimeoutSeconds = options.pollRequestTimeoutSeconds ?? defaultPollRequestTimeoutSeconds;
     this.logger = options.logger ?? noopLogger;
@@ -139,6 +136,9 @@ export class TelegramPollingAdapter {
       await Promise.allSettled([...this.backgroundRunTasks]);
     }
 
+    this.backgroundRunAbortControllers.clear();
+    this.backgroundRunAbortControllersByThread.clear();
+
     if (!this.runner) {
       return;
     }
@@ -178,6 +178,13 @@ export class TelegramPollingAdapter {
         }
         case 'settings': {
           await this.runtimeControls.handleSettingsCommand(ctx);
+          return;
+        }
+        case 'cancel': {
+          const cancelled = await this.runtimeControls.handleCancelCommand(ctx);
+          if (cancelled && ctx.chat) {
+            this.abortBackgroundRunsForThread(telegramThreadKey(ctx.chat.id));
+          }
           return;
         }
         case 'new': {
@@ -327,6 +334,9 @@ export class TelegramPollingAdapter {
       return;
     }
 
+    const backgroundAbortController = new AbortController();
+    this.trackBackgroundRunAbortController(threadKey, backgroundAbortController);
+
     const progressReporter = new TelegramRunProgressReporter({
       bot: this.bot,
       chatId,
@@ -335,56 +345,32 @@ export class TelegramPollingAdapter {
       messageLimit: telegramMessageLimit,
     });
 
-    await progressReporter.start();
+    try {
+      await progressReporter.start();
+    } catch (error) {
+      this.untrackBackgroundRunAbortController(threadKey, backgroundAbortController);
+      throw error;
+    }
 
     const unsubscribe = this.subscribeRunProgress(ingested.run.runId, (event) => {
       progressReporter.onProgress(event);
     });
 
-    let backgroundContinuationStarted = false;
-
-    try {
-      const completedRun = await this.waitForCompletion(ingested.run.runId, this.waitTimeoutMs);
-      if (completedRun.status === 'running') {
-        await progressReporter.markLongRunning();
-        await this.sendMessage(chatId, "Still running. I'll send the result when it's done.");
-
-        backgroundContinuationStarted = true;
-
-        const backgroundAbortController = new AbortController();
-        this.backgroundRunAbortControllers.add(backgroundAbortController);
-
-        let backgroundTask: Promise<void> | null = null;
-        backgroundTask = this.continueRunInBackground({
-          chatId,
-          runId: completedRun.runId,
-          progressReporter,
-          unsubscribe,
-          signal: backgroundAbortController.signal,
-        }).finally(() => {
-          if (backgroundTask) {
-            this.backgroundRunTasks.delete(backgroundTask);
-          }
-          this.backgroundRunAbortControllers.delete(backgroundAbortController);
-        });
-
-        this.backgroundRunTasks.add(backgroundTask);
-        return;
+    let backgroundTask: Promise<void> | null = null;
+    backgroundTask = this.continueRunInBackground({
+      chatId,
+      runId: ingested.run.runId,
+      progressReporter,
+      unsubscribe,
+      signal: backgroundAbortController.signal,
+    }).finally(() => {
+      if (backgroundTask) {
+        this.backgroundRunTasks.delete(backgroundTask);
       }
+      this.untrackBackgroundRunAbortController(threadKey, backgroundAbortController);
+    });
 
-      if (completedRun.status === 'failed') {
-        await progressReporter.finishFailed(completedRun.errorMessage);
-      } else {
-        await progressReporter.finishSucceeded();
-      }
-
-      await this.replyLong(chatId, formatRunResult(completedRun));
-    } finally {
-      if (!backgroundContinuationStarted) {
-        unsubscribe();
-        await progressReporter.dispose();
-      }
-    }
+    this.backgroundRunTasks.add(backgroundTask);
   }
 
   private async continueRunInBackground(options: {
@@ -395,9 +381,9 @@ export class TelegramPollingAdapter {
     signal: AbortSignal;
   }): Promise<void> {
     try {
-      const completedRun = await this.waitForCompletion(options.runId, null, options.signal);
-      if (completedRun.status === 'running') {
-        return;
+      const completedRun = await this.waitForCompletion(options.runId, options.signal);
+      if (options.signal.aborted) {
+        throw new Error('telegram run wait aborted');
       }
 
       if (completedRun.status === 'failed') {
@@ -428,9 +414,7 @@ export class TelegramPollingAdapter {
     }
   }
 
-  private async waitForCompletion(runId: string, timeoutMs: number | null, signal?: AbortSignal): Promise<RunRecord> {
-    const startedAt = Date.now();
-
+  private async waitForCompletion(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     while (true) {
       if (signal?.aborted) {
         throw new Error('telegram run wait aborted');
@@ -441,11 +425,11 @@ export class TelegramPollingAdapter {
         throw new Error(`run ${runId} not found while waiting for completion`);
       }
 
-      if (run.status !== 'running') {
-        return run;
+      if (signal?.aborted) {
+        throw new Error('telegram run wait aborted');
       }
 
-      if (timeoutMs !== null && Date.now() - startedAt >= timeoutMs) {
+      if (run.status !== 'running') {
         return run;
       }
 
@@ -463,6 +447,39 @@ export class TelegramPollingAdapter {
     }
 
     return runService.subscribeRunProgress(runId, listener);
+  }
+
+  private trackBackgroundRunAbortController(threadKey: string, controller: AbortController): void {
+    this.backgroundRunAbortControllers.add(controller);
+
+    const threadControllers = this.backgroundRunAbortControllersByThread.get(threadKey) ?? new Set<AbortController>();
+    threadControllers.add(controller);
+    this.backgroundRunAbortControllersByThread.set(threadKey, threadControllers);
+  }
+
+  private untrackBackgroundRunAbortController(threadKey: string, controller: AbortController): void {
+    this.backgroundRunAbortControllers.delete(controller);
+
+    const threadControllers = this.backgroundRunAbortControllersByThread.get(threadKey);
+    if (!threadControllers) {
+      return;
+    }
+
+    threadControllers.delete(controller);
+    if (threadControllers.size === 0) {
+      this.backgroundRunAbortControllersByThread.delete(threadKey);
+    }
+  }
+
+  private abortBackgroundRunsForThread(threadKey: string): void {
+    const threadControllers = this.backgroundRunAbortControllersByThread.get(threadKey);
+    if (!threadControllers) {
+      return;
+    }
+
+    for (const controller of threadControllers) {
+      controller.abort();
+    }
   }
 
   private async replyLong(chatId: number, text: string): Promise<void> {
@@ -527,6 +544,7 @@ function helpText(): string {
   return [
     'jagc Telegram commands:',
     '/settings — open runtime settings',
+    '/cancel — stop the active run in this chat (session stays intact)',
     '/new — reset this chat session (next message starts fresh)',
     '/share — export this chat session and upload a secret gist',
     '/model — open model picker',

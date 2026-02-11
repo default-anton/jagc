@@ -55,6 +55,7 @@ jagc health --json
 - Open your bot chat
 - Send `/settings` to check runtime state
 - Send a normal message to run the assistant
+- If a run is taking too long, send `/cancel` to stop it without resetting session context (idle chats return a no-op "No active run" reply, and successful cancels suppress follow-up aborted-run error replies)
 
 ### 4) If something is off
 
@@ -87,6 +88,7 @@ Use CLI when you need explicit control:
 ```bash
 jagc message "ping" --json
 jagc run wait <run_id> --json
+jagc cancel --thread-key cli:default --json
 jagc model list --json
 jagc model set <provider/model> --thread-key cli:default --json
 jagc packages list
@@ -98,10 +100,10 @@ jagc share --thread-key cli:default --json
 
 ## What works in v0
 
-- Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `POST /v1/threads/:thread_key/share`
-- CLI: `health`, `message`, `run wait`, `new`, `share`, `defaults sync`, `packages install|remove|update|list|config`, `model list|get|set`, `thinking get|set`, `auth providers|login`
-- Telegram polling adapter (personal chats) with `/settings`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
-- Telegram progress stream shows tool/thinking snippets; tool calls start as `> tool ...` and are edited in place to append `[✓] done (0.4s)` / `[✗] failed (0.4s)` style suffixes; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive
+- Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `POST /v1/threads/:thread_key/cancel`, `POST /v1/threads/:thread_key/share`
+- CLI: `health`, `message`, `run wait`, `cancel`, `new`, `share`, `defaults sync`, `packages install|remove|update|list|config`, `model list|get|set`, `thinking get|set`, `auth providers|login`
+- Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
+- Telegram progress stream shows tool/thinking snippets; tool calls start as `> tool ...` and are edited in place to append `[✓] done (0.4s)` / `[✗] failed (0.4s)` style suffixes; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive; when progress exceeds one Telegram message, older lines are flushed into additional `progress log (continued):` messages so visibility is preserved for long runs
 - Runtime semantics: same-thread `followUp` (default) and explicit `steer`
 - System-prompt context is extension-driven: runtime/harness context (jagc+pi), global `AGENTS.md`, available skills metadata, local pi docs/examples paths, and Codex harness notes are injected by default workspace extensions (SDK built-in AGENTS/skills auto-loading is disabled)
 - jagc wraps pi coding agent; extension surfaces (custom tools, commands, event handlers) and packages are pi-native capabilities

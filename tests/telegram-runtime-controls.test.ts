@@ -140,6 +140,53 @@ describe('Telegram runtime controls integration', () => {
     });
   });
 
+  test('cancel command aborts active run without resetting session', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+
+    await withTelegramAdapter({ threadControlService }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/cancel',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('🛑 Stopped the active run. Session context is preserved.');
+      expect(threadControlService.cancelCalls).toEqual(['telegram:chat:101']);
+      expect(threadControlService.resetCalls).toHaveLength(0);
+    });
+  });
+
+  test('cancel command reports when no active run is present', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+    threadControlService.cancelResult = false;
+
+    await withTelegramAdapter({ threadControlService }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/cancel',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('No active run to stop in this chat. Session context is preserved.');
+      expect(threadControlService.cancelCalls).toEqual(['telegram:chat:101']);
+    });
+  });
+
+  test('cancel command reports unavailable when pi thread controls are not configured', async () => {
+    await withTelegramAdapter({}, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/cancel',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('Run cancellation is unavailable when JAGC_RUNNER is not pi.');
+    });
+  });
+
   test('new command resets thread session', async () => {
     const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
 

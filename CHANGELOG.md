@@ -13,15 +13,23 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- Added thread-run cancellation controls without session reset across all primary surfaces: API `POST /v1/threads/:thread_key/cancel`, CLI `jagc cancel`, and Telegram `/cancel`.
 - Added first-class workspace package management commands: `jagc packages install|remove|update|list|config` (with `jagc package` alias), wrapping jagc's bundled pi dependency so operators can manage workspace package sources without relying on a globally installed `pi` binary.
 
 ### Changed
 
+- Runtime/harness context prompt injection now includes workspace paths for skills/extensions (`~/.jagc/skills`, `~/.jagc/extensions` by default), and the global AGENTS loader no longer emits those path lines.
+- Telegram run handling no longer sends timeout handoff text (`"Still running. I'll send the result when it's done."`); runs stay on live progress until terminal completion.
 - Telegram progress tool-call lines now update in place on completion and append status/duration suffixes like `[✓] done (0.4s)` and `[✗] failed (0.4s)`, instead of printing the same command twice.
+- Telegram progress rendering now preserves long-run visibility by flushing overflowed progress lines into additional `progress log (continued):` messages instead of silently trimming older lines.
 
 ### Fixed
 
 - macOS launchd services now re-apply `service.env.snapshot` + `service.env` at server startup with override semantics, so launchd's default `PATH` no longer hides `gh` and other user-installed CLIs.
+- Thread cancellation now reports `cancelled: false` when a thread session exists but has no active/queued work, so Telegram `/cancel` no longer claims success on idle chats.
+- Telegram progress archive flushing now consumes archive lines per successful chunk send and retries failed sends without duplicating or dropping overflowed progress lines.
+- Removed unused Telegram polling `waitTimeoutMs` config from adapter/test surfaces.
+- Telegram `/cancel` now aborts in-flight per-chat waiters so successful cancellations no longer emit a second terminal `❌ run ... failed: This operation was aborted` reply.
 
 ## [0.2.0] - 2026-02-10
 

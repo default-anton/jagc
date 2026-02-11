@@ -18,7 +18,7 @@ Telegram tests use a local behavioral Bot API clone (`tests/helpers/telegram-bot
 Primary coverage lives in:
 
 - shared harness: `tests/helpers/telegram-test-kit.ts` (common bot token/chat fixtures, adapter+clone lifecycle helper, thread control fake)
-- `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, timeout/background completion handoff, long-output chunking, and adapter-level recovery from transient polling errors)
+- `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, no-timeout long-run delivery, progress overflow splitting into additional Telegram messages, long-output chunking, and adapter-level recovery from transient polling errors)
 - `tests/telegram-runtime-controls.test.ts` (settings/model/thinking/auth callback flows)
 - `tests/telegram-polling.test.ts` (command/callback parsing and stale callback recovery)
 - `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), malformed payload handling, and urlencoded payload parsing)

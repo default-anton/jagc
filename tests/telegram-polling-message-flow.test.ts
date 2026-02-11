@@ -1,9 +1,12 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, test, vi } from 'vitest';
 
 import type { RunService } from '../src/server/service.js';
 import type { RunProgressEvent } from '../src/shared/run-progress.js';
 import type { MessageIngest, RunRecord } from '../src/shared/run-types.js';
 import {
+  createThreadRuntimeState,
+  FakeThreadControlService,
   telegramTestChatId as testChatId,
   telegramTestUserId as testUserId,
   withTelegramAdapter,
@@ -105,7 +108,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 200,
       },
       async ({ clone }) => {
@@ -194,7 +196,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 150,
       },
       async ({ clone }) => {
@@ -270,7 +271,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 150,
       },
       async ({ clone }) => {
@@ -325,7 +325,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 100,
       },
       async ({ clone }) => {
@@ -433,7 +432,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 200,
       },
       async ({ clone }) => {
@@ -578,7 +576,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 200,
       },
       async ({ clone }) => {
@@ -678,7 +675,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 4_000,
         pollIntervalMs: 200,
       },
       async ({ clone }) => {
@@ -784,6 +780,72 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
+  test('cancel command suppresses terminal aborted-run error reply for the active chat run', async () => {
+    const abortedErrorMessage = 'run run-cancel-active failed: This operation was aborted';
+    const runService = new StubRunService('run-cancel-active', [
+      runRecord({
+        runId: 'run-cancel-active',
+        status: 'running',
+        output: null,
+        errorMessage: null,
+      }),
+      runRecord({
+        runId: 'run-cancel-active',
+        status: 'running',
+        output: null,
+        errorMessage: null,
+      }),
+      runRecord({
+        runId: 'run-cancel-active',
+        status: 'failed',
+        output: null,
+        errorMessage: abortedErrorMessage,
+      }),
+    ]);
+
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        threadControlService,
+        pollIntervalMs: 75,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'start and then cancel',
+        });
+
+        await clone.waitForBotCall('sendMessage', (call) => isFunnyProgressLine(call.payload.text), 4_000);
+
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: '/cancel',
+        });
+
+        await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === '🛑 Stopped the active run. Session context is preserved.',
+          4_000,
+        );
+
+        await sleep(500);
+
+        const failureReplies = clone
+          .getBotCalls()
+          .filter((call) => call.method === 'sendMessage')
+          .map((call) => call.payload.text)
+          .filter((text): text is string => typeof text === 'string')
+          .filter((text) => text === `❌ ${abortedErrorMessage}`);
+
+        expect(failureReplies).toHaveLength(0);
+      },
+    );
+  });
+
   test('structured output without text falls back to pretty JSON', async () => {
     const runService = new StubRunService('run-structured', [
       runRecord({
@@ -815,19 +877,18 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
-  test('run wait timeout returns queued status message', async () => {
+  test('does not send timeout handoff text while run is still in progress', async () => {
     const running = runRecord({
-      runId: 'run-timeout',
+      runId: 'run-timeout-removed',
       status: 'running',
       output: null,
       errorMessage: null,
     });
-    const runService = new StubRunService('run-timeout', [running]);
+    const runService = new StubRunService('run-timeout-removed', [running]);
 
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 25,
         pollIntervalMs: 5,
       },
       async ({ clone }) => {
@@ -837,16 +898,22 @@ describe('TelegramPollingAdapter message flow integration', () => {
           text: 'still running?',
         });
 
-        const sendMessage = await clone.waitForBotCall(
-          'sendMessage',
-          (call) => call.payload.text === "Still running. I'll send the result when it's done.",
-        );
-        expect(sendMessage.payload.text).toBe("Still running. I'll send the result when it's done.");
+        await clone.waitForBotCall('sendMessage', (call) => isFunnyProgressLine(call.payload.text), 3_000);
+        await sleep(200);
+
+        const timeoutHandoffMessages = clone
+          .getBotCalls()
+          .filter((call) => call.method === 'sendMessage')
+          .map((call) => call.payload.text)
+          .filter((text): text is string => typeof text === 'string')
+          .filter((text) => text === "Still running. I'll send the result when it's done.");
+
+        expect(timeoutHandoffMessages).toHaveLength(0);
       },
     );
   });
 
-  test('sends final output later when initial wait times out', async () => {
+  test('sends final output later without timeout handoff text', async () => {
     const runService = new StubRunService('run-late-complete', [
       runRecord({
         runId: 'run-late-complete',
@@ -870,7 +937,6 @@ describe('TelegramPollingAdapter message flow integration', () => {
     await withTelegramAdapter(
       {
         runService: runService.asRunService(),
-        waitTimeoutMs: 15,
         pollIntervalMs: 10,
       },
       async ({ clone }) => {
@@ -880,18 +946,21 @@ describe('TelegramPollingAdapter message flow integration', () => {
           text: 'complete later',
         });
 
-        const queuedMessage = await clone.waitForBotCall(
-          'sendMessage',
-          (call) => call.payload.text === "Still running. I'll send the result when it's done.",
-        );
-        expect(queuedMessage.payload.text).toContain('Still running');
-
         const finalMessage = await clone.waitForBotCall(
           'sendMessage',
           (call) => call.payload.text === 'Finished later',
           3_000,
         );
         expect(finalMessage.payload.text).toBe('Finished later');
+
+        const timeoutHandoffMessages = clone
+          .getBotCalls()
+          .filter((call) => call.method === 'sendMessage')
+          .map((call) => call.payload.text)
+          .filter((text): text is string => typeof text === 'string')
+          .filter((text) => text === "Still running. I'll send the result when it's done.");
+
+        expect(timeoutHandoffMessages).toHaveLength(0);
       },
     );
   });
@@ -930,6 +999,81 @@ describe('TelegramPollingAdapter message flow integration', () => {
       expect(chunks.join('')).toBe(longText);
     });
   });
+
+  test('splits long progress streams into additional Telegram messages', async () => {
+    const toolEventCount = 34;
+    const runStates: RunRecord[] = [];
+    for (let i = 0; i < toolEventCount + 2; i += 1) {
+      runStates.push(
+        runRecord({
+          runId: 'run-progress-overflow',
+          status: 'running',
+          output: null,
+          errorMessage: null,
+        }),
+      );
+    }
+
+    runStates.push(
+      runRecord({
+        runId: 'run-progress-overflow',
+        status: 'succeeded',
+        output: { text: 'Overflow done' },
+        errorMessage: null,
+      }),
+    );
+
+    const progressEventsByPoll: Record<number, RunProgressEvent[]> = {
+      1: [progressEvent('run-progress-overflow', 'started')],
+    };
+
+    for (let i = 0; i < toolEventCount; i += 1) {
+      progressEventsByPoll[i + 2] = [
+        progressEvent('run-progress-overflow', 'tool_execution_start', {
+          toolCallId: `overflow-tool-${i}`,
+          toolName: 'bash',
+          args: {
+            command: `echo step-${i} ${'x'.repeat(120)}`,
+          },
+        }),
+      ];
+    }
+
+    const runService = new StubRunService('run-progress-overflow', runStates, {
+      progressEventsByPoll,
+    });
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        pollIntervalMs: 20,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show overflowing progress',
+        });
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Overflow done',
+          12_000,
+        );
+        expect(finalMessage.payload.text).toBe('Overflow done');
+
+        const progressArchiveMessages = clone
+          .getBotCalls()
+          .filter((call) => call.method === 'sendMessage')
+          .map((call) => call.payload.text)
+          .filter((text): text is string => typeof text === 'string')
+          .filter((text) => text.startsWith('progress log (continued):'));
+
+        expect(progressArchiveMessages.length).toBeGreaterThan(0);
+        expect(progressArchiveMessages.join('\n')).toContain('> bash cmd="echo step-');
+      },
+    );
+  }, 20_000);
 
   test('recovers from transient getUpdates 500 errors and still processes messages', async () => {
     const runService = new StubRunService('run-retry', [

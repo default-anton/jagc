@@ -52,6 +52,24 @@ export class TelegramRuntimeControls {
     await this.showSettingsPanel(ctx);
   }
 
+  async handleCancelCommand(ctx: Context): Promise<boolean> {
+    const threadControlService = this.options.threadControlService;
+    if (!threadControlService) {
+      await ctx.reply('Run cancellation is unavailable when JAGC_RUNNER is not pi.');
+      return false;
+    }
+
+    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const cancelled = await threadControlService.cancelThreadRun(threadKey);
+    if (cancelled.cancelled) {
+      await ctx.reply('🛑 Stopped the active run. Session context is preserved.');
+      return true;
+    }
+
+    await ctx.reply('No active run to stop in this chat. Session context is preserved.');
+    return false;
+  }
+
   async handleNewCommand(ctx: Context): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {

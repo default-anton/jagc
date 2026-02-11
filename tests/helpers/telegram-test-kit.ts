@@ -14,8 +14,10 @@ export type TelegramAdapterAuthService = NonNullable<TelegramPollingAdapterOptio
 export class FakeThreadControlService implements ThreadControlService {
   readonly modelSetCalls: Array<{ threadKey: string; provider: string; modelId: string }> = [];
   readonly thinkingSetCalls: Array<{ threadKey: string; thinkingLevel: ThreadRuntimeState['thinkingLevel'] }> = [];
+  readonly cancelCalls: string[] = [];
   readonly resetCalls: string[] = [];
   readonly shareCalls: string[] = [];
+  cancelResult = true;
 
   constructor(private state: ThreadRuntimeState) {}
 
@@ -48,6 +50,14 @@ export class FakeThreadControlService implements ThreadControlService {
     };
 
     return this.state;
+  }
+
+  async cancelThreadRun(threadKey: string): Promise<{ threadKey: string; cancelled: boolean }> {
+    this.cancelCalls.push(threadKey);
+    return {
+      threadKey,
+      cancelled: this.cancelResult,
+    };
   }
 
   async resetThreadSession(threadKey: string): Promise<void> {
@@ -95,7 +105,6 @@ export async function withTelegramAdapter(
     runService?: RunService;
     authService?: TelegramAdapterAuthService;
     threadControlService?: ThreadControlService;
-    waitTimeoutMs?: number;
     pollIntervalMs?: number;
     pollRequestTimeoutSeconds?: number;
   },
@@ -114,7 +123,6 @@ export async function withTelegramAdapter(
       threadControlService: options.threadControlService,
       telegramApiRoot: clone.apiRoot ?? undefined,
       pollRequestTimeoutSeconds: options.pollRequestTimeoutSeconds ?? 1,
-      waitTimeoutMs: options.waitTimeoutMs,
       pollIntervalMs: options.pollIntervalMs ?? 10,
     });
 

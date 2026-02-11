@@ -178,7 +178,6 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
       telegramApiRoot: clone.apiRoot ?? undefined,
       pollRequestTimeoutSeconds: 1,
       pollIntervalMs: 10,
-      waitTimeoutMs: 5_000,
     });
     await adapter.start();
 

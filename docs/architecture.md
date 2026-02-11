@@ -11,7 +11,7 @@ This doc is the implementation snapshot (not design intent).
 
 - Core run lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
 - OAuth broker: `GET /v1/auth/providers`, `POST /v1/auth/providers/:provider/login`, `GET /v1/auth/logins/:attempt_id`, `POST /v1/auth/logins/:attempt_id/input`, `POST /v1/auth/logins/:attempt_id/cancel`
-- Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`, `DELETE /v1/threads/:thread_key/session`, `POST /v1/threads/:thread_key/share`
+- Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`, `POST /v1/threads/:thread_key/cancel`, `DELETE /v1/threads/:thread_key/session`, `POST /v1/threads/:thread_key/share`
 
 ### CLI
 
@@ -19,14 +19,14 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc model list|get|set`, `jagc thinking get|set`
+- `jagc cancel`, `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
 ### Runtime/adapters
 
 - Executors: `echo` (deterministic), `pi` (real agent)
 - `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts` (runtime/harness context, global AGENTS hierarchy, available skills metadata, local pi docs/examples paths, and Codex harness notes)
-- Telegram polling adapter (personal chats) with `/settings`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
+- Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
 - SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
 - Structured Pino JSON logging with component-scoped child loggers shared across server/runtime/adapters
@@ -125,14 +125,15 @@ Operational note:
 - Thread mapping: `thread_key = telegram:chat:<chat_id>`.
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
+- Telegram `/cancel`, API `POST /v1/threads/:thread_key/cancel`, and CLI `jagc cancel` abort active work for the thread without resetting session context.
+- After a successful Telegram `/cancel`, the adapter suppresses the in-chat terminal `❌ run ... failed: This operation was aborted` reply for that cancelled run (the explicit cancel confirmation message is the terminal user-facing signal).
 - Telegram `/new` and API `DELETE /v1/threads/:thread_key/session` abort/dispose the current thread session, clear persisted `thread_sessions` mapping, and cause the next message to create a fresh pi session.
 - Telegram `/share` and API `POST /v1/threads/:thread_key/share` export the current thread session to HTML and upload it as a secret GitHub gist; response includes both gist URL and share-viewer URL.
 - Adapter starts a per-run progress reporter (in-chat append-style progress message + typing indicator) as soon as a run is ingested.
 - Progress is driven by run-level events emitted from `RunService` and pi session events forwarded by `ThreadRunController` (`assistant_text_delta`, `assistant_thinking_delta`, `tool_execution_*`, turn/agent lifecycle), rendered as compact append-log lines (`>` for tool calls with args-focused snippets, `~` for short thinking snippets); tool call completion edits the original `>` line in place to append status + duration (`[✓] done (0.4s)` / `[✗] failed (0.4s)`).
 - Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed, and if the run finishes without any snippets, the placeholder message is deleted.
-- Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`).
-- Adapter waits for terminal run status and replies with output/error.
-- If foreground wait exceeds adapter timeout, Telegram receives a "still running" notice and the adapter continues waiting in the background, then posts final output when complete.
+- Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`); when progress overflows the editable message limit, older progress lines are flushed into additional `progress log (continued):` messages and the live message keeps tail updates.
+- Adapter keeps waiting for terminal run status in the background and replies with output/error when done (no timeout handoff message).
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
 - After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.
 - The `/settings` panel does not include a dedicated refresh button; reopening `/settings` (or returning from a change) re-fetches live state.
@@ -149,11 +150,12 @@ Operational note:
 - Capacity behavior: if active attempts fill broker capacity, new starts return `429 auth_login_capacity_exceeded` (no eviction of active attempts).
 - Successful credentials persist via pi `AuthStorage` to workspace `auth.json`.
 
-### Runtime controls (model/thinking/share)
+### Runtime controls (model/thinking/cancel/share)
 
 - `PiRunExecutor` is source of truth for per-thread runtime state.
 - Model updates call `AgentSession.setModel(...)` (validated via pi `ModelRegistry`, persisted via `SettingsManager`).
 - Thinking updates call `AgentSession.setThinkingLevel(...)` and return effective/clamped level + available levels.
+- Cancel operations call `AgentSession.abort()` for the current thread session without clearing persisted `thread_sessions` mapping, and return `cancelled: false` when the thread has no active/queued work.
 - Share operations call `AgentSession.exportToHtml(...)`, then run `gh gist create` (secret gist by default) and return `{ gistUrl, shareUrl }`.
 - Share-viewer URL uses `PI_SHARE_VIEWER_URL` when set to an absolute URL, else defaults to `https://pi.dev/session/`.
 - Share operations require GitHub CLI (`gh`) installed and authenticated (`gh auth login`).
