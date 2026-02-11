@@ -13,7 +13,7 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added first-class workspace package management commands: `jagc packages install|remove|update|list|config` (with `jagc package` alias), wrapping jagc's bundled pi dependency so operators can manage workspace package sources without relying on a globally installed `pi` binary.
 
 ### Changed
 
