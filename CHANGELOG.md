@@ -17,7 +17,8 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Tightened runtime harness prompt guidance for jagc self-ops: agents now start with `jagc --help`, use `jagc` as the first control surface for jagc-runtime tasks, and prefer `--json` output when available.
+- Added missing descriptions across CLI command groups so `jagc --help` and nested help screens consistently explain each command/subcommand.
 
 ### Fixed
 

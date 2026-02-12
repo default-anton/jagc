@@ -42,4 +42,5 @@
 - If behavior/contracts change, update `README.md` and `docs/architecture.md` in the same change.
 - If test feedback loops change, update `docs/testing.md` in the same change.
 - Any change that modifies runtime/packaging/CLI behavior (tests/docs-only changes excluded) must add an entry to `CHANGELOG.md` under **[Unreleased]** in the same change.
+- If the jagc CLI command surface changes (add/remove/rename commands or command groups), update the runtime CLI guidance in `defaults/extensions/20-runtime-harness-context.ts` in the same change.
 - Keep this file terse; move niche instructions to subtree `AGENTS.md` files.

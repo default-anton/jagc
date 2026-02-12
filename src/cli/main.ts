@@ -44,6 +44,7 @@ program
 
 program
   .command('health')
+  .description('check jagc API health')
   .option('--json', 'JSON output')
   .action(async (options) => {
     try {
@@ -65,6 +66,7 @@ registerPackagesCommands(program);
 
 program
   .command('message')
+  .description('enqueue a thread message and start a run')
   .argument('<text>', 'message text')
   .option('--source <source>', 'message source', 'cli')
   .option('--thread-key <threadKey>', 'message thread key', defaultThreadKey)
@@ -158,10 +160,11 @@ program
     }
   });
 
-const authCommand = program.command('auth');
+const authCommand = program.command('auth').description('manage provider authentication');
 
 authCommand
   .command('providers')
+  .description('list provider auth status and model availability')
   .option('--json', 'JSON output')
   .action(async (options) => {
     try {
@@ -186,6 +189,7 @@ authCommand
 
 authCommand
   .command('login')
+  .description('start interactive OAuth login for a provider')
   .argument('<provider>', 'OAuth provider id (for example: openai-codex)')
   .option('--owner-key <key>', 'stable owner key for resuming the same login flow across retries')
   .option('--poll-interval-ms <ms>', 'poll interval milliseconds', parsePositiveNumber, 1000)
@@ -216,6 +220,7 @@ const modelCommand = program.command('model').description('inspect and change th
 
 modelCommand
   .command('list')
+  .description('list providers and models available to jagc')
   .option('--json', 'JSON output')
   .action(async (options) => {
     try {
@@ -242,6 +247,7 @@ modelCommand
 
 modelCommand
   .command('get')
+  .description('show the current model for a thread')
   .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
   .option('--json', 'JSON output')
   .action(async (options) => {
@@ -262,6 +268,7 @@ modelCommand
 
 modelCommand
   .command('set')
+  .description('set the model for a thread')
   .argument('<providerModel>', 'model in provider/model format')
   .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
   .option('--json', 'JSON output')
@@ -289,6 +296,7 @@ const thinkingCommand = program.command('thinking').description('inspect and cha
 
 thinkingCommand
   .command('get')
+  .description('show the current thinking level for a thread')
   .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
   .option('--json', 'JSON output')
   .action(async (options) => {
@@ -312,6 +320,7 @@ thinkingCommand
 
 thinkingCommand
   .command('set')
+  .description('set the thinking level for a thread')
   .argument('<level>', `thinking level (${thinkingLevels.join(', ')})`)
   .option('--thread-key <threadKey>', 'thread key', defaultThreadKey)
   .option('--json', 'JSON output')
@@ -340,10 +349,11 @@ thinkingCommand
     }
   });
 
-const runCommand = program.command('run');
+const runCommand = program.command('run').description('inspect and control run lifecycle');
 
 runCommand
   .command('wait')
+  .description('wait for a run to reach a terminal status')
   .argument('<runId>', 'run ID')
   .option('--timeout <seconds>', 'timeout in seconds', parsePositiveNumber, 60)
   .option('--interval-ms <ms>', 'poll interval milliseconds', parsePositiveNumber, 500)

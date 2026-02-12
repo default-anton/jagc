@@ -56,6 +56,7 @@ export function registerPackagesCommands(program: Command, dependencies: Package
 
   packagesCommand
     .command('install')
+    .description('install a pi package source into the workspace')
     .argument('<source>', 'package source (npm:, git:, URL, or local path)')
     .option('-l, --local', 'install project-locally (.pi/settings.json)')
     .option('--workspace-dir <path>', 'workspace directory', defaultWorkspaceDir)
@@ -76,6 +77,7 @@ export function registerPackagesCommands(program: Command, dependencies: Package
 
   packagesCommand
     .command('remove')
+    .description('remove a pi package source from the workspace')
     .argument('<source>', 'package source to remove')
     .option('-l, --local', 'remove project-local source (.pi/settings.json)')
     .option('--workspace-dir <path>', 'workspace directory', defaultWorkspaceDir)
@@ -96,6 +98,7 @@ export function registerPackagesCommands(program: Command, dependencies: Package
 
   packagesCommand
     .command('update')
+    .description('update one package source or all sources in the workspace')
     .argument('[source]', 'specific package source to update')
     .option('--workspace-dir <path>', 'workspace directory', defaultWorkspaceDir)
     .action(async (source: string | undefined, options: UpdateCommandOptions) => {
