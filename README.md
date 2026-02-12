@@ -60,8 +60,16 @@ jagc status
 jagc health --json
 ```
 
-### 3) Open Telegram and validate the loop
+### 3) Open Telegram and authorize the first user
 
+- Send any message to your bot.
+- On first contact, the bot replies with an exact command like:
+
+  ```bash
+  jagc telegram allow --user-id <id>
+  ```
+
+- Run that command in terminal (it updates `~/.jagc/service.env` and restarts the service).
 - Send `/settings` (runtime state should render)
 - Send a normal message (assistant should run)
 - Send `/cancel` during a long run (stops run, keeps session)
@@ -111,6 +119,8 @@ jagc model list --json
 jagc model set <provider/model> --thread-key cli:default --json
 jagc thinking get --thread-key cli:default --json
 jagc auth providers --json
+jagc telegram list --json
+jagc telegram allow --user-id <telegram_user_id>
 jagc share --thread-key cli:default --json
 ```
 
@@ -160,6 +170,7 @@ Most users only need to set Telegram token once at install.
 | Variable                  | Default                           | Why you might set it                                      |
 | ---                       | ---                               | ---                                                       |
 | `JAGC_TELEGRAM_BOT_TOKEN` | unset                             | Enable Telegram (primary UX)                              |
+| `JAGC_TELEGRAM_ALLOWED_USER_IDS` | unset (deny all)           | Comma-separated Telegram user ids allowed to chat (`123,456`); use `jagc telegram allow --user-id <id>` |
 | `JAGC_WORKSPACE_DIR`      | `~/.jagc`                         | Move workspace/data location                              |
 | `JAGC_DATABASE_PATH`      | `$JAGC_WORKSPACE_DIR/jagc.sqlite` | Custom DB path                                            |
 | `JAGC_HOST`               | `127.0.0.1`                       | Bind a different host                                     |
@@ -188,6 +199,7 @@ If you rerun `jagc install` without `--telegram-bot-token`, existing token in `s
 
 - Workspace and installed packages are **trusted code**.
 - Local CLI usage is unauthenticated.
+- Telegram access is deny-by-default and controlled by `JAGC_TELEGRAM_ALLOWED_USER_IDS` (managed via `jagc telegram allow ...`).
 - Webhook ingress (when used) requires bearer token auth.
 - Run jagc as a normal (non-root) user.
 

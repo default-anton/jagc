@@ -26,6 +26,7 @@ import { exitWithError, parsePositiveNumber, printJson } from './common.js';
 import { registerDefaultsCommands } from './defaults-commands.js';
 import { registerPackagesCommands } from './packages-commands.js';
 import { registerServiceCommands } from './service-commands.js';
+import { registerTelegramCommands } from './telegram-commands.js';
 
 const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf-8')) as {
   version: string;
@@ -63,6 +64,7 @@ program
 registerServiceCommands(program);
 registerDefaultsCommands(program);
 registerPackagesCommands(program);
+registerTelegramCommands(program);
 
 program
   .command('message')

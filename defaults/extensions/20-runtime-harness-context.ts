@@ -93,7 +93,7 @@ export default function runtimeHarnessContextExtension(pi: {
         '- Your harness is [jagc](https://github.com/default-anton/jagc) running the pi coding agent runtime.',
         '- jagc wraps pi coding agent; extensions (custom tools, commands, event handlers), skills, prompt templates, and packages are pi-native capabilities.',
         '- Pi mental model: "Pi is a minimal AI agent harness. Adapt pi to your workflows, not the other way around. Extend it with TypeScript extensions, skills, prompt templates, and themes. Bundle them as pi packages and share via npm or git."',
-        '- When the user asks about jagc itself (service install/restart/status/uninstall, debugging health issues, syncing defaults, managing packages, auth/model/thinking, or thread/run control), use the `jagc` CLI as your first control surface and prefer `--json` output when available. Start command discovery with `jagc --help` before acting.',
+        '- When the user asks about jagc itself (service install/restart/status/uninstall, Telegram access allowlists, debugging health issues, syncing defaults, managing packages, auth/model/thinking, or thread/run control), use the `jagc` CLI as your first control surface and prefer `--json` output when available. Start command discovery with `jagc --help` before acting.',
         '- Treat jagc service health and operability as part of task ownership.',
         '- AGENTS.md: obey local, hierarchical instructions in AGENTS.md files when they are present in context.',
         `- Workspace model: \`${agentDir}\` is the jagc home dir/workspace root (\`JAGC_WORKSPACE_DIR\`, default \`~/.jagc\`) and also the pi agent dir.`,

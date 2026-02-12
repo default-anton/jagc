@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { type RunnerHandle, run } from '@grammyjs/runner';
@@ -22,6 +24,7 @@ import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
 const defaultPollIntervalMs = 500;
 const defaultPollRequestTimeoutSeconds = 30;
 const telegramMessageLimit = 3500;
+const defaultWorkspaceDir = join(homedir(), '.jagc');
 
 interface TelegramPollingAdapterOptions {
   botToken: string;
@@ -40,6 +43,8 @@ interface TelegramPollingAdapterOptions {
     cancelOAuthLogin(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
   threadControlService?: ThreadControlService;
+  allowedTelegramUserIds?: string[];
+  workspaceDir?: string;
   pollIntervalMs?: number;
   telegramApiRoot?: string;
   pollRequestTimeoutSeconds?: number;
@@ -59,6 +64,8 @@ export class TelegramPollingAdapter {
   private readonly pollIntervalMs: number;
   private readonly pollRequestTimeoutSeconds: number;
   private readonly logger: Logger;
+  private readonly allowedTelegramUserIds: Set<string>;
+  private readonly workspaceDir: string | null;
   private readonly backgroundRunTasks = new Set<Promise<void>>();
   private readonly backgroundRunAbortControllers = new Set<AbortController>();
   private readonly backgroundRunAbortControllersByThread = new Map<string, Set<AbortController>>();
@@ -84,6 +91,8 @@ export class TelegramPollingAdapter {
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
     this.pollRequestTimeoutSeconds = options.pollRequestTimeoutSeconds ?? defaultPollRequestTimeoutSeconds;
     this.logger = options.logger ?? noopLogger;
+    this.allowedTelegramUserIds = new Set((options.allowedTelegramUserIds ?? []).map(canonicalizeTelegramUserId));
+    this.workspaceDir = options.workspaceDir ?? null;
 
     this.bot.catch((error) => {
       this.logger.error({
@@ -156,6 +165,11 @@ export class TelegramPollingAdapter {
 
     const text = ctx.message?.text?.trim();
     if (!text) {
+      return;
+    }
+
+    if (!this.isTelegramUserAuthorized(ctx.from?.id)) {
+      await this.handleUnauthorizedTelegramAccess(ctx);
       return;
     }
 
@@ -235,6 +249,16 @@ export class TelegramPollingAdapter {
       return;
     }
 
+    if (!this.isTelegramUserAuthorized(ctx.from?.id)) {
+      await this.handleUnauthorizedTelegramAccess(ctx);
+      try {
+        await ctx.answerCallbackQuery({ text: 'Not authorized yet. Ask operator to allow your user id.' });
+      } catch {
+        // no-op: fallback chat reply from handleUnauthorizedTelegramAccess is sufficient
+      }
+      return;
+    }
+
     const data = ctx.callbackQuery?.data;
     if (!data) {
       await ctx.answerCallbackQuery();
@@ -304,6 +328,56 @@ export class TelegramPollingAdapter {
 
       await ctx.reply(`❌ ${message}`);
     }
+  }
+
+  private isTelegramUserAuthorized(userId: number | undefined): boolean {
+    if (userId === undefined) {
+      return false;
+    }
+
+    return this.allowedTelegramUserIds.has(String(userId));
+  }
+
+  private async handleUnauthorizedTelegramAccess(ctx: Context): Promise<void> {
+    const userId = ctx.from?.id;
+    const allowCommand = this.buildTelegramAllowCommand(userId);
+
+    this.logger.warn({
+      event: 'telegram_unauthorized_access',
+      chat_id: ctx.chat?.id ?? null,
+      user_id: userId ?? null,
+      username: ctx.from?.username ?? null,
+      first_name: ctx.from?.first_name ?? null,
+      last_name: ctx.from?.last_name ?? null,
+      suggested_allow_command: allowCommand,
+    });
+
+    if (!allowCommand) {
+      await ctx.reply('🔒 This bot is private. Ask the operator to allow your Telegram user id.');
+      return;
+    }
+
+    await ctx.reply(
+      [
+        '🔒 This bot is private. You are not authorized yet.',
+        'Operator: run this exact command on the host to allow this user:',
+        allowCommand,
+        'Then send /start again.',
+      ].join('\n'),
+    );
+  }
+
+  private buildTelegramAllowCommand(userId: number | undefined): string | null {
+    if (userId === undefined) {
+      return null;
+    }
+
+    const commandParts = ['jagc', 'telegram', 'allow', '--user-id', String(userId)];
+    if (this.workspaceDir && this.workspaceDir !== defaultWorkspaceDir) {
+      commandParts.push('--workspace-dir', this.workspaceDir);
+    }
+
+    return commandParts.map((part) => formatShellArgument(part)).join(' ');
   }
 
   private async handleAssistantMessage(ctx: Context, text: string, deliveryMode: 'steer' | 'followUp'): Promise<void> {
@@ -593,6 +667,23 @@ function telegramUserKey(userId: number | undefined): string | undefined {
   }
 
   return `telegram:user:${userId}`;
+}
+
+function formatShellArgument(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+,=-]+$/u.test(value)) {
+    return value;
+  }
+
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function canonicalizeTelegramUserId(value: string): string {
+  const trimmed = value.trim();
+  if (!/^\d+$/u.test(trimmed)) {
+    throw new Error(`allowedTelegramUserIds contains invalid Telegram user id '${value}'.`);
+  }
+
+  return BigInt(trimmed).toString();
 }
 
 function isAbortError(error: unknown): boolean {

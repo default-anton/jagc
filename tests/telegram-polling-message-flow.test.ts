@@ -45,6 +45,78 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
+  test('accepts authorized users when allowlist entry has leading zeroes', async () => {
+    const runService = new StubRunService('run-leading-zero-allow', [
+      runRecord({
+        runId: 'run-leading-zero-allow',
+        status: 'succeeded',
+        output: { text: 'allowed through' },
+      }),
+    ]);
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        allowedTelegramUserIds: ['000202'],
+      },
+      async ({ clone }) => {
+        const updateId = clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'hello leading zero allowlist',
+        });
+
+        const reply = await clone.waitForBotCall('sendMessage', (call) => call.payload.text === 'allowed through');
+        expect(reply.payload.text).toBe('allowed through');
+        expect(runService.ingests).toEqual([
+          {
+            source: 'telegram',
+            threadKey: 'telegram:chat:101',
+            userKey: 'telegram:user:202',
+            text: 'hello leading zero allowlist',
+            deliveryMode: 'followUp',
+            idempotencyKey: `telegram:update:${updateId}`,
+          },
+        ]);
+      },
+    );
+  });
+
+  test('blocks unauthorized users and returns exact allow command', async () => {
+    const runService = new StubRunService('run-unauthorized', [
+      runRecord({
+        runId: 'run-unauthorized',
+        status: 'succeeded',
+        output: { text: 'should not run' },
+      }),
+    ]);
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        allowedTelegramUserIds: [],
+        workspaceDir: '/tmp/jagc-workspace',
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'hello there',
+        });
+
+        const denial = await clone.waitForBotCall(
+          'sendMessage',
+          (call) =>
+            typeof call.payload.text === 'string' &&
+            call.payload.text.includes('jagc telegram allow --user-id 202 --workspace-dir /tmp/jagc-workspace'),
+        );
+
+        expect(String(denial.payload.text)).toContain('This bot is private');
+        expect(runService.ingests).toEqual([]);
+      },
+    );
+  });
+
   test('shows progress updates and typing indicator during long-running runs', async () => {
     const runningState = runRecord({
       runId: 'run-progress',

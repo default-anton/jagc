@@ -91,6 +91,8 @@ async function main(): Promise<void> {
       runService,
       authService,
       threadControlService,
+      allowedTelegramUserIds: config.JAGC_TELEGRAM_ALLOWED_USER_IDS,
+      workspaceDir: config.JAGC_WORKSPACE_DIR,
       logger: rootLogger.child({ component: 'telegram_polling' }),
     });
   }

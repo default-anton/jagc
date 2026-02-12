@@ -105,6 +105,8 @@ export async function withTelegramAdapter(
     runService?: RunService;
     authService?: TelegramAdapterAuthService;
     threadControlService?: ThreadControlService;
+    allowedTelegramUserIds?: string[];
+    workspaceDir?: string;
     pollIntervalMs?: number;
     pollRequestTimeoutSeconds?: number;
   },
@@ -121,6 +123,8 @@ export async function withTelegramAdapter(
       runService: options.runService ?? createRunServiceStub(),
       authService: options.authService,
       threadControlService: options.threadControlService,
+      allowedTelegramUserIds: options.allowedTelegramUserIds ?? [String(telegramTestUserId)],
+      workspaceDir: options.workspaceDir,
       telegramApiRoot: clone.apiRoot ?? undefined,
       pollRequestTimeoutSeconds: options.pollRequestTimeoutSeconds ?? 1,
       pollIntervalMs: options.pollIntervalMs ?? 10,

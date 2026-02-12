@@ -175,6 +175,7 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
     adapter = new TelegramPollingAdapter({
       botToken: telegramTestBotToken,
       runService,
+      allowedTelegramUserIds: [String(telegramTestUserId)],
       telegramApiRoot: clone.apiRoot ?? undefined,
       pollRequestTimeoutSeconds: 1,
       pollIntervalMs: 10,

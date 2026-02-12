@@ -19,7 +19,7 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc cancel`, `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc model list|get|set`, `jagc thinking get|set`
+- `jagc cancel`, `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc telegram allow|list`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
 ### Runtime/adapters
@@ -126,6 +126,7 @@ Operational note:
 - Ingest source: grammY long polling (personal chats).
 - Thread mapping: `thread_key = telegram:chat:<chat_id>`.
 - User mapping: `user_key = telegram:user:<from.id>`.
+- Access gate: Telegram message/callback handling is allowlisted by `JAGC_TELEGRAM_ALLOWED_USER_IDS` (`from.id` values). Empty allowlist means deny all. Unauthorized users receive an in-chat command prompt (`jagc telegram allow --user-id <id>`) and no run is ingested.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
 - Telegram `/cancel`, API `POST /v1/threads/:thread_key/cancel`, and CLI `jagc cancel` abort active work for the thread without resetting session context.
 - After a successful Telegram `/cancel`, the adapter suppresses the in-chat terminal `❌ run ... failed: This operation was aborted` reply for that cancelled run (the explicit cancel confirmation message is the terminal user-facing signal).
