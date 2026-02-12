@@ -1,16 +1,10 @@
 # jagc
 
-**jagc** ("just a good clanker") is a self-hosted AI assistant you run on your own machine.
+**jagc** ("just a good clanker") is a self-hosted AI assistant.
 
-**Primary UX is Telegram.** The CLI/API are there for setup, control, and debugging.
+**Primary UX is Telegram.** The CLI/API are the control plane: setup, control, debugging, and self-maintenance.
 
-It gives you:
-- Telegram chat interface for day-to-day use
-- local API + CLI (`jagc ...`) for ops/runtime control
-- durable run tracking (SQLite)
-- pi-coding-agent runtime features (sessions, skills, prompts, extensions)
-
-> **Status: pre-alpha.** It works today, but expect breaking changes.
+> **Status: pre-alpha.** Useful today, but expect breaking changes.
 
 ## Who this is for
 
@@ -18,23 +12,39 @@ It gives you:
 - You want a self-hosted assistant without building infra from scratch.
 - You expect Telegram-first interaction, not a web UI.
 
+## What you get
+
+- Telegram chat interface for day-to-day use
+- Local server + CLI (`jagc ...`) as a control plane for operators and agent self-maintenance
+- Durable run/thread state in SQLite
+- pi-coding-agent runtime features (sessions, skills, prompts, extensions)
+
+## Mental model (2 minutes)
+
+- A **thread** is a conversation lane (`thread_key`).
+- A **run** is one assistant execution (`run_id`).
+- Same thread = ordered turns.
+- Different threads can run concurrently.
+- Normal messages use `followUp` (default). Interrupting turns are explicit `steer`.
+
+Default workspace: `~/.jagc` (auto-initialized as a local git repo).
+
 ## Quick start (Telegram-first, macOS)
 
-> Supported service-management path today: macOS (`jagc install`). Linux/Windows service commands are not implemented yet.
+> Supported service-management path today: **macOS only** (`jagc install`). Linux/Windows service lifecycle commands are not implemented yet.
 
 ### Prerequisites
+
 - Node.js `>=20.19.0 <21` or `>=22.9.0`
 - npm
 - Telegram account
-- A bot token from `@BotFather`
+- Bot token from `@BotFather`
 
 ### BotFather in 3 steps
 
 1. In Telegram, open `@BotFather` and send `/newbot`.
-2. Pick a display name + unique bot username (must end with `bot`, e.g. `anton_helper_bot`).
-3. Copy the HTTP API token from BotFather (`123456:ABC...`) and keep it secret.
-
-You can always fetch it again later with `/token` in `@BotFather`.
+2. Pick a display name and unique bot username (must end with `bot`, for example `anton_helper_bot`).
+3. Copy the HTTP API token (`123456:ABC...`) and keep it secret.
 
 ### 1) Install jagc
 
@@ -42,7 +52,7 @@ You can always fetch it again later with `/token` in `@BotFather`.
 npm install -g jagc@latest
 ```
 
-### 2) Install/start service with Telegram enabled
+### 2) Install/start the background service
 
 ```bash
 jagc install --telegram-bot-token <YOUR_BOT_TOKEN>
@@ -50,12 +60,11 @@ jagc status
 jagc health --json
 ```
 
-### 3) Chat with your bot in Telegram
+### 3) Open Telegram and validate the loop
 
-- Open your bot chat
-- Send `/settings` to check runtime state
-- Send a normal message to run the assistant
-- If a run is taking too long, send `/cancel` to stop it without resetting session context (idle chats return a no-op "No active run" reply, and successful cancels suppress follow-up aborted-run error replies)
+- Send `/settings` (runtime state should render)
+- Send a normal message (assistant should run)
+- Send `/cancel` during a long run (stops run, keeps session)
 
 ### 4) If something is off
 
@@ -64,101 +73,122 @@ jagc doctor
 jagc status
 ```
 
-### 5) Sync bundled defaults after upgrading jagc
+### 5) After upgrading jagc
 
 ```bash
 jagc defaults sync
-```
-
-This updates bundled `skills/**` and `extensions/**` in your workspace to the latest shipped defaults without deleting your custom files.
-
-### 6) Update workspace pi packages (bundled dependency)
-
-```bash
-jagc packages list
 jagc packages update
 ```
 
-These commands wrap the pi package manager from jagc's bundled dependency and scope operations to your jagc workspace (`JAGC_WORKSPACE_DIR` / `~/.jagc` by default).
+- `defaults sync` refreshes bundled `skills/**` and `extensions/**` in your workspace without deleting your custom files.
+- `packages update` updates workspace pi packages using jagc's bundled pi dependency.
 
-## CLI/API are still useful (but secondary)
+## Day-to-day usage
 
-Use CLI when you need explicit control:
+### Telegram commands (primary)
+
+- `/settings` — runtime/settings panel
+- `/cancel` — stop active run in this chat (session preserved)
+- `/new` — reset this chat's session
+- `/share` — export session HTML + upload secret gist
+- `/model` — model picker
+- `/thinking` — thinking level picker
+- `/auth` — provider auth flow
+- `/steer <message>` — explicit interrupting turn
+- Unknown slash commands are forwarded to the assistant as normal messages
+
+### CLI control plane (agent-facing first)
+
+The CLI is intentionally built so **jagc can inspect, fix, and adapt itself** (with you in the loop). It is the surface for run lifecycle debugging, thread/session repair (`cancel`/`new`), runtime tuning (`model`/`thinking`), auth bootstrap, defaults/package updates, and service diagnostics.
 
 ```bash
 jagc --version
 jagc message "ping" --json
 jagc run wait <run_id> --json
 jagc cancel --thread-key cli:default --json
+jagc new --thread-key cli:default --json
 jagc model list --json
 jagc model set <provider/model> --thread-key cli:default --json
-jagc packages list
-jagc packages update
+jagc thinking get --thread-key cli:default --json
+jagc auth providers --json
 jagc share --thread-key cli:default --json
 ```
 
-`jagc share` / Telegram `/share` require GitHub CLI (`gh`) installed and authenticated (`gh auth login`) and upload session HTML as a secret gist.
+`jagc share` / Telegram `/share` require GitHub CLI (`gh`) installed and authenticated (`gh auth login`).
 
-## What works in v0
+## Current capabilities
 
-- Local server: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`, `POST /v1/threads/:thread_key/cancel`, `POST /v1/threads/:thread_key/share`
-- CLI: `-v|--version`, `health`, `message`, `run wait`, `cancel`, `new`, `share`, `defaults sync`, `packages install|remove|update|list|config`, `model list|get|set`, `thinking get|set`, `auth providers|login`
-- Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`; unknown slash commands (for example `/handoff`) are forwarded to the assistant as normal messages
-- Telegram progress stream shows tool/thinking snippets; tool calls start as `> tool ...` and are edited in place to append `[✓] done (0.4s)` / `[✗] failed (0.4s)` style suffixes; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive; when progress exceeds one Telegram message, older lines are flushed into additional `progress log (continued):` messages so visibility is preserved for long runs
-- Runtime semantics: same-thread `followUp` (default) and explicit `steer`
-- Thread→session persistence is reconciled after each run, so extension-driven session switches (for example `/handoff` calling `ctx.newSession(...)`) survive process restarts
-- System-prompt context is extension-driven: runtime/harness context (jagc+pi), global `AGENTS.md`, available skills metadata, local pi docs/examples paths, and Codex harness notes are injected by default workspace extensions (SDK built-in AGENTS/skills auto-loading is disabled)
-- jagc wraps pi coding agent; extension surfaces (custom tools, commands, event handlers) and packages are pi-native capabilities
-- In-process scheduling + SQLite-backed recovery after restart
+### Runtime + durability
 
-## Mental model (important)
+- In-process scheduling with SQLite-backed recovery after restart
+- Thread→session persistence (`thread_key -> session`) survives process restarts
+- Same-thread turn ordering enforced by per-thread pi session controller
+- Structured run payload contract (`output` is structured; not plain-text-only)
 
-- A **thread** is a conversation lane (`thread_key`).
-- A **run** is one assistant execution attempt (`run_id`).
-- Same thread = ordered turns; different threads can run concurrently.
-- Workspace defaults to `~/.jagc` and is auto-initialized as a local git repository.
+### API
 
-## Minimal config
+- Health/lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
+- Runtime controls: cancel/new/share/model/thinking endpoints
+- OAuth broker endpoints for provider login flows
 
-Most users only need to provide the Telegram token once at install time.
+### CLI
 
-| Variable | Default | Why you might set it |
-| --- | --- | --- |
-| `JAGC_TELEGRAM_BOT_TOKEN` | unset | Enable Telegram (primary UX) |
-| `JAGC_WORKSPACE_DIR` | `~/.jagc` | Move workspace/data location |
-| `JAGC_DATABASE_PATH` | `$JAGC_WORKSPACE_DIR/jagc.sqlite` | Custom DB path |
-| `JAGC_HOST` | `127.0.0.1` | Bind a different host |
-| `JAGC_PORT` | `31415` | Bind a different port |
-| `JAGC_API_URL` | `http://127.0.0.1:31415` | Point CLI at another server |
-| `JAGC_RUNNER` | `pi` | Use `echo` for deterministic smoke/testing |
-| `PI_SHARE_VIEWER_URL` | `https://pi.dev/session/` | Override `/share` viewer base URL (must be absolute URL) |
+- Message/run lifecycle: `message`, `run wait`, `cancel`, `new`, `share`
+- Runtime controls: `model list|get|set`, `thinking get|set`
+- Auth: `auth providers|login`
+- Workspace/runtime ops: `defaults sync`, `packages install|remove|update|list|config`
+- Service ops (macOS): `install|status|restart|uninstall|doctor`
+- Designed as an agent/script-friendly control plane for self-debugging and adaptation
 
-### Service environment (macOS launchd)
+### Telegram adapter
 
-`jagc install` creates two workspace env files for launchd:
+- Long polling (personal chats)
+- Commands: `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
+- Progress stream with thinking/tool snippets and tool completion status updates
+- Long progress logs split into continuation messages to preserve visibility
 
-- `~/.jagc/service.env.snapshot` — managed by jagc (captured from your login shell; includes PATH/tooling env for brew/mise/uv/asdf/etc.)
-- `~/.jagc/service.env` — user overrides (never overwritten by `jagc install` once created; `jagc install --telegram-bot-token ...` upserts `JAGC_TELEGRAM_BOT_TOKEN` here)
+### Known limitations
 
-launchd points Node at both files on startup (`snapshot` first, then `service.env`), and jagc reapplies them in that same order so values in `service.env` win (including `PATH`, which launchd otherwise hardcodes).
+- Service management is macOS launchd-first (Linux/Windows not implemented yet)
+- Telegram webhook mode is intentionally unsupported in core (polling only)
+- Multi-process global per-thread locking is deferred post-v0
 
-If you rerun `jagc install` without `--telegram-bot-token`, jagc keeps any existing `JAGC_TELEGRAM_BOT_TOKEN` already in `service.env`.
+## Minimal configuration
 
-This path depends on Node's `--env-file-if-exists` flag, so use Node `>=20.19.0 <21` or `>=22.9.0`.
+Most users only need to set Telegram token once at install.
 
-After editing either file, run:
+| Variable                  | Default                           | Why you might set it                                      |
+| ---                       | ---                               | ---                                                       |
+| `JAGC_TELEGRAM_BOT_TOKEN` | unset                             | Enable Telegram (primary UX)                              |
+| `JAGC_WORKSPACE_DIR`      | `~/.jagc`                         | Move workspace/data location                              |
+| `JAGC_DATABASE_PATH`      | `$JAGC_WORKSPACE_DIR/jagc.sqlite` | Custom DB path                                            |
+| `JAGC_HOST`               | `127.0.0.1`                       | Bind a different host                                     |
+| `JAGC_PORT`               | `31415`                           | Bind a different port                                     |
+| `JAGC_API_URL`            | `http://127.0.0.1:31415`          | Point CLI at another server                               |
+| `JAGC_RUNNER`             | `pi`                              | Use `echo` for deterministic smoke/testing                |
+| `PI_SHARE_VIEWER_URL`     | `https://pi.dev/session/`         | Override `/share` viewer base URL (absolute URL required) |
+
+### Service environment files (macOS launchd)
+
+`jagc install` manages two workspace env files:
+
+- `~/.jagc/service.env.snapshot` — managed by jagc (captured from your login shell)
+- `~/.jagc/service.env` — user overrides (not overwritten after first creation)
+
+Launchd loads `snapshot` first, then `service.env` (so user overrides win).
+After editing either file:
 
 ```bash
 jagc restart
 ```
 
-Auth provider setup details: [`docs/auth.md`](docs/auth.md)
+If you rerun `jagc install` without `--telegram-bot-token`, existing token in `service.env` is preserved.
 
 ## Security baseline
 
-- Your workspace and installed packages are **trusted code**.
-- Local CLI usage is unauthenticated in v0.
-- Webhook ingress requires bearer token auth.
+- Workspace and installed packages are **trusted code**.
+- Local CLI usage is unauthenticated.
+- Webhook ingress (when used) requires bearer token auth.
 - Run jagc as a normal (non-root) user.
 
 ## Update / remove
@@ -174,9 +204,17 @@ jagc uninstall
 jagc uninstall --purge-data
 ```
 
+## Operator/dev feedback loops
+
+- Fast end-to-end smoke (echo runner): `pnpm smoke`
+- Smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
+- Full suite (includes Telegram behavioral clone tests): `pnpm test`
+- Local release gate: `pnpm release:gate`
+
 ## Docs map
 
 - Architecture (implemented behavior): [`docs/architecture.md`](docs/architecture.md)
+- Auth details: [`docs/auth.md`](docs/auth.md)
 - Testing loops: [`docs/testing.md`](docs/testing.md)
 - Release process: [`docs/release.md`](docs/release.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
