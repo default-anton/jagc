@@ -13,6 +13,20 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+## [0.3.3] - 2026-02-12
+
+### Added
+
 - Added Telegram access control allowlist via `JAGC_TELEGRAM_ALLOWED_USER_IDS` (deny-by-default when empty), in-chat first-contact authorization guidance, canonicalized numeric user-id handling, and new CLI controls `jagc telegram allow --user-id <id>` / `jagc telegram list` for operator-managed authorization.
 
 ### Changed
