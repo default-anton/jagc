@@ -210,9 +210,15 @@ export class ThreadRunController {
     }
 
     if (assistantMessageEvent.type === 'thinking_delta') {
+      const contentIndex =
+        typeof assistantMessageEvent.contentIndex === 'number' && Number.isFinite(assistantMessageEvent.contentIndex)
+          ? assistantMessageEvent.contentIndex
+          : undefined;
+
       this.emitForActiveRun({
         type: 'assistant_thinking_delta',
         delta: assistantMessageEvent.delta,
+        contentIndex,
       });
     }
   }
@@ -336,6 +342,7 @@ export class ThreadRunController {
       | {
           type: 'assistant_thinking_delta';
           delta: string;
+          contentIndex?: number;
         }
       | {
           type: 'tool_execution_start';
@@ -393,6 +400,7 @@ export class ThreadRunController {
       | {
           type: 'assistant_thinking_delta';
           delta: string;
+          contentIndex?: number;
         }
       | {
           type: 'tool_execution_start';

@@ -471,6 +471,125 @@ describe('TelegramPollingAdapter message flow integration', () => {
     );
   }, 14_000);
 
+  test('keeps separate thinking snippets across tool events even when content index stays the same', async () => {
+    const runningState = runRecord({
+      runId: 'run-thinking-content-blocks',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-thinking-content-blocks',
+      status: 'succeeded',
+      output: { text: 'Thinking content blocks done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-thinking-content-blocks',
+      [
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        runningState,
+        completedState,
+      ],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-thinking-content-blocks', 'started')],
+          2: [
+            progressEvent('run-thinking-content-blocks', 'assistant_thinking_delta', {
+              delta: '**Planning recommendations for AGENTS.md**',
+              contentIndex: 0,
+            }),
+          ],
+          3: [
+            progressEvent('run-thinking-content-blocks', 'tool_execution_start', {
+              toolCallId: 'tool-1',
+              toolName: 'read',
+              args: { path: '/Users/akuzmenko/.jagc/skills/agents-md/SKILL.md' },
+            }),
+          ],
+          4: [
+            progressEvent('run-thinking-content-blocks', 'tool_execution_end', {
+              toolCallId: 'tool-1',
+              toolName: 'read',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+          5: [
+            progressEvent('run-thinking-content-blocks', 'assistant_thinking_delta', {
+              delta: '**Planning to read agents file**',
+              contentIndex: 0,
+            }),
+          ],
+          6: [
+            progressEvent('run-thinking-content-blocks', 'tool_execution_start', {
+              toolCallId: 'tool-2',
+              toolName: 'read',
+              args: { path: '/Users/akuzmenko/.jagc/AGENTS.md' },
+            }),
+          ],
+          7: [
+            progressEvent('run-thinking-content-blocks', 'tool_execution_end', {
+              toolCallId: 'tool-2',
+              toolName: 'read',
+              result: { ok: true },
+              isError: false,
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        pollIntervalMs: 200,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'show thinking content blocks',
+        });
+
+        const finalMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) => call.payload.text === 'Thinking content blocks done',
+          8_000,
+        );
+        expect(finalMessage.payload.text).toBe('Thinking content blocks done');
+
+        const progressEdit = [...clone.getBotCalls()]
+          .reverse()
+          .find(
+            (call) =>
+              call.method === 'editMessageText' &&
+              typeof call.payload.text === 'string' &&
+              call.payload.text.includes('~ **Planning to read agents file**') &&
+              call.payload.text.includes('> read path=/Users/akuzmenko/.jagc/AGENTS.md [✓] done ('),
+          );
+
+        expect(progressEdit).toBeDefined();
+
+        const progressText = String(progressEdit?.payload.text ?? '');
+        expect(progressText).toContain('~ **Planning recommendations for AGENTS.md**');
+        expect(progressText).toContain('~ **Planning to read agents file**');
+        expect(progressText).not.toContain(
+          '~ **Planning recommendations for AGENTS.md****Planning to read agents file**',
+        );
+      },
+    );
+  }, 14_000);
+
   test('tool progress labels keep only useful argument snippets', async () => {
     const runningState = runRecord({
       runId: 'run-tool-snippets',
@@ -1310,6 +1429,7 @@ function progressEvent(
         ...base,
         type,
         delta: String(extra.delta ?? ''),
+        ...(typeof extra.contentIndex === 'number' ? { contentIndex: extra.contentIndex } : {}),
       };
     case 'tool_execution_start':
       return {

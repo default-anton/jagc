@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { TelegramRunProgressReporter } from '../src/adapters/telegram-progress.js';
 import { noopLogger } from '../src/shared/logger.js';
+import type { RunProgressEvent } from '../src/shared/run-progress.js';
 
 describe('TelegramRunProgressReporter archive flushing', () => {
   test('retains only unsent archive lines after a mid-flush send failure', async () => {
@@ -111,6 +112,94 @@ describe('TelegramRunProgressReporter archive flushing', () => {
   });
 });
 
+describe('TelegramRunProgressReporter thinking preview formatting', () => {
+  test('renders separate thinking lines when content blocks change', () => {
+    const reporter = createThinkingReporter();
+    const state = reporter as unknown as {
+      eventLogLines: string[];
+      flushThinkingPreviewToLog: (now?: number) => boolean;
+    };
+
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Confirming commit safety and reading skill**',
+        contentIndex: 0,
+      }),
+    );
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Preparing commit inspection**',
+        contentIndex: 1,
+      }),
+    );
+
+    state.flushThinkingPreviewToLog(Date.now());
+
+    expect(state.eventLogLines).toEqual([
+      '~ **Confirming commit safety and reading skill**',
+      '~ **Preparing commit inspection**',
+    ]);
+  });
+
+  test('starts a new thinking line after non-thinking events even when content index stays the same', () => {
+    const reporter = createThinkingReporter();
+    const state = reporter as unknown as {
+      eventLogLines: string[];
+      flushThinkingPreviewToLog: (now?: number) => boolean;
+    };
+
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Planning recommendations for AGENTS.md**',
+        contentIndex: 0,
+      }),
+    );
+    reporter.onProgress(
+      progressEvent('assistant_text_delta', {
+        delta: 'tool output streamed elsewhere',
+      }),
+    );
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Planning to read agents file**',
+        contentIndex: 0,
+      }),
+    );
+
+    state.flushThinkingPreviewToLog(Date.now());
+
+    expect(state.eventLogLines).toEqual([
+      '~ **Planning recommendations for AGENTS.md**',
+      '~ **Planning to read agents file**',
+    ]);
+  });
+
+  test('updates the latest thinking line in place for the same content block', () => {
+    const reporter = createThinkingReporter();
+    const state = reporter as unknown as {
+      eventLogLines: string[];
+      flushThinkingPreviewToLog: (now?: number) => boolean;
+    };
+
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Confirming commit safety',
+        contentIndex: 0,
+      }),
+    );
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: ' and reading skill**',
+        contentIndex: 0,
+      }),
+    );
+
+    state.flushThinkingPreviewToLog(Date.now());
+
+    expect(state.eventLogLines).toEqual(['~ **Confirming commit safety and reading skill**']);
+  });
+});
+
 function archiveChunkLines(chunkText: string): string[] {
   const lines = chunkText.split('\n');
   if (lines.length <= 1) {
@@ -118,4 +207,51 @@ function archiveChunkLines(chunkText: string): string[] {
   }
 
   return lines.slice(1);
+}
+
+function createThinkingReporter(): TelegramRunProgressReporter {
+  const bot = {
+    api: {
+      sendMessage: vi.fn(async () => ({ message_id: 1 })),
+      editMessageText: vi.fn(async () => ({ message_id: 1 })),
+      sendChatAction: vi.fn(),
+      deleteMessage: vi.fn(),
+    },
+  } as unknown as Bot;
+
+  return new TelegramRunProgressReporter({
+    bot,
+    chatId: 101,
+    runId: 'run-thinking-format',
+    logger: noopLogger,
+    minEditIntervalMs: 0,
+  });
+}
+
+function progressEvent(
+  type: 'assistant_thinking_delta' | 'assistant_text_delta',
+  extra: { delta: string; contentIndex?: number },
+): RunProgressEvent {
+  const base = {
+    runId: 'run-thinking-format',
+    threadKey: 'telegram:chat:101',
+    source: 'telegram',
+    deliveryMode: 'followUp' as const,
+    timestamp: new Date(0).toISOString(),
+  };
+
+  if (type === 'assistant_text_delta') {
+    return {
+      ...base,
+      type,
+      delta: extra.delta,
+    };
+  }
+
+  return {
+    ...base,
+    type,
+    delta: extra.delta,
+    ...(typeof extra.contentIndex === 'number' ? { contentIndex: extra.contentIndex } : {}),
+  };
 }

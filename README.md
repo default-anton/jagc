@@ -144,7 +144,7 @@ jagc share --thread-key cli:default --json
 
 - Long polling (personal chats)
 - Commands: `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
-- Progress stream with thinking/tool snippets and tool completion status updates
+- Progress stream with thinking/tool snippets and tool completion status updates (separate thinking content blocks render as separate `~` lines)
 - Long progress logs split into continuation messages to preserve visibility
 
 ### Known limitations

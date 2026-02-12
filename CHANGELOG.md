@@ -23,6 +23,7 @@ All notable changes to `jagc` are documented here.
 ### Fixed
 
 - `.gitignore` now includes `.envrc` to reduce accidental local secret commits.
+- Telegram thinking preview now keeps separate reasoning blocks on separate `~` lines (instead of merging adjacent markdown sections like `**...****...**` into one line) when the model streams multiple thinking content parts.
 - Telegram adapter no longer rejects unknown slash commands with `Unknown command: /...`; unknown slash messages (for example `/handoff`) now flow to the assistant unchanged as normal `followUp` input.
 - Thread session persistence now reconciles after every run, so extension-driven `ctx.newSession(...)` switches (for example `/handoff`) update `thread_sessions` and survive service restarts.
 

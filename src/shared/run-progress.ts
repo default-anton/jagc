@@ -38,6 +38,7 @@ export type RunProgressEvent =
   | (RunProgressEventBase & {
       type: 'assistant_thinking_delta';
       delta: string;
+      contentIndex?: number;
     })
   | (RunProgressEventBase & {
       type: 'tool_execution_start';

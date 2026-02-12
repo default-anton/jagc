@@ -203,11 +203,17 @@ describe('ThreadRunController', () => {
 
   test('emits progress events for active run tool execution and deltas', async () => {
     const session = new FakeSession();
-    const events: Array<{ type: string; runId: string }> = [];
+    const events: Array<{ type: string; runId: string; contentIndex?: number }> = [];
 
     const controller = new ThreadRunController(session, {
       onProgress: (event) => {
-        events.push({ type: event.type, runId: event.runId });
+        events.push({
+          type: event.type,
+          runId: event.runId,
+          ...(event.type === 'assistant_thinking_delta' && typeof event.contentIndex === 'number'
+            ? { contentIndex: event.contentIndex }
+            : {}),
+        });
       },
     });
 
@@ -248,6 +254,12 @@ describe('ThreadRunController', () => {
     expect(events.map((event) => event.type)).toEqual(
       expect.arrayContaining(['delivered', 'assistant_thinking_delta', 'tool_execution_start', 'tool_execution_end']),
     );
+
+    expect(events.find((event) => event.type === 'assistant_thinking_delta')).toMatchObject({
+      type: 'assistant_thinking_delta',
+      runId: 'run-1',
+      contentIndex: 0,
+    });
     expect(events.every((event) => event.runId === 'run-1')).toBe(true);
 
     controller.dispose();

@@ -68,6 +68,8 @@ export class TelegramRunProgressReporter {
   private lastThinkingLoggedAt = 0;
   private thinkingPreview = '';
   private hasPendingThinkingPreview = false;
+  private lastThinkingContentIndex: number | null = null;
+  private forceAppendNextThinkingLine = false;
 
   private readonly toolProgressByCallId = new Map<string, ToolProgressState>();
   private eventLogLines: string[] = [];
@@ -126,7 +128,11 @@ export class TelegramRunProgressReporter {
     let immediateRender = false;
 
     if (event.type !== 'assistant_thinking_delta') {
+      const shouldCloseThinkingSegment = this.hasPendingThinkingPreview || this.thinkingPreview.trim().length > 0;
       immediateRender = this.flushThinkingPreviewToLog() || immediateRender;
+      if (shouldCloseThinkingSegment) {
+        this.markThinkingSegmentBoundary();
+      }
     }
 
     switch (event.type) {
@@ -156,6 +162,16 @@ export class TelegramRunProgressReporter {
         const delta = normalizePreviewDelta(event.delta);
         if (delta.trim().length > 0) {
           this.showStartupLine = false;
+
+          if (typeof event.contentIndex === 'number' && Number.isFinite(event.contentIndex)) {
+            if (this.lastThinkingContentIndex !== null && this.lastThinkingContentIndex !== event.contentIndex) {
+              immediateRender = this.flushThinkingPreviewToLog(now) || immediateRender;
+              this.markThinkingSegmentBoundary();
+            }
+
+            this.lastThinkingContentIndex = event.contentIndex;
+          }
+
           this.thinkingPreview = appendTail(this.thinkingPreview, delta.slice(-maxDeltaChars), maxThinkingPreviewChars);
           this.hasPendingThinkingPreview = true;
           if (now - this.lastThinkingLoggedAt >= minThinkingLogIntervalMs) {
@@ -480,6 +496,13 @@ export class TelegramRunProgressReporter {
     return this.renderTrimmedLines(this.buildProgressLines());
   }
 
+  private markThinkingSegmentBoundary(): void {
+    this.thinkingPreview = '';
+    this.hasPendingThinkingPreview = false;
+    this.lastThinkingContentIndex = null;
+    this.forceAppendNextThinkingLine = true;
+  }
+
   private flushThinkingPreviewToLog(now = Date.now()): boolean {
     if (!this.hasPendingThinkingPreview) {
       return false;
@@ -489,27 +512,32 @@ export class TelegramRunProgressReporter {
     if (thinkingSnippet.length === 0) {
       this.hasPendingThinkingPreview = false;
       this.lastThinkingLoggedAt = now;
+      this.forceAppendNextThinkingLine = false;
       return false;
     }
 
     const line = truncateLine(`~ ${thinkingSnippet}`, maxProgressToolLabelChars);
+    const canReplaceLastThinkingLine = !this.forceAppendNextThinkingLine;
     const lastIndex = this.eventLogLines.length - 1;
-    if (lastIndex >= 0 && this.eventLogLines[lastIndex]?.startsWith('~ ')) {
+    if (canReplaceLastThinkingLine && lastIndex >= 0 && this.eventLogLines[lastIndex]?.startsWith('~ ')) {
       if (this.eventLogLines[lastIndex] !== line) {
         this.eventLogLines[lastIndex] = line;
         this.hasPendingThinkingPreview = false;
         this.lastThinkingLoggedAt = now;
+        this.forceAppendNextThinkingLine = false;
         return true;
       }
 
       this.hasPendingThinkingPreview = false;
       this.lastThinkingLoggedAt = now;
+      this.forceAppendNextThinkingLine = false;
       return false;
     }
 
     const appended = this.pushEventLogLine(line);
     this.hasPendingThinkingPreview = false;
     this.lastThinkingLoggedAt = now;
+    this.forceAppendNextThinkingLine = false;
     return appended;
   }
 
