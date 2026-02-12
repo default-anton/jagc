@@ -84,10 +84,15 @@ jagc status
 ### 5) After upgrading jagc
 
 ```bash
+# safe/idempotent: refresh launchd plist + service env snapshot
+jagc install
+jagc status
+
 jagc defaults sync
 jagc packages update
 ```
 
+- `install` is safe to rerun and ensures launchd points at the currently installed jagc server entrypoint.
 - `defaults sync` refreshes bundled `skills/**` and `extensions/**` in your workspace without deleting your custom files.
 - `packages update` updates workspace pi packages using jagc's bundled pi dependency.
 
@@ -207,6 +212,10 @@ If you rerun `jagc install` without `--telegram-bot-token`, existing token in `s
 
 ```bash
 npm install -g jagc@latest
+
+# recommended on macOS service installs: rewrites launchd plist to current paths
+jagc install
+# if you skip install, at least restart
 jagc restart
 
 # uninstall service (keep data)

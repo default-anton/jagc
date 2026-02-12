@@ -8,29 +8,6 @@ This is the canonical publish procedure for `jagc`.
 - Publish target: npm package **`jagc`**.
 - Owner account: npm user **`akuzmenko`**.
 
-## One-time setup
-
-1. Ensure npm package ownership includes `akuzmenko`:
-   - `npm owner ls jagc`
-2. Enable npm trusted publishing for this repository in npm package settings.
-   - Provider: GitHub Actions
-   - Repo: `<github-owner>/jagc`
-3. Ensure GitHub Actions is enabled and can request OIDC tokens.
-   - Workflow must have `permissions: id-token: write`.
-4. Do **not** configure npm publish tokens (`NODE_AUTH_TOKEN` / `NPM_TOKEN`) for this repo.
-   - Release workflow enforces tokenless publish and fails if token auth is present.
-
-> 2FA remains enabled on the npm account. Trusted publishing avoids long-lived npm tokens in repo secrets.
-
-### First-release bootstrap (only if needed)
-
-If npm does not allow trusted publishing setup before the package exists, do one manual bootstrap publish from a trusted local machine:
-
-1. `pnpm release:gate`
-2. `npm login` (account: `akuzmenko`)
-3. `npm publish --access public`
-4. Configure trusted publishing for this repo.
-5. All subsequent releases use tag-driven GitHub Actions only.
 
 ## Changelog format (required)
 
@@ -60,22 +37,24 @@ If npm does not allow trusted publishing setup before the package exists, do one
    - `git push origin vX.Y.Z`
 
 5. **Automated publish**
-   - GitHub Actions `release` workflow runs on the tag.
-   - Workflow verifies tag/version/changelog consistency.
-   - Workflow runs `pnpm release:gate`.
-   - Workflow publishes with:
-     - `npm publish --provenance --access public`
-   - Workflow creates/updates GitHub release notes from the matching changelog section.
-   - Note: npm provenance requires trusted publishing + public GitHub source.
+   - Push `vX.Y.Z` tag; GitHub Actions `release` workflow handles the rest.
+   - It validates release metadata, runs `pnpm release:gate`, publishes to npm, and updates GitHub release notes.
 
 6. **Post-release verification**
    - `npm view jagc version dist-tags --json`
+   - `npm view` may lag due cache. Verify with registry data:
+     ```bash
+     curl -s https://registry.npmjs.org/jagc \
+       | jq -r '."dist-tags".latest, (.versions | keys | .[-1])'
+     ```
    - Fresh install smoke:
      - `npm install -g jagc@latest`
      - `jagc --help`
 
 ## Failure + rollback
 
+- Auth errors (`gh`/`npm`): ask the user to authenticate, then retry.
+- Version already exists: bump version and repeat release steps.
 - If publish fails before npm upload: fix and re-run workflow.
 - If a bad version is published:
   1. Deprecate bad version:
