@@ -63,12 +63,12 @@
 ### Guidance
 
 - Track high-signal paths as they become relevant.
-- Format each entry as: ``/absolute/path`` — one sentence on what it contains and why it matters.
+- Format each entry as: ``/absolute/path`` or ``~/path/from/home`` — one sentence on what it contains and why it matters.
 
 ### Entries
 
 - `/absolute/path` — <fill me>
-- `/absolute/path` — <fill me>
+- `~/path/from/home` — <fill me>
 
 ## Safety and guardrails
 
