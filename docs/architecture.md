@@ -26,7 +26,7 @@ This doc is the implementation snapshot (not design intent).
 
 - Executors: `echo` (deterministic), `pi` (real agent)
 - `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts` (runtime/harness context, global AGENTS hierarchy, available skills metadata, local pi docs/examples paths, and Codex harness notes)
-- Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`
+- Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth` and pass-through for unknown slash commands (for prompt-template packages like `/handoff`)
 - SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
 - Structured Pino JSON logging with component-scoped child loggers shared across server/runtime/adapters
@@ -136,6 +136,7 @@ Operational note:
 - Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`); when progress overflows the editable message limit, older progress lines are flushed into additional `progress log (continued):` messages and the live message keeps tail updates.
 - Adapter keeps waiting for terminal run status in the background and replies with output/error when done (no timeout handoff message).
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
+- Unknown slash commands are not rejected by the adapter; they are forwarded to the assistant as normal `followUp` text with the original message content.
 - After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.
 - The `/settings` panel does not include a dedicated refresh button; reopening `/settings` (or returning from a change) re-fetches live state.
 - Outdated/invalid callback payloads trigger stale-menu recovery: the adapter re-renders the latest `/settings` panel.

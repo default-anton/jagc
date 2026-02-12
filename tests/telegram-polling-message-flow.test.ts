@@ -734,6 +734,42 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
+  test('unknown slash commands are forwarded as followUp messages', async () => {
+    const runService = new StubRunService('run-handoff', [
+      runRecord({
+        runId: 'run-handoff',
+        status: 'succeeded',
+        output: { text: 'Handoff done' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/handoff',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage', (call) => call.payload.text === 'Handoff done');
+      expect(sendMessage.payload.text).toBe('Handoff done');
+
+      expect(runService.ingests).toHaveLength(1);
+      expect(runService.ingests[0]).toMatchObject({
+        source: 'telegram',
+        threadKey: 'telegram:chat:101',
+        userKey: 'telegram:user:202',
+        text: '/handoff',
+        deliveryMode: 'followUp',
+      });
+
+      expect(
+        clone
+          .getBotCalls()
+          .some((call) => call.method === 'sendMessage' && call.payload.text === 'Unknown command: /handoff'),
+      ).toBe(false);
+    });
+  });
+
   test('empty steer message is rejected without ingesting a run', async () => {
     const runService = new StubRunService('run-unused', [
       runRecord({

@@ -161,14 +161,14 @@ export class TelegramPollingAdapter {
 
     const command = parseTelegramCommand(text);
     if (command) {
-      await this.handleCommand(ctx, command);
+      await this.handleCommand(ctx, command, text);
       return;
     }
 
     await this.handleAssistantMessage(ctx, text, 'followUp');
   }
 
-  private async handleCommand(ctx: Context, command: ParsedTelegramCommand): Promise<void> {
+  private async handleCommand(ctx: Context, command: ParsedTelegramCommand, rawText: string): Promise<void> {
     try {
       switch (command.command) {
         case 'start':
@@ -212,7 +212,8 @@ export class TelegramPollingAdapter {
           return;
         }
         default: {
-          await ctx.reply(`Unknown command: /${command.command}`);
+          await this.handleAssistantMessage(ctx, rawText, 'followUp');
+          return;
         }
       }
     } catch (error) {
@@ -551,6 +552,7 @@ function helpText(): string {
     '/thinking — open thinking picker',
     '/auth — open provider login controls',
     '/steer <message> — send an interrupting message (explicit steer)',
+    'Any other /command is forwarded to the assistant as a normal message.',
   ].join('\n');
 }
 

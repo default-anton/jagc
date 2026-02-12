@@ -21,7 +21,7 @@ All notable changes to `jagc` are documented here.
 
 ### Fixed
 
-- None.
+- Telegram adapter no longer rejects unknown slash commands with `Unknown command: /...`; unknown slash messages (for example `/handoff`) now flow to the assistant unchanged as normal `followUp` input.
 
 ## [0.3.2] - 2026-02-11
 
