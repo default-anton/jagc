@@ -106,6 +106,7 @@ jagc share --thread-key cli:default --json
 - Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`; unknown slash commands (for example `/handoff`) are forwarded to the assistant as normal messages
 - Telegram progress stream shows tool/thinking snippets; tool calls start as `> tool ...` and are edited in place to append `[✓] done (0.4s)` / `[✗] failed (0.4s)` style suffixes; before the first snippet, a short placeholder line appears for faster feedback and is deleted if no snippets ever arrive; when progress exceeds one Telegram message, older lines are flushed into additional `progress log (continued):` messages so visibility is preserved for long runs
 - Runtime semantics: same-thread `followUp` (default) and explicit `steer`
+- Thread→session persistence is reconciled after each run, so extension-driven session switches (for example `/handoff` calling `ctx.newSession(...)`) survive process restarts
 - System-prompt context is extension-driven: runtime/harness context (jagc+pi), global `AGENTS.md`, available skills metadata, local pi docs/examples paths, and Codex harness notes are injected by default workspace extensions (SDK built-in AGENTS/skills auto-loading is disabled)
 - jagc wraps pi coding agent; extension surfaces (custom tools, commands, event handlers) and packages are pi-native capabilities
 - In-process scheduling + SQLite-backed recovery after restart

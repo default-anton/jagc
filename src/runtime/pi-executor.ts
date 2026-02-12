@@ -91,7 +91,13 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
 
   async execute(run: RunRecord): Promise<RunOutput> {
     const controller = await this.getController(run.threadKey);
-    return controller.submit(run);
+    const generation = this.getThreadGeneration(run.threadKey);
+
+    try {
+      return await controller.submit(run);
+    } finally {
+      await this.reconcilePersistedThreadSession(run.threadKey, generation);
+    }
   }
 
   setRunProgressListener(listener: RunProgressListener | null): void {
@@ -415,6 +421,23 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     }
 
     await this.runStore.upsertThreadSession(threadKey, sessionId, sessionFile);
+  }
+
+  private async reconcilePersistedThreadSession(threadKey: string, generation: number): Promise<void> {
+    const session = this.sessions.get(threadKey);
+    if (!session) {
+      return;
+    }
+
+    try {
+      await this.ensureThreadSession(threadKey, session.sessionId, session.sessionFile, generation);
+    } catch (error) {
+      if (error instanceof ThreadGenerationMismatchError) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   private handleRunProgressEvent(event: RunProgressEvent): void {

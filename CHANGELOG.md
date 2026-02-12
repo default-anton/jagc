@@ -22,6 +22,7 @@ All notable changes to `jagc` are documented here.
 ### Fixed
 
 - Telegram adapter no longer rejects unknown slash commands with `Unknown command: /...`; unknown slash messages (for example `/handoff`) now flow to the assistant unchanged as normal `followUp` input.
+- Thread session persistence now reconciles after every run, so extension-driven `ctx.newSession(...)` switches (for example `/handoff`) update `thread_sessions` and survive service restarts.
 
 ## [0.3.2] - 2026-02-11
 

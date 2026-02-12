@@ -105,6 +105,7 @@ This doc is the implementation snapshot (not design intent).
 - Session identity is per `thread_key`.
 - `thread_sessions` persists `thread_key`, `session_id`, `session_file`.
 - `PiRunExecutor` reopens persisted sessions when possible; creates/persists when missing/invalid.
+- After each run, `PiRunExecutor` reconciles `thread_sessions` with the live `AgentSession` (`session_id`/`session_file`) so extension-driven session switches during a run remain durable across restarts.
 - In-memory session cache is hot-path only; SQLite mapping is source of truth across restarts.
 
 ### Same-thread coordination (non-obvious)
