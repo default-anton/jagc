@@ -17,10 +17,12 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Release workflow and runbook now publish to npm with provenance metadata (`npm publish --provenance --access public`) for public-source trusted publishing.
+- `.env.example` now uses `$HOME/.jagc` defaults instead of personal absolute paths.
 
 ### Fixed
 
+- `.gitignore` now includes `.envrc` to reduce accidental local secret commits.
 - Telegram adapter no longer rejects unknown slash commands with `Unknown command: /...`; unknown slash messages (for example `/handoff`) now flow to the assistant unchanged as normal `followUp` input.
 - Thread session persistence now reconciles after every run, so extension-driven `ctx.newSession(...)` switches (for example `/handoff`) update `thread_sessions` and survive service restarts.
 

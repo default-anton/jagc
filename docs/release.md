@@ -64,9 +64,9 @@ If npm does not allow trusted publishing setup before the package exists, do one
    - Workflow verifies tag/version/changelog consistency.
    - Workflow runs `pnpm release:gate`.
    - Workflow publishes with:
-     - `NPM_CONFIG_PROVENANCE=false npm publish --access public`
+     - `npm publish --provenance --access public`
    - Workflow creates/updates GitHub release notes from the matching changelog section.
-   - Note: npm provenance is currently unsupported for private GitHub repositories.
+   - Note: npm provenance requires trusted publishing + public GitHub source.
 
 6. **Post-release verification**
    - `npm view jagc version dist-tags --json`
