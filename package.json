@@ -2,6 +2,7 @@
   "name": "jagc",
   "version": "0.3.2",
   "description": "just a good clanker",
+  "author": "Anton Kuzmenko",
   "license": "MIT",
   "type": "module",
   "repository": {
