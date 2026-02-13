@@ -381,6 +381,30 @@ export class TelegramBotApiClone {
           text,
         };
       }
+      case 'sendDocument': {
+        this.recordBotCall({ method, payload });
+
+        const chatId = toNumber(payload.chat_id) ?? 0;
+        const caption = typeof payload.caption === 'string' ? payload.caption : '';
+        const document = parseDocumentPayload(payload.document, payload);
+
+        return {
+          message_id: this.nextMessageId++,
+          date: Math.floor(Date.now() / 1000),
+          chat: {
+            id: chatId,
+            type: 'private',
+          },
+          caption,
+          document: {
+            file_id: `file-${this.nextMessageId}`,
+            file_unique_id: `file-unique-${this.nextMessageId}`,
+            file_name: document.fileName,
+            mime_type: 'text/plain',
+            file_size: document.content.length,
+          },
+        };
+      }
       case 'answerCallbackQuery': {
         this.recordBotCall({ method, payload });
         return true;
@@ -544,6 +568,58 @@ export class TelegramBotApiClone {
     response.setHeader('content-type', 'application/json; charset=utf-8');
     response.end(JSON.stringify(body));
   }
+}
+
+function parseDocumentPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
+  let resolvedValue = value;
+  const visitedAttachKeys = new Set<string>();
+
+  while (typeof resolvedValue === 'string' && resolvedValue.startsWith('attach://')) {
+    const attachKey = resolvedValue.slice('attach://'.length);
+    if (visitedAttachKeys.has(attachKey)) {
+      break;
+    }
+
+    visitedAttachKeys.add(attachKey);
+    resolvedValue = payload[attachKey] ?? null;
+  }
+
+  if (!resolvedValue || typeof resolvedValue !== 'object') {
+    return fallbackDocumentPayload(payload);
+  }
+
+  const record = resolvedValue as Record<string, unknown>;
+  const fileName = typeof record.filename === 'string' && record.filename.length > 0 ? record.filename : 'document.txt';
+  const content = typeof record.content === 'string' ? record.content : '';
+
+  return {
+    fileName,
+    content,
+  };
+}
+
+function fallbackDocumentPayload(payload: Record<string, unknown>): { fileName: string; content: string } {
+  return findMultipartDocumentPayload(payload) ?? { fileName: 'document.txt', content: '' };
+}
+
+function findMultipartDocumentPayload(payload: Record<string, unknown>): { fileName: string; content: string } | null {
+  for (const value of Object.values(payload)) {
+    if (!value || typeof value !== 'object') {
+      continue;
+    }
+
+    const record = value as Record<string, unknown>;
+    if (typeof record.filename !== 'string' || typeof record.content !== 'string') {
+      continue;
+    }
+
+    return {
+      fileName: record.filename,
+      content: record.content,
+    };
+  }
+
+  return null;
 }
 
 function parseGetUpdatesArgs(payload: Record<string, unknown>): GetUpdatesArgs {

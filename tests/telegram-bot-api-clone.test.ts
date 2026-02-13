@@ -214,6 +214,93 @@ describe('TelegramBotApiClone', () => {
       await clone.stop();
     }
   });
+
+  test('parses multipart payloads for sendDocument', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const form = new FormData();
+      form.set('chat_id', '101');
+      form.set('caption', '📎 snippet-1.ts (typescript)');
+      form.set('document', new Blob(['const x: number = 1;'], { type: 'text/plain' }), 'snippet-1.ts');
+
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/sendDocument`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(response.status).toBe(200);
+
+      const calls = clone.getBotCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe('sendDocument');
+      expect(calls[0]?.payload.caption).toBe('📎 snippet-1.ts (typescript)');
+
+      const documentPayload = calls[0]?.payload.document as { filename?: string; content?: string };
+      expect(documentPayload.filename).toBe('snippet-1.ts');
+      expect(documentPayload.content).toContain('const x: number = 1;');
+    } finally {
+      await clone.stop();
+    }
+  });
+
+  test('parses multipart sendDocument with filename* content-disposition parameter', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const boundary = '----jagc-test-boundary';
+      const body = [
+        `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n101\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n📎 snippet-1.ts (typescript)\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename*=UTF-8''snippet-1.ts\r\nContent-Type: text/plain\r\n\r\nconst y: number = 2;\r\n`,
+        `--${boundary}--\r\n`,
+      ].join('');
+
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/sendDocument`, {
+        method: 'POST',
+        headers: {
+          'content-type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+
+      const calls = clone.getBotCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe('sendDocument');
+
+      const documentPayload = calls[0]?.payload.document as { filename?: string; content?: string };
+      expect(documentPayload.filename).toBe('snippet-1.ts');
+      expect(documentPayload.content).toContain('const y: number = 2;');
+    } finally {
+      await clone.stop();
+    }
+  });
+
+  test('fails loud on malformed multipart payloads', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/sendDocument`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'multipart/form-data',
+        },
+        body: '--broken\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n101\r\n--broken--\r\n',
+      });
+
+      expect(response.status).toBe(400);
+
+      const calls = clone.getBotCalls();
+      expect(calls).toHaveLength(0);
+    } finally {
+      await clone.stop();
+    }
+  });
 });
 
 async function fetchWithRunner(
