@@ -161,7 +161,7 @@ export class TelegramPollingAdapter {
 
   private async handleTextMessage(ctx: Context): Promise<void> {
     if (!ctx.chat || ctx.chat.type !== 'private') {
-      await ctx.reply('Telegram adapter currently supports personal chats only.');
+      await this.reply(ctx, 'Telegram adapter currently supports personal chats only.');
       return;
     }
 
@@ -189,7 +189,7 @@ export class TelegramPollingAdapter {
       switch (command.command) {
         case 'start':
         case 'help': {
-          await ctx.reply(helpText());
+          await this.reply(ctx, helpText());
           return;
         }
         case 'settings': {
@@ -241,7 +241,7 @@ export class TelegramPollingAdapter {
         command: command.command,
         message,
       });
-      await ctx.reply(`❌ ${message}`);
+      await this.reply(ctx, `❌ ${message}`);
     }
   }
 
@@ -293,7 +293,7 @@ export class TelegramPollingAdapter {
           message,
         });
 
-        await ctx.reply('This menu is outdated. Use /settings to refresh.');
+        await this.reply(ctx, 'This menu is outdated. Use /settings to refresh.');
       }
 
       return;
@@ -328,8 +328,12 @@ export class TelegramPollingAdapter {
         message,
       });
 
-      await ctx.reply(`❌ ${message}`);
+      await this.reply(ctx, `❌ ${message}`);
     }
+  }
+
+  private async reply(ctx: Context, text: string): Promise<void> {
+    await ctx.reply(text);
   }
 
   private isTelegramUserAuthorized(userId: number | undefined): boolean {
@@ -355,11 +359,12 @@ export class TelegramPollingAdapter {
     });
 
     if (!allowCommand) {
-      await ctx.reply('🔒 This bot is private. Ask the operator to allow your Telegram user id.');
+      await this.reply(ctx, '🔒 This bot is private. Ask the operator to allow your Telegram user id.');
       return;
     }
 
-    await ctx.reply(
+    await this.reply(
+      ctx,
       [
         '🔒 This bot is private. You are not authorized yet.',
         'Operator: run this exact command on the host to allow this user:',
@@ -385,7 +390,7 @@ export class TelegramPollingAdapter {
   private async handleAssistantMessage(ctx: Context, text: string, deliveryMode: 'steer' | 'followUp'): Promise<void> {
     const prompt = text.trim();
     if (!prompt) {
-      await ctx.reply('Message is empty.');
+      await this.reply(ctx, 'Message is empty.');
       return;
     }
 
@@ -589,11 +594,6 @@ export class TelegramPollingAdapter {
   }
 
   private async sendMarkdownMessage(chatId: number, text: string, entities: MessageEntity[]): Promise<void> {
-    if (entities.length === 0) {
-      await this.sendMessage(chatId, text);
-      return;
-    }
-
     await callTelegramWithRetry(() => this.bot.api.sendMessage(chatId, text, { entities }));
   }
 

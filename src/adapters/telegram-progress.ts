@@ -1,9 +1,11 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import type { Bot } from 'grammy';
+import type { MessageEntity } from 'grammy/types';
 import type { Logger } from '../shared/logger.js';
 import type { RunProgressEvent } from '../shared/run-progress.js';
 import { extractTelegramRetryAfterSeconds, isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
+import { renderTelegramText, type TelegramRenderedMessage } from './telegram-markdown.js';
 import {
   appendTail,
   isDeleteMessageGoneError,
@@ -77,6 +79,7 @@ export class TelegramRunProgressReporter {
 
   private progressMessageId: number | null = null;
   private lastRenderedText = '';
+  private lastRenderedEntitiesJson = '[]';
   private lastEditAt = 0;
   private nextEditAllowedAt = 0;
   private nextTypingAllowedAt = 0;
@@ -99,14 +102,17 @@ export class TelegramRunProgressReporter {
       return;
     }
 
-    const initialText = this.renderProgressText();
+    const initialRender = this.renderProgressMessage();
 
     try {
       const message = await this.callWithRetry(() =>
-        this.options.bot.api.sendMessage(this.options.chatId, initialText),
+        this.options.bot.api.sendMessage(this.options.chatId, initialRender.text, {
+          entities: initialRender.entities,
+        }),
       );
       this.progressMessageId = message.message_id;
-      this.lastRenderedText = initialText;
+      this.lastRenderedText = initialRender.text;
+      this.lastRenderedEntitiesJson = JSON.stringify(initialRender.entities);
       this.lastEditAt = Date.now();
     } catch (error) {
       this.options.logger.warn({
@@ -331,6 +337,7 @@ export class TelegramRunProgressReporter {
         this.progressMessageId = null;
       }
       this.lastRenderedText = '';
+      this.lastRenderedEntitiesJson = '[]';
     }
   }
 
@@ -383,23 +390,32 @@ export class TelegramRunProgressReporter {
     this.renderInFlight = true;
     this.pendingRender = false;
 
-    let text = this.lastRenderedText;
+    let rendered: TelegramRenderedMessage = {
+      text: this.lastRenderedText,
+      entities: [],
+    };
+    let entitiesJson = this.lastRenderedEntitiesJson;
 
     try {
       this.archiveOverflowEventLogLines();
       await this.flushPendingArchiveLines(this.phase === 'succeeded' || this.phase === 'failed');
 
-      text = this.renderProgressText();
-      if (text === this.lastRenderedText) {
+      rendered = this.renderProgressMessage();
+      entitiesJson = JSON.stringify(rendered.entities);
+      if (rendered.text === this.lastRenderedText && entitiesJson === this.lastRenderedEntitiesJson) {
         return;
       }
 
-      await this.options.bot.api.editMessageText(this.options.chatId, this.progressMessageId, text);
-      this.lastRenderedText = text;
+      await this.options.bot.api.editMessageText(this.options.chatId, this.progressMessageId, rendered.text, {
+        entities: rendered.entities,
+      });
+      this.lastRenderedText = rendered.text;
+      this.lastRenderedEntitiesJson = entitiesJson;
       this.lastEditAt = Date.now();
     } catch (error) {
       if (isTelegramMessageNotModifiedError(error)) {
-        this.lastRenderedText = text;
+        this.lastRenderedText = rendered.text;
+        this.lastRenderedEntitiesJson = entitiesJson;
         this.lastEditAt = Date.now();
       } else {
         const retryAfterSeconds = extractTelegramRetryAfterSeconds(error);
@@ -407,7 +423,7 @@ export class TelegramRunProgressReporter {
           this.nextEditAllowedAt = Date.now() + Math.ceil(retryAfterSeconds * 1000);
           this.pendingRender = true;
         } else if (isEditMessageGoneError(error)) {
-          await this.recreateProgressMessage(text);
+          await this.recreateProgressMessage(rendered, entitiesJson);
         } else {
           this.options.logger.warn({
             event: 'telegram_progress_edit_failed',
@@ -429,11 +445,16 @@ export class TelegramRunProgressReporter {
     }
   }
 
-  private async recreateProgressMessage(text: string): Promise<void> {
+  private async recreateProgressMessage(rendered: TelegramRenderedMessage, entitiesJson: string): Promise<void> {
     try {
-      const message = await this.callWithRetry(() => this.options.bot.api.sendMessage(this.options.chatId, text));
+      const message = await this.callWithRetry(() =>
+        this.options.bot.api.sendMessage(this.options.chatId, rendered.text, {
+          entities: rendered.entities,
+        }),
+      );
       this.progressMessageId = message.message_id;
-      this.lastRenderedText = text;
+      this.lastRenderedText = rendered.text;
+      this.lastRenderedEntitiesJson = entitiesJson;
       this.lastEditAt = Date.now();
     } catch (error) {
       this.options.logger.warn({
@@ -494,6 +515,54 @@ export class TelegramRunProgressReporter {
 
   private renderProgressText(): string {
     return this.renderTrimmedLines(this.buildProgressLines());
+  }
+
+  private renderProgressMessage(): TelegramRenderedMessage {
+    const sourceLines = this.renderProgressText().split('\n');
+    const renderedLines: string[] = [];
+    const entities: MessageEntity[] = [];
+
+    let offset = 0;
+    for (let index = 0; index < sourceLines.length; index += 1) {
+      const sourceLine = sourceLines[index] ?? '';
+      const renderedLine = this.renderProgressLine(sourceLine);
+      renderedLines.push(renderedLine.text);
+
+      for (const entity of renderedLine.entities) {
+        entities.push({
+          ...entity,
+          offset: entity.offset + offset,
+        });
+      }
+
+      offset += renderedLine.text.length;
+      if (index < sourceLines.length - 1) {
+        offset += 1;
+      }
+    }
+
+    return {
+      text: renderedLines.join('\n'),
+      entities,
+    };
+  }
+
+  private renderProgressLine(line: string): TelegramRenderedMessage {
+    if (!line.startsWith('~ ')) {
+      return {
+        text: line,
+        entities: [],
+      };
+    }
+
+    const renderedThinking = renderTelegramText(line.slice(2));
+    return {
+      text: `~ ${renderedThinking.text}`,
+      entities: renderedThinking.entities.map((entity) => ({
+        ...entity,
+        offset: entity.offset + 2,
+      })),
+    };
   }
 
   private markThinkingSegmentBoundary(): void {
@@ -662,7 +731,11 @@ export class TelegramRunProgressReporter {
     }
 
     for (const chunk of chunks) {
-      await this.callWithRetry(() => this.options.bot.api.sendMessage(this.options.chatId, chunk.text));
+      await this.callWithRetry(() =>
+        this.options.bot.api.sendMessage(this.options.chatId, chunk.text, {
+          entities: [],
+        }),
+      );
       this.pendingArchiveLines.splice(0, chunk.lineCount);
     }
   }

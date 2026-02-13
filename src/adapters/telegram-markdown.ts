@@ -58,6 +58,31 @@ const defaultMessageLimit = 3500;
 const defaultInlineCodeBlockMaxChars = 1800;
 const defaultInlineCodeBlockMaxLines = 48;
 
+export function renderTelegramText(text: string): TelegramRenderedMessage {
+  const rendered = renderTelegramMarkdown(text, {
+    messageLimit: Math.max(defaultMessageLimit, text.length + 16),
+    inlineCodeBlockMaxChars: Number.MAX_SAFE_INTEGER,
+    inlineCodeBlockMaxLines: Number.MAX_SAFE_INTEGER,
+  });
+
+  if (rendered.messages.length !== 1 || rendered.attachments.length > 0) {
+    return {
+      text,
+      entities: [],
+    };
+  }
+
+  const message = rendered.messages[0];
+  if (!message) {
+    return {
+      text,
+      entities: [],
+    };
+  }
+
+  return message;
+}
+
 export function renderTelegramMarkdown(
   markdown: string,
   options: TelegramMarkdownRenderOptions = {},

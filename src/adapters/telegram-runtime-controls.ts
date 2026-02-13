@@ -55,43 +55,43 @@ export class TelegramRuntimeControls {
   async handleCancelCommand(ctx: Context): Promise<boolean> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await ctx.reply('Run cancellation is unavailable when JAGC_RUNNER is not pi.');
+      await this.reply(ctx, 'Run cancellation is unavailable when JAGC_RUNNER is not pi.');
       return false;
     }
 
     const threadKey = telegramThreadKey(ctx.chat?.id);
     const cancelled = await threadControlService.cancelThreadRun(threadKey);
     if (cancelled.cancelled) {
-      await ctx.reply('🛑 Stopped the active run. Session context is preserved.');
+      await this.reply(ctx, '🛑 Stopped the active run. Session context is preserved.');
       return true;
     }
 
-    await ctx.reply('No active run to stop in this chat. Session context is preserved.');
+    await this.reply(ctx, 'No active run to stop in this chat. Session context is preserved.');
     return false;
   }
 
   async handleNewCommand(ctx: Context): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await ctx.reply('Session reset is unavailable when JAGC_RUNNER is not pi.');
+      await this.reply(ctx, 'Session reset is unavailable when JAGC_RUNNER is not pi.');
       return;
     }
 
     const threadKey = telegramThreadKey(ctx.chat?.id);
     await threadControlService.resetThreadSession(threadKey);
-    await ctx.reply('✅ Session reset. Your next message will start a new pi session.');
+    await this.reply(ctx, '✅ Session reset. Your next message will start a new pi session.');
   }
 
   async handleShareCommand(ctx: Context): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await ctx.reply('Session sharing is unavailable when JAGC_RUNNER is not pi.');
+      await this.reply(ctx, 'Session sharing is unavailable when JAGC_RUNNER is not pi.');
       return;
     }
 
     const threadKey = telegramThreadKey(ctx.chat?.id);
     const shared = await threadControlService.shareThreadSession(threadKey);
-    await ctx.reply(`Share URL: ${shared.shareUrl}\nGist: ${shared.gistUrl}`);
+    await this.reply(ctx, `Share URL: ${shared.shareUrl}\nGist: ${shared.gistUrl}`);
   }
 
   async handleStaleCallback(ctx: Context): Promise<void> {
@@ -101,12 +101,12 @@ export class TelegramRuntimeControls {
   async handleModelCommand(ctx: Context, args: string): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await ctx.reply('Model controls are unavailable when JAGC_RUNNER is not pi.');
+      await this.reply(ctx, 'Model controls are unavailable when JAGC_RUNNER is not pi.');
       return;
     }
 
     if (args.trim().length > 0) {
-      await ctx.reply('Text arguments for /model are no longer supported. Use the buttons.');
+      await this.reply(ctx, 'Text arguments for /model are no longer supported. Use the buttons.');
     }
 
     await this.showModelProviderPicker(ctx, 0);
@@ -115,12 +115,12 @@ export class TelegramRuntimeControls {
   async handleThinkingCommand(ctx: Context, args: string): Promise<void> {
     const threadControlService = this.options.threadControlService;
     if (!threadControlService) {
-      await ctx.reply('Thinking controls are unavailable when JAGC_RUNNER is not pi.');
+      await this.reply(ctx, 'Thinking controls are unavailable when JAGC_RUNNER is not pi.');
       return;
     }
 
     if (args.trim().length > 0) {
-      await ctx.reply('Text arguments for /thinking are no longer supported. Use the buttons.');
+      await this.reply(ctx, 'Text arguments for /thinking are no longer supported. Use the buttons.');
     }
 
     await this.showThinkingPicker(ctx);
@@ -165,6 +165,10 @@ export class TelegramRuntimeControls {
         return;
       }
     }
+  }
+
+  private async reply(ctx: Context, text: string): Promise<void> {
+    await ctx.reply(text);
   }
 
   private async showSettingsPanel(ctx: Context, notice?: string): Promise<void> {

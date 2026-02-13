@@ -170,7 +170,7 @@ describe('TelegramPollingAdapter message flow integration', () => {
       {
         runService: runService.asRunService(),
         allowedTelegramUserIds: [],
-        workspaceDir: '/tmp/jagc-workspace',
+        workspaceDir: '/tmp/_jagc-workspace_',
       },
       async ({ clone }) => {
         clone.injectTextMessage({
@@ -183,7 +183,7 @@ describe('TelegramPollingAdapter message flow integration', () => {
           'sendMessage',
           (call) =>
             typeof call.payload.text === 'string' &&
-            call.payload.text.includes('jagc telegram allow --user-id 202 --workspace-dir /tmp/jagc-workspace'),
+            call.payload.text.includes('jagc telegram allow --user-id 202 --workspace-dir /tmp/_jagc-workspace_'),
         );
 
         expect(String(denial.payload.text)).toContain('This bot is private');
@@ -721,18 +721,19 @@ describe('TelegramPollingAdapter message flow integration', () => {
             (call) =>
               call.method === 'editMessageText' &&
               typeof call.payload.text === 'string' &&
-              call.payload.text.includes('~ **Planning to read agents file**') &&
+              call.payload.text.includes('~ Planning to read agents file') &&
               call.payload.text.includes('> read path=/Users/akuzmenko/.jagc/AGENTS.md [✓] done ('),
           );
 
         expect(progressEdit).toBeDefined();
 
         const progressText = String(progressEdit?.payload.text ?? '');
-        expect(progressText).toContain('~ **Planning recommendations for AGENTS.md**');
-        expect(progressText).toContain('~ **Planning to read agents file**');
-        expect(progressText).not.toContain(
-          '~ **Planning recommendations for AGENTS.md****Planning to read agents file**',
-        );
+        expect(progressText).toContain('~ Planning recommendations for AGENTS.md');
+        expect(progressText).toContain('~ Planning to read agents file');
+        expect(progressText).not.toContain('~ Planning recommendations for AGENTS.mdPlanning to read agents file');
+
+        const progressEntities = (progressEdit?.payload.entities ?? []) as Array<{ type?: string }>;
+        expect(progressEntities.some((entity) => entity.type === 'bold')).toBe(true);
       },
     );
   }, 14_000);

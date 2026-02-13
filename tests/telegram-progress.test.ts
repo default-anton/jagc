@@ -112,6 +112,115 @@ describe('TelegramRunProgressReporter archive flushing', () => {
   });
 });
 
+describe('TelegramRunProgressReporter edit recovery', () => {
+  test('recreates progress message with entities preserved after message-gone edit failures', async () => {
+    const sendCalls: Array<{ text: string; entities: Array<{ type?: string }> }> = [];
+
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (_chatId: number, text: string, options?: { entities?: Array<{ type?: string }> }) => {
+          sendCalls.push({ text, entities: options?.entities ?? [] });
+          return { message_id: sendCalls.length };
+        }),
+        editMessageText: vi.fn(async () => {
+          throw new Error('message to edit not found');
+        }),
+        sendChatAction: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
+    } as unknown as Bot;
+
+    const reporter = new TelegramRunProgressReporter({
+      bot,
+      chatId: 101,
+      runId: 'run-thinking-format',
+      logger: noopLogger,
+      minEditIntervalMs: 0,
+    });
+
+    await reporter.start();
+
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Bold think**',
+        contentIndex: 0,
+      }),
+    );
+    reporter.onProgress(
+      progressEvent('assistant_text_delta', {
+        delta: 'continuing run',
+      }),
+    );
+
+    await reporter.finishSucceeded();
+
+    expect(sendCalls.length).toBeGreaterThanOrEqual(2);
+
+    const recreatedProgress = sendCalls[1];
+    expect(recreatedProgress?.text).toContain('~ Bold think');
+    expect(recreatedProgress?.entities.some((entity) => entity.type === 'bold')).toBe(true);
+  });
+
+  test('keeps tool-call labels literal while rendering thinking snippets as entities', async () => {
+    const editCalls: Array<{ text: string; entities: Array<{ type?: string }> }> = [];
+
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async () => ({ message_id: 1 })),
+        editMessageText: vi.fn(
+          async (
+            _chatId: number,
+            _messageId: number,
+            text: string,
+            options?: { entities?: Array<{ type?: string }> },
+          ) => {
+            editCalls.push({ text, entities: options?.entities ?? [] });
+            return { message_id: 1 };
+          },
+        ),
+        sendChatAction: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
+    } as unknown as Bot;
+
+    const reporter = new TelegramRunProgressReporter({
+      bot,
+      chatId: 101,
+      runId: 'run-thinking-format',
+      logger: noopLogger,
+      minEditIntervalMs: 0,
+    });
+
+    await reporter.start();
+
+    reporter.onProgress(
+      progressEvent('assistant_thinking_delta', {
+        delta: '**Plan**',
+        contentIndex: 0,
+      }),
+    );
+
+    reporter.onProgress({
+      runId: 'run-thinking-format',
+      threadKey: 'telegram:chat:101',
+      source: 'telegram',
+      deliveryMode: 'followUp',
+      timestamp: new Date(0).toISOString(),
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'read',
+      args: { path: '/tmp/__pycache__/module.py' },
+    });
+
+    await reporter.finishSucceeded();
+
+    const latestEdit = editCalls.at(-1);
+    expect(latestEdit?.text).toContain('> read path=/tmp/__pycache__/module.py');
+    expect(latestEdit?.text).toContain('~ Plan');
+    expect(latestEdit?.entities.some((entity) => entity.type === 'bold')).toBe(true);
+  });
+});
+
 describe('TelegramRunProgressReporter thinking preview formatting', () => {
   test('renders separate thinking lines when content blocks change', () => {
     const reporter = createThinkingReporter();

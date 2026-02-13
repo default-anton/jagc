@@ -18,11 +18,14 @@ All notable changes to `jagc` are documented here.
 ### Changed
 
 - Telegram terminal run replies now always use entity-based rich-text rendering instead of plain-text passthrough.
+- Telegram progress updates now send/edit via Bot API `entities` payloads for thinking-snippet formatting while keeping tool-call labels and control-path text literal.
 
 ### Fixed
 
 - Telegram no longer depends on fragile MarkdownV2 string escaping for assistant replies.
 - Telegram entity rendering now strips/segments incompatible overlaps (for example `code` inside links, or formatting wrappers around inline code) to avoid Bot API entity parse failures.
+- Telegram progress edit recovery now recreates the message with the same entity payload after `message to edit not found`, so thinking formatting is preserved.
+- Telegram control-path replies (for example the unauthorized-user allow command prompt) are sent as literal text so markdown-like paths/commands are not mutated.
 
 ## [0.3.4] - 2026-02-12
 
