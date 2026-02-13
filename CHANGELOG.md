@@ -17,6 +17,20 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
+- None.
+
+### Fixed
+
+- None.
+
+## [0.3.7] - 2026-02-13
+
+### Added
+
+- None.
+
+### Changed
+
 - Updated runtime dependencies to latest compatible releases, including `@mariozechner/pi-coding-agent` (`^0.52.12`), `better-sqlite3` (`^12.6.2`), `grammy` (`^1.40.0`), and `pino` (`^10.3.1`).
 - Updated development tooling versions, including `@biomejs/biome` (`^2.3.15`) and `@types/node` (`^25.2.3`).
 
