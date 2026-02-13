@@ -36,9 +36,9 @@ fi
 
 SMOKE_DATABASE_PATH="${JAGC_DATABASE_PATH:-$SMOKE_WORKSPACE_DIR/jagc.sqlite}"
 
-INVALID_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-invalid.XXXXXX.json")"
-MISMATCH_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-idem-mismatch.XXXXXX.json")"
-MISSING_RUN_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-run-missing.XXXXXX.json")"
+INVALID_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-invalid.XXXXXX")"
+MISMATCH_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-idem-mismatch.XXXXXX")"
+MISSING_RUN_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/jagc-smoke-run-missing.XXXXXX")"
 
 export JAGC_WORKSPACE_DIR="$SMOKE_WORKSPACE_DIR"
 export JAGC_DATABASE_PATH="$SMOKE_DATABASE_PATH"

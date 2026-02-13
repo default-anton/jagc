@@ -54,6 +54,7 @@ That gives us stable refactors and catches protocol-shape regressions that conte
 
 ### Commands
 
+- Fast end-to-end smoke (echo runner): `pnpm smoke`
 - Full non-smoke suite (includes Telegram behavioral tests): `pnpm test`
 - Focused Telegram suite (optional while iterating, includes Telegram system smoke): `pnpm test:telegram`
 - npm package smoke (pack + install + run from tarball): `pnpm test:pack`
