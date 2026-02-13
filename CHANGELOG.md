@@ -23,6 +23,20 @@ All notable changes to `jagc` are documented here.
 
 - None.
 
+## [0.3.6] - 2026-02-13
+
+### Added
+
+- None.
+
+### Changed
+
+- Clarified agent prompt-context guidance to explicitly state AGENTS.md files are auto-loaded by scope and should not be searched proactively.
+
+### Fixed
+
+- None.
+
 ## [0.3.5] - 2026-02-13
 
 ### Added
