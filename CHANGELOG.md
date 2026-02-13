@@ -13,6 +13,20 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+## [0.3.5] - 2026-02-13
+
+### Added
+
 - Added Telegram Markdown rendering pipeline that converts assistant Markdown into Bot API `entities` and supports language-aware code attachments for oversized fenced code blocks (for example `snippet-1.ts`).
 
 ### Changed
