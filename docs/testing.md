@@ -18,10 +18,11 @@ Telegram tests use a local behavioral Bot API clone (`tests/helpers/telegram-bot
 Primary coverage lives in:
 
 - shared harness: `tests/helpers/telegram-test-kit.ts` (common bot token/chat fixtures, adapter+clone lifecycle helper, thread control fake)
-- `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, no-timeout long-run delivery, progress overflow splitting into additional Telegram messages, long-output chunking, and adapter-level recovery from transient polling errors)
+- `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, no-timeout long-run delivery, entity-based Markdown terminal rendering, language-aware code attachments, progress overflow splitting into additional Telegram messages, long-output chunking, and adapter-level recovery from transient polling errors)
 - `tests/telegram-runtime-controls.test.ts` (settings/model/thinking/auth callback flows)
 - `tests/telegram-polling.test.ts` (command/callback parsing and stale callback recovery)
-- `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), malformed payload handling, and urlencoded payload parsing)
+- `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), malformed payload handling, urlencoded payload parsing, and multipart `sendDocument` payload parsing)
+- `tests/telegram-markdown.test.ts` (Markdown AST-to-entity rendering, entity-safe chunking, language-aware code attachment filename mapping, and a small fixture corpus of realistic messy LLM markdown inputs)
 - `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + SQLite + Fastify app + polling adapter + clone)
 - `tests/cli-service-manager.test.ts` (launchd service-manager helpers: plist rendering, server entrypoint resolution, launchctl output parsing)
 
@@ -34,6 +35,7 @@ This clone is intentionally narrow: it only implements the polling and messaging
 - `sendChatAction`
 - `deleteMessage`
 - `answerCallbackQuery`
+- `sendDocument`
 
 ### Why
 
@@ -47,7 +49,7 @@ That gives us stable refactors and catches protocol-shape regressions that conte
 - Only add Bot API methods when jagc starts using them.
 - Keep method behavior deterministic and assertion-friendly.
 - Record outbound bot calls so tests assert on real API payloads (`text`, `reply_markup.inline_keyboard`, callback answers).
-- Accept both JSON and `application/x-www-form-urlencoded` Bot API payloads (including JSON-encoded nested fields like `reply_markup`) to stay resilient to client transport changes.
+- Accept JSON, `application/x-www-form-urlencoded`, and multipart/form-data Bot API payloads (including JSON-encoded nested fields like `reply_markup`) to stay resilient to client transport changes.
 - Fail loud on malformed request payloads (invalid JSON or invalid `getUpdates` argument shapes) to avoid silent transport bugs in tests.
 
 ### Commands

@@ -13,15 +13,16 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added Telegram Markdown rendering pipeline that converts assistant Markdown into Bot API `entities` and supports language-aware code attachments for oversized fenced code blocks (for example `snippet-1.ts`).
 
 ### Changed
 
-- None.
+- Telegram terminal run replies now always use entity-based rich-text rendering instead of plain-text passthrough.
 
 ### Fixed
 
-- None.
+- Telegram no longer depends on fragile MarkdownV2 string escaping for assistant replies.
+- Telegram entity rendering now strips/segments incompatible overlaps (for example `code` inside links, or formatting wrappers around inline code) to avoid Bot API entity parse failures.
 
 ## [0.3.4] - 2026-02-12
 

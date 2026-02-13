@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { type RunnerHandle, run } from '@grammyjs/runner';
-import { Bot, type BotConfig, type Context } from 'grammy';
+import { Bot, type BotConfig, type Context, InputFile } from 'grammy';
+import type { MessageEntity } from 'grammy/types';
 import type {
   OAuthLoginAttemptSnapshot,
   OAuthLoginInputKind,
@@ -18,6 +19,7 @@ import type { RunProgressEvent } from '../shared/run-progress.js';
 import type { RunRecord } from '../shared/run-types.js';
 import { extractTelegramRetryAfterSeconds } from './telegram-api-errors.js';
 import { parseTelegramCallbackData } from './telegram-controls-callbacks.js';
+import { renderTelegramMarkdown, type TelegramRenderedAttachment } from './telegram-markdown.js';
 import { TelegramRunProgressReporter } from './telegram-progress.js';
 import { TelegramRuntimeControls } from './telegram-runtime-controls.js';
 
@@ -405,7 +407,7 @@ export class TelegramPollingAdapter {
     });
 
     if (ingested.run.status !== 'running') {
-      await this.replyLong(chatId, formatRunResult(ingested.run));
+      await this.replyRunResult(chatId, formatRunResult(ingested.run));
       return;
     }
 
@@ -467,7 +469,7 @@ export class TelegramPollingAdapter {
         await options.progressReporter.finishSucceeded();
       }
 
-      await this.replyLong(options.chatId, formatRunResult(completedRun));
+      await this.replyRunResult(options.chatId, formatRunResult(completedRun));
     } catch (error) {
       if (isAbortError(error)) {
         return;
@@ -557,6 +559,25 @@ export class TelegramPollingAdapter {
     }
   }
 
+  private async replyRunResult(chatId: number, runResult: FormattedRunResult): Promise<void> {
+    if (runResult.mode === 'plain') {
+      await this.replyLong(chatId, runResult.text);
+      return;
+    }
+
+    const rendered = renderTelegramMarkdown(runResult.text, {
+      messageLimit: telegramMessageLimit,
+    });
+
+    for (const message of rendered.messages) {
+      await this.sendMarkdownMessage(chatId, message.text, message.entities);
+    }
+
+    for (const attachment of rendered.attachments) {
+      await this.sendCodeAttachment(chatId, attachment);
+    }
+  }
+
   private async replyLong(chatId: number, text: string): Promise<void> {
     for (const chunk of chunkMessage(text, telegramMessageLimit)) {
       await this.sendMessage(chatId, chunk);
@@ -565,6 +586,24 @@ export class TelegramPollingAdapter {
 
   private async sendMessage(chatId: number, text: string): Promise<void> {
     await callTelegramWithRetry(() => this.bot.api.sendMessage(chatId, text));
+  }
+
+  private async sendMarkdownMessage(chatId: number, text: string, entities: MessageEntity[]): Promise<void> {
+    if (entities.length === 0) {
+      await this.sendMessage(chatId, text);
+      return;
+    }
+
+    await callTelegramWithRetry(() => this.bot.api.sendMessage(chatId, text, { entities }));
+  }
+
+  private async sendCodeAttachment(chatId: number, attachment: TelegramRenderedAttachment): Promise<void> {
+    const inputFile = new InputFile(Buffer.from(attachment.content, 'utf8'), attachment.filename);
+    await callTelegramWithRetry(() =>
+      this.bot.api.sendDocument(chatId, inputFile, {
+        caption: attachment.caption,
+      }),
+    );
   }
 }
 
@@ -598,21 +637,43 @@ export function parseTelegramCommand(text: string): ParsedTelegramCommand | null
   };
 }
 
-function formatRunResult(run: RunRecord): string {
+type FormattedRunResult =
+  | {
+      mode: 'plain';
+      text: string;
+    }
+  | {
+      mode: 'markdown';
+      text: string;
+    };
+
+function formatRunResult(run: RunRecord): FormattedRunResult {
   if (run.status === 'failed') {
-    return `❌ ${run.errorMessage ?? 'run failed'}`;
+    return {
+      mode: 'plain',
+      text: `❌ ${run.errorMessage ?? 'run failed'}`,
+    };
   }
 
   if (!run.output) {
-    return 'Run succeeded with no output.';
+    return {
+      mode: 'plain',
+      text: 'Run succeeded with no output.',
+    };
   }
 
   const messageText = run.output.text;
   if (typeof messageText === 'string' && messageText.trim().length > 0) {
-    return messageText;
+    return {
+      mode: 'markdown',
+      text: messageText,
+    };
   }
 
-  return `Run output:\n${JSON.stringify(run.output, null, 2)}`;
+  return {
+    mode: 'plain',
+    text: `Run output:\n${JSON.stringify(run.output, null, 2)}`,
+  };
 }
 
 function helpText(): string {

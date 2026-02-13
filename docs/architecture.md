@@ -137,6 +137,8 @@ Operational note:
 - Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed, and if the run finishes without any snippets, the placeholder message is deleted.
 - Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`); when progress overflows the editable message limit, older progress lines are flushed into additional `progress log (continued):` messages and the live message keeps tail updates.
 - Adapter keeps waiting for terminal run status in the background and replies with output/error when done (no timeout handoff message).
+- Terminal assistant text replies are parsed as Markdown and sent via Telegram `entities` (not `parse_mode` Markdown strings) for robust formatting.
+- Fenced code blocks above inline thresholds are emitted as Telegram document uploads with language-aware filenames (for example `snippet-1.ts`); shorter blocks stay inline as `pre` entities.
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
 - Unknown slash commands are not rejected by the adapter; they are forwarded to the assistant as normal `followUp` text with the original message content.
 - After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.

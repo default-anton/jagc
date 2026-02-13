@@ -45,6 +45,81 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
+  test('renders markdown output using Telegram entities', async () => {
+    const markdownOutput = [
+      'Hello **world** and `inline` code with [docs](https://example.com).',
+      '',
+      '```ts',
+      'const answer: number = 42;',
+      '```',
+    ].join('\n');
+
+    const runService = new StubRunService('run-markdown-entities', [
+      runRecord({
+        runId: 'run-markdown-entities',
+        status: 'succeeded',
+        output: { text: markdownOutput },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: 'render markdown please',
+      });
+
+      const sendMessage = await clone.waitForBotCall(
+        'sendMessage',
+        (call) => typeof call.payload.text === 'string' && call.payload.text.includes('const answer: number = 42;'),
+      );
+
+      expect(sendMessage.payload.text).toContain('Hello world and inline code with docs.');
+
+      const entities = sendMessage.payload.entities as Array<{ type?: string }>;
+      expect(Array.isArray(entities)).toBe(true);
+      expect(entities.some((entity) => entity.type === 'bold')).toBe(true);
+      expect(entities.some((entity) => entity.type === 'code')).toBe(true);
+      expect(entities.some((entity) => entity.type === 'text_link')).toBe(true);
+      expect(entities.some((entity) => entity.type === 'pre')).toBe(true);
+    });
+  });
+
+  test('sends oversized code blocks as language-aware document attachments', async () => {
+    const largeCode = Array.from({ length: 90 }, (_, index) => `const value${index}: number = ${index};`).join('\n');
+    const output = ['```typescript', largeCode, '```'].join('\n');
+
+    const runService = new StubRunService('run-markdown-attachment', [
+      runRecord({
+        runId: 'run-markdown-attachment',
+        status: 'succeeded',
+        output: { text: output },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: 'render attachment please',
+      });
+
+      const attachmentNotice = await clone.waitForBotCall(
+        'sendMessage',
+        (call) => call.payload.text === '📎 attached code: snippet-1.ts',
+      );
+      expect(attachmentNotice.payload.text).toBe('📎 attached code: snippet-1.ts');
+
+      const documentCall = await clone.waitForBotCall('sendDocument');
+      expect(documentCall.payload.caption).toBe('📎 snippet-1.ts (typescript)');
+
+      const attachmentFieldName = String(documentCall.payload.document).replace('attach://', '');
+      const attachmentContent = documentCall.payload[attachmentFieldName];
+      expect(typeof attachmentContent).toBe('string');
+      expect(String(attachmentContent)).toContain('const value0: number = 0;');
+    });
+  });
+
   test('accepts authorized users when allowlist entry has leading zeroes', async () => {
     const runService = new StubRunService('run-leading-zero-allow', [
       runRecord({
