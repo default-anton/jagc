@@ -237,6 +237,7 @@ jagc uninstall --purge-data
 
 ## Operator/dev feedback loops
 
+- Local dev server: `pnpm dev` (prepends a repo-local `jagc` shim so agent `bash` calls use `pnpm dev:cli`, not a globally installed `jagc`)
 - Fast end-to-end smoke (echo runner): `pnpm smoke`
 - Smoke through real pi runtime: `JAGC_RUNNER=pi pnpm smoke`
 - Full suite (includes Telegram behavioral clone tests): `pnpm test`

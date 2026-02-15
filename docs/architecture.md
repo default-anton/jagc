@@ -42,6 +42,7 @@ This doc is the implementation snapshot (not design intent).
 - Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (does not overwrite by default).
 - Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (does not overwrite by default), including context-injection extensions for runtime/harness context, global AGENTS.md, skills listing, local pi docs/examples references, and Codex harness instructions.
 - Dev-only overwrite mode (`JAGC_DEV_OVERWRITE_DEFAULTS=1`, enabled by `pnpm dev`) rewrites workspace `SYSTEM.md`, `AGENTS.md`, bundled `defaults/skills/**`, and bundled `defaults/extensions/**` on each startup, while preserving existing `settings.json`.
+- `pnpm dev` also prepends a repo-local `scripts/dev-bin/jagc` shim to `PATH`, so agent `bash` calls to `jagc` resolve to `pnpm dev:cli` from the current checkout instead of any globally installed `jagc` binary.
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.
 - `jagc packages ...` is a thin wrapper around the bundled `@mariozechner/pi-coding-agent` package manager CLI (`dist/cli.js`), executed with `PI_CODING_AGENT_DIR=<workspace>` and `cwd=<workspace>` so package operations target the jagc workspace and do not depend on a globally installed `pi` binary.
 - Bootstrap initializes `JAGC_WORKSPACE_DIR` as a local git repository (`git init`) when `.git` is missing.
