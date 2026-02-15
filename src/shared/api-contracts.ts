@@ -18,6 +18,10 @@ export const runParamsSchema = z.object({
   run_id: z.string().trim().min(1),
 });
 
+export const taskParamsSchema = z.object({
+  task_id: z.string().trim().min(1),
+});
+
 export const threadParamsSchema = z.object({
   thread_key: z.string().trim().min(1),
 });
@@ -152,6 +156,102 @@ export const shareThreadSessionResponseSchema = z.object({
   share_url: z.string().trim().min(1),
 });
 
+const scheduleCreateOnceSchema = z.object({
+  kind: z.literal('once'),
+  once_at: z.string().trim().min(1),
+  timezone: z.string().trim().min(1),
+});
+
+const scheduleCreateCronSchema = z.object({
+  kind: z.literal('cron'),
+  cron: z.string().trim().min(1),
+  timezone: z.string().trim().min(1),
+});
+
+export const taskCreateScheduleSchema = z.discriminatedUnion('kind', [
+  scheduleCreateOnceSchema,
+  scheduleCreateCronSchema,
+]);
+
+export const createTaskRequestSchema = z.object({
+  title: z.string().trim().min(1),
+  instructions: z.string().trim().min(1),
+  schedule: taskCreateScheduleSchema,
+});
+
+export const updateTaskRequestSchema = z
+  .object({
+    title: z.string().trim().min(1).optional(),
+    instructions: z.string().trim().min(1).optional(),
+    enabled: z.boolean().optional(),
+    schedule: taskCreateScheduleSchema.optional(),
+  })
+  .refine((payload) => Object.keys(payload).length > 0, 'at least one task field must be provided');
+
+export const taskListQuerySchema = z.object({
+  thread_key: z.string().trim().min(1).optional(),
+  state: z.enum(['all', 'enabled', 'disabled']).optional(),
+});
+
+export const taskDeliveryTargetSchema = z.object({
+  provider: z.string(),
+  route: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const taskScheduleResponseSchema = z.object({
+  kind: z.enum(['once', 'cron']),
+  once_at: z.string().nullable(),
+  cron: z.string().nullable(),
+  timezone: z.string(),
+});
+
+export const scheduledTaskSchema = z.object({
+  task_id: z.string(),
+  title: z.string(),
+  instructions: z.string(),
+  schedule: taskScheduleResponseSchema,
+  enabled: z.boolean(),
+  next_run_at: z.string().nullable(),
+  creator_thread_key: z.string(),
+  owner_user_key: z.string().nullable(),
+  delivery_target: taskDeliveryTargetSchema,
+  execution_thread_key: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  last_run_at: z.string().nullable(),
+  last_run_status: z.enum(['succeeded', 'failed']).nullable(),
+  last_error_message: z.string().nullable(),
+});
+
+export const taskResponseSchema = z.object({
+  task: scheduledTaskSchema,
+  warnings: z.array(z.string()).optional(),
+});
+
+export const taskListResponseSchema = z.object({
+  tasks: z.array(scheduledTaskSchema),
+});
+
+export const deleteTaskResponseSchema = z.object({
+  deleted: z.boolean(),
+});
+
+export const runNowTaskResponseSchema = z.object({
+  task: scheduledTaskSchema,
+  task_run: z.object({
+    task_run_id: z.string(),
+    task_id: z.string(),
+    scheduled_for: z.string(),
+    idempotency_key: z.string(),
+    run_id: z.string().nullable(),
+    status: z.enum(['pending', 'dispatched', 'succeeded', 'failed']),
+    error_message: z.string().nullable(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  }),
+});
+
 export type PostMessageRequest = z.infer<typeof postMessageRequestSchema>;
 export type RunResponse = z.infer<typeof runResponseSchema>;
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
@@ -166,3 +266,9 @@ export type SetThreadThinkingRequest = z.infer<typeof setThreadThinkingRequestSc
 export type CancelThreadRunResponse = z.infer<typeof cancelThreadRunResponseSchema>;
 export type ResetThreadSessionResponse = z.infer<typeof resetThreadSessionResponseSchema>;
 export type ShareThreadSessionResponse = z.infer<typeof shareThreadSessionResponseSchema>;
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>;
+export type ScheduledTaskResponse = z.infer<typeof scheduledTaskSchema>;
+export type TaskResponse = z.infer<typeof taskResponseSchema>;
+export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
+export type RunNowTaskResponse = z.infer<typeof runNowTaskResponseSchema>;

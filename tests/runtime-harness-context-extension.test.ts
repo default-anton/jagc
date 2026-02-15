@@ -30,6 +30,9 @@ describe('runtimeHarnessContextExtension', () => {
     expect(result?.systemPrompt).toContain('Your harness is [jagc]');
     expect(result?.systemPrompt).toContain('jagc wraps pi coding agent');
     expect(result?.systemPrompt).toContain('use the `jagc` CLI as your first control surface');
+    expect(result?.systemPrompt).toContain('Manage scheduled tasks via `jagc task ... --json`');
+    expect(result?.systemPrompt).toContain('Do not modify jagc SQLite tables directly');
+    expect(result?.systemPrompt).toContain('Task execution threads are created lazily on first due/run-now execution');
     expect(result?.systemPrompt).toContain(`Your skills are located in: ${path.join(fakeCwd, 'skills')}/`);
     expect(result?.systemPrompt).toContain(`Your extensions are located in: ${path.join(fakeCwd, 'extensions')}/`);
     expect(result?.systemPrompt).toContain('Pi documentation (consult when needed for jagc/pi implementation work):');

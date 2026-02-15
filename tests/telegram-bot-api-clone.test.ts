@@ -245,6 +245,77 @@ describe('TelegramBotApiClone', () => {
     }
   });
 
+  test('supports createForumTopic and returns message_thread_id', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const result = await apiCall<{ message_thread_id: number; name: string }>(clone, 'createForumTopic', {
+        chat_id: 101,
+        name: 'task:abcd1234 Daily plan',
+      });
+
+      expect(result.name).toContain('task:abcd1234');
+      expect(result.message_thread_id).toBeGreaterThan(0);
+
+      const calls = clone.getBotCalls();
+      expect(calls[0]).toMatchObject({
+        method: 'createForumTopic',
+        payload: {
+          chat_id: 101,
+          name: 'task:abcd1234 Daily plan',
+        },
+      });
+    } finally {
+      await clone.stop();
+    }
+  });
+
+  test('preserves message_thread_id payload fields for topic-aware methods', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      await apiCall(clone, 'sendMessage', {
+        chat_id: 101,
+        message_thread_id: 333,
+        text: 'hello topic',
+      });
+
+      await apiCall(clone, 'editMessageText', {
+        chat_id: 101,
+        message_id: 10,
+        message_thread_id: 333,
+        text: 'edited topic',
+      });
+
+      await apiCall(clone, 'sendChatAction', {
+        chat_id: 101,
+        message_thread_id: 333,
+        action: 'typing',
+      });
+
+      await apiCall(clone, 'deleteMessage', {
+        chat_id: 101,
+        message_id: 10,
+        message_thread_id: 333,
+      });
+
+      const calls = clone.getBotCalls();
+      expect(calls.map((call) => call.method)).toEqual([
+        'sendMessage',
+        'editMessageText',
+        'sendChatAction',
+        'deleteMessage',
+      ]);
+      for (const call of calls) {
+        expect(call.payload.message_thread_id).toBe(333);
+      }
+    } finally {
+      await clone.stop();
+    }
+  });
+
   test('parses multipart sendDocument with filename* content-disposition parameter', async () => {
     const clone = new TelegramBotApiClone({ token: testBotToken });
     await clone.start();

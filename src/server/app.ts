@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { z } from 'zod';
+
 import type {
   OAuthLoginAttemptSnapshot,
   OAuthLoginInputKind,
@@ -14,24 +15,21 @@ import {
   OAuthLoginInvalidStateError,
   OAuthLoginProviderNotFoundError,
 } from '../runtime/pi-auth.js';
-import type { ThreadControlService, ThreadRuntimeState } from '../runtime/pi-executor.js';
+import type { ThreadControlService } from '../runtime/pi-executor.js';
 import {
   type ApiErrorResponse,
   authLoginAttemptParamsSchema,
   authProviderParamsSchema,
-  cancelThreadRunResponseSchema,
   oauthOwnerHeaderName,
   postMessageRequestSchema,
   type RunResponse,
-  resetThreadSessionResponseSchema,
   runParamsSchema,
-  setThreadModelRequestSchema,
-  setThreadThinkingRequestSchema,
-  shareThreadSessionResponseSchema,
   submitOAuthLoginInputRequestSchema,
-  threadParamsSchema,
 } from '../shared/api-contracts.js';
 import type { RunRecord } from '../shared/run-types.js';
+import { registerTaskRoutes } from './app-task-routes.js';
+import { registerThreadRoutes } from './app-thread-routes.js';
+import type { ScheduledTaskService } from './scheduled-task-service.js';
 import type { RunService } from './service.js';
 
 const idempotencyHeaderSchema = z.string().trim().min(1).optional();
@@ -53,20 +51,17 @@ interface AppOptions {
     cancelOAuthLogin?(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
   threadControlService?: ThreadControlService;
+  scheduledTaskService?: ScheduledTaskService;
   logger?: FastifyBaseLogger;
 }
 
 export function createApp(options: AppOptions): FastifyInstance {
-  let app: FastifyInstance;
-
-  if (options.logger) {
-    app = Fastify({
-      loggerInstance: options.logger,
-      disableRequestLogging: true,
-    });
-  } else {
-    app = Fastify({ logger: false });
-  }
+  const app = options.logger
+    ? Fastify({
+        loggerInstance: options.logger,
+        disableRequestLogging: true,
+      })
+    : Fastify({ logger: false });
 
   const requestStartedAt = new WeakMap<object, bigint>();
 
@@ -103,9 +98,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     });
   });
 
-  app.get('/healthz', async () => {
-    return { ok: true };
-  });
+  app.get('/healthz', async () => ({ ok: true }));
 
   app.post('/v1/messages', async (request, reply) => {
     const bodyResult = postMessageRequestSchema.safeParse(request.body);
@@ -286,157 +279,16 @@ export function createApp(options: AppOptions): FastifyInstance {
     }
   });
 
-  app.get('/v1/threads/:thread_key/runtime', async (request, reply) => {
-    if (!options.threadControlService) {
-      return reply
-        .status(501)
-        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
-    }
-
-    const paramsResult = threadParamsSchema.safeParse(request.params);
-    if (!paramsResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
-    }
-
-    try {
-      const state = await options.threadControlService.getThreadRuntimeState(paramsResult.data.thread_key);
-      return reply.send(threadRuntimeStateResponse(state));
-    } catch (error) {
-      return reply.status(400).send(errorResponse('thread_runtime_error', toErrorMessage(error)));
-    }
+  registerThreadRoutes(app, {
+    threadControlService: options.threadControlService,
+    errorResponse,
+    toErrorMessage,
   });
 
-  app.put('/v1/threads/:thread_key/model', async (request, reply) => {
-    if (!options.threadControlService) {
-      return reply
-        .status(501)
-        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
-    }
-
-    const paramsResult = threadParamsSchema.safeParse(request.params);
-    if (!paramsResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
-    }
-
-    const bodyResult = setThreadModelRequestSchema.safeParse(request.body);
-    if (!bodyResult.success) {
-      return reply.status(400).send(errorResponse('invalid_model_payload', bodyResult.error.issues[0]?.message));
-    }
-
-    try {
-      const state = await options.threadControlService.setThreadModel(
-        paramsResult.data.thread_key,
-        bodyResult.data.provider,
-        bodyResult.data.model_id,
-      );
-      return reply.send(threadRuntimeStateResponse(state));
-    } catch (error) {
-      return reply.status(400).send(errorResponse('thread_model_error', toErrorMessage(error)));
-    }
-  });
-
-  app.put('/v1/threads/:thread_key/thinking', async (request, reply) => {
-    if (!options.threadControlService) {
-      return reply
-        .status(501)
-        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
-    }
-
-    const paramsResult = threadParamsSchema.safeParse(request.params);
-    if (!paramsResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
-    }
-
-    const bodyResult = setThreadThinkingRequestSchema.safeParse(request.body);
-    if (!bodyResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thinking_payload', bodyResult.error.issues[0]?.message));
-    }
-
-    try {
-      const state = await options.threadControlService.setThreadThinkingLevel(
-        paramsResult.data.thread_key,
-        bodyResult.data.thinking_level,
-      );
-      return reply.send(threadRuntimeStateResponse(state));
-    } catch (error) {
-      return reply.status(400).send(errorResponse('thread_thinking_error', toErrorMessage(error)));
-    }
-  });
-
-  app.post('/v1/threads/:thread_key/cancel', async (request, reply) => {
-    if (!options.threadControlService) {
-      return reply
-        .status(501)
-        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
-    }
-
-    const paramsResult = threadParamsSchema.safeParse(request.params);
-    if (!paramsResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
-    }
-
-    try {
-      const cancelled = await options.threadControlService.cancelThreadRun(paramsResult.data.thread_key);
-      return reply.send(
-        cancelThreadRunResponseSchema.parse({
-          thread_key: cancelled.threadKey,
-          cancelled: cancelled.cancelled,
-        }),
-      );
-    } catch (error) {
-      return reply.status(400).send(errorResponse('thread_run_cancel_error', toErrorMessage(error)));
-    }
-  });
-
-  app.delete('/v1/threads/:thread_key/session', async (request, reply) => {
-    if (!options.threadControlService) {
-      return reply
-        .status(501)
-        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
-    }
-
-    const paramsResult = threadParamsSchema.safeParse(request.params);
-    if (!paramsResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
-    }
-
-    try {
-      await options.threadControlService.resetThreadSession(paramsResult.data.thread_key);
-      return reply.send(
-        resetThreadSessionResponseSchema.parse({
-          thread_key: paramsResult.data.thread_key,
-          reset: true,
-        }),
-      );
-    } catch (error) {
-      return reply.status(400).send(errorResponse('thread_session_reset_error', toErrorMessage(error)));
-    }
-  });
-
-  app.post('/v1/threads/:thread_key/share', async (request, reply) => {
-    if (!options.threadControlService) {
-      return reply
-        .status(501)
-        .send(errorResponse('thread_control_unavailable', 'thread control service is not configured'));
-    }
-
-    const paramsResult = threadParamsSchema.safeParse(request.params);
-    if (!paramsResult.success) {
-      return reply.status(400).send(errorResponse('invalid_thread_key', paramsResult.error.issues[0]?.message));
-    }
-
-    try {
-      const shared = await options.threadControlService.shareThreadSession(paramsResult.data.thread_key);
-      return reply.send(
-        shareThreadSessionResponseSchema.parse({
-          thread_key: shared.threadKey,
-          gist_url: shared.gistUrl,
-          share_url: shared.shareUrl,
-        }),
-      );
-    } catch (error) {
-      return reply.status(400).send(errorResponse('thread_session_share_error', toErrorMessage(error)));
-    }
+  registerTaskRoutes(app, {
+    scheduledTaskService: options.scheduledTaskService,
+    errorResponse,
+    toErrorMessage,
   });
 
   return app;
@@ -448,22 +300,6 @@ function runResponse(run: RunRecord): RunResponse {
     status: run.status,
     output: run.output,
     error: run.errorMessage ? { message: run.errorMessage } : null,
-  };
-}
-
-function threadRuntimeStateResponse(state: ThreadRuntimeState) {
-  return {
-    thread_key: state.threadKey,
-    model: state.model
-      ? {
-          provider: state.model.provider,
-          model_id: state.model.modelId,
-          name: state.model.name,
-        }
-      : null,
-    thinking_level: state.thinkingLevel,
-    supports_thinking: state.supportsThinking,
-    available_thinking_levels: state.availableThinkingLevels,
   };
 }
 

@@ -6,6 +6,7 @@ import type {
   ProviderCatalogEntry,
 } from '../runtime/pi-auth.js';
 import type { ThreadControlService, ThreadRuntimeState } from '../runtime/pi-executor.js';
+import { telegramRoute, telegramThreadKeyFromRoute } from '../shared/telegram-threading.js';
 import { TelegramAuthControls } from './telegram-auth-controls.js';
 import {
   callbackAuthProviders,
@@ -59,7 +60,7 @@ export class TelegramRuntimeControls {
       return false;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const cancelled = await threadControlService.cancelThreadRun(threadKey);
     if (cancelled.cancelled) {
       await this.reply(ctx, '🛑 Stopped the active run. Session context is preserved.');
@@ -77,7 +78,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     await threadControlService.resetThreadSession(threadKey);
     await this.reply(ctx, '✅ Session reset. Your next message will start a new pi session.');
   }
@@ -89,7 +90,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const shared = await threadControlService.shareThreadSession(threadKey);
     await this.reply(ctx, `Share URL: ${shared.shareUrl}\nGist: ${shared.gistUrl}`);
   }
@@ -182,7 +183,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const state = await threadControlService.getThreadRuntimeState(threadKey);
 
     const lines: string[] = [];
@@ -215,7 +216,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const state = await threadControlService.getThreadRuntimeState(threadKey);
 
     const providers = authService.getProviderCatalog().filter((provider) => provider.available_models > 0);
@@ -316,7 +317,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const state = await threadControlService.getThreadRuntimeState(threadKey);
 
     const availableModels = provider.models.filter((model) => model.available).map((model) => ({ model }));
@@ -426,7 +427,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     await threadControlService.setThreadModel(threadKey, provider.provider, selectedModel.model_id);
 
     await this.showSettingsPanel(ctx, `✅ Model set to ${provider.provider}/${selectedModel.model_id}`);
@@ -439,7 +440,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const state = await threadControlService.getThreadRuntimeState(threadKey);
 
     const lines: string[] = [];
@@ -514,7 +515,7 @@ export class TelegramRuntimeControls {
       return;
     }
 
-    const threadKey = telegramThreadKey(ctx.chat?.id);
+    const threadKey = threadKeyFromContext(ctx);
     const currentState = await threadControlService.getThreadRuntimeState(threadKey);
     const selectedThinkingLevel = currentState.availableThinkingLevels.find((level) => level === thinkingLevel);
     if (!currentState.supportsThinking || !selectedThinkingLevel) {
@@ -545,10 +546,10 @@ function formatModelValue(state: ThreadRuntimeState): string {
   return `${state.model.provider}/${state.model.modelId}`;
 }
 
-function telegramThreadKey(chatId: number | undefined): string {
-  if (chatId === undefined) {
-    throw new Error('telegram message has no chat id');
-  }
-
-  return `telegram:chat:${chatId}`;
+function threadKeyFromContext(ctx: Context): string {
+  const route = telegramRoute(
+    ctx.chat?.id,
+    ctx.callbackQuery?.message?.message_thread_id ?? ctx.message?.message_thread_id,
+  );
+  return telegramThreadKeyFromRoute(route);
 }

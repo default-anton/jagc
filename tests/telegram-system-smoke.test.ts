@@ -5,6 +5,8 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { TelegramPollingAdapter } from '../src/adapters/telegram-polling.js';
 import { createApp } from '../src/server/app.js';
 import { EchoRunExecutor } from '../src/server/executor.js';
+import { ScheduledTaskService } from '../src/server/scheduled-task-service.js';
+import { SqliteScheduledTaskStore } from '../src/server/scheduled-task-store.js';
 import { LocalRunScheduler } from '../src/server/scheduler.js';
 import { RunService } from '../src/server/service.js';
 import type { SqliteDatabase } from '../src/server/sqlite.js';
@@ -109,6 +111,78 @@ describe('Telegram system smoke', () => {
     await stack.stop();
     runningStacks.delete(stack);
   });
+
+  test('run-now lazily creates a Telegram topic and delivers scheduled output in that topic thread', async () => {
+    const stack = await startTelegramSystemStack(testDb.database);
+    runningStacks.add(stack);
+
+    const createTaskResponse = await fetch(
+      `${stack.apiBaseUrl}/v1/threads/${encodeURIComponent('telegram:chat:101')}/tasks`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: 'Daily plan',
+          instructions: 'Prepare my day plan',
+          schedule: {
+            kind: 'cron',
+            cron: '0 9 * * 1-5',
+            timezone: 'America/Los_Angeles',
+          },
+        }),
+      },
+    );
+
+    expect(createTaskResponse.status).toBe(201);
+    const createdTask = (await createTaskResponse.json()) as { task: { task_id: string } };
+
+    expect(stack.clone.getApiCallCount('createForumTopic')).toBe(0);
+
+    const runNowResponse = await fetch(
+      `${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}/run-now`,
+      {
+        method: 'POST',
+      },
+    );
+
+    expect(runNowResponse.status).toBe(200);
+
+    const createTopicCall = await stack.clone.waitForBotCall('createForumTopic', () => true, 5_000);
+    expect(String(createTopicCall.payload.name)).toContain('task:');
+
+    const topicReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) =>
+        typeof call.payload.message_thread_id === 'number' &&
+        typeof call.payload.text === 'string' &&
+        String(call.payload.text).includes('[SCHEDULED TASK]'),
+      8_000,
+    );
+
+    expect(topicReply.payload.chat_id).toBe(telegramTestChatId);
+    expect(typeof topicReply.payload.message_thread_id).toBe('number');
+
+    const updatedTitle = 'Daily plan updated';
+    const patchTaskResponse = await fetch(`${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: updatedTitle,
+      }),
+    });
+
+    expect(patchTaskResponse.status).toBe(200);
+
+    const editTopicCall = await stack.clone.waitForBotCall('editForumTopic', () => true, 5_000);
+    expect(String(editTopicCall.payload.name)).toBe(`task:${createdTask.task.task_id.slice(0, 8)} ${updatedTitle}`);
+
+    await stack.stop();
+    runningStacks.delete(stack);
+  }, 20_000);
 });
 
 interface PersistedRunRow {
@@ -130,6 +204,7 @@ interface RunningTelegramSystemStack {
   clone: TelegramBotApiClone;
   app: FastifyInstance;
   runService: RunService;
+  scheduledTaskService: ScheduledTaskService;
   apiBaseUrl: string;
   stop(): Promise<void>;
 }
@@ -138,6 +213,7 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
   const clone = new TelegramBotApiClone({ token: telegramTestBotToken });
   let app: FastifyInstance | null = null;
   let runService: RunService | null = null;
+  let scheduledTaskService: ScheduledTaskService | null = null;
   let adapter: TelegramPollingAdapter | null = null;
 
   try {
@@ -158,8 +234,48 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
     runService = new RunService(runStore, new EchoRunExecutor(5), runScheduler);
     await runService.init();
 
+    adapter = new TelegramPollingAdapter({
+      botToken: telegramTestBotToken,
+      runService,
+      allowedTelegramUserIds: [String(telegramTestUserId)],
+      telegramApiRoot: clone.apiRoot ?? undefined,
+      pollRequestTimeoutSeconds: 1,
+      pollIntervalMs: 10,
+    });
+    await adapter.start();
+
+    const scheduledTaskStore = new SqliteScheduledTaskStore(database);
+    scheduledTaskService = new ScheduledTaskService(scheduledTaskStore, runService, {
+      pollIntervalMs: 50,
+      telegramBridge: {
+        createTaskTopic: async ({ chatId, taskId, title }) => {
+          if (!adapter) {
+            throw new Error('telegram adapter not started');
+          }
+
+          return adapter.createTaskTopic({ chatId, taskId, title });
+        },
+        syncTaskTopicTitle: async (route, taskId, title) => {
+          if (!adapter) {
+            throw new Error('telegram adapter not started');
+          }
+
+          await adapter.syncTaskTopicTitle(route, taskId, title);
+        },
+        deliverRun: async (runId, route) => {
+          if (!adapter) {
+            throw new Error('telegram adapter not started');
+          }
+
+          await adapter.deliverRun(runId, route);
+        },
+      },
+    });
+    await scheduledTaskService.start();
+
     app = createApp({
       runService,
+      scheduledTaskService,
     });
 
     await app.listen({
@@ -172,22 +288,13 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
       throw new Error('server did not bind to a TCP address');
     }
 
-    adapter = new TelegramPollingAdapter({
-      botToken: telegramTestBotToken,
-      runService,
-      allowedTelegramUserIds: [String(telegramTestUserId)],
-      telegramApiRoot: clone.apiRoot ?? undefined,
-      pollRequestTimeoutSeconds: 1,
-      pollIntervalMs: 10,
-    });
-    await adapter.start();
-
     let stopped = false;
 
     return {
       clone,
       app,
       runService,
+      scheduledTaskService,
       apiBaseUrl: `http://127.0.0.1:${(address as AddressInfo).port}`,
       async stop() {
         if (stopped) {
@@ -195,12 +302,12 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
         }
 
         stopped = true;
-        await stopTelegramSystemResources({ adapter, app, runService, clone });
+        await stopTelegramSystemResources({ adapter, app, scheduledTaskService, runService, clone });
       },
     };
   } catch (error) {
     try {
-      await stopTelegramSystemResources({ adapter, app, runService, clone });
+      await stopTelegramSystemResources({ adapter, app, scheduledTaskService, runService, clone });
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], 'failed to start telegram system stack');
     }
@@ -212,10 +319,19 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
 async function stopTelegramSystemResources(resources: {
   adapter: TelegramPollingAdapter | null;
   app: FastifyInstance | null;
+  scheduledTaskService: ScheduledTaskService | null;
   runService: RunService | null;
   clone: TelegramBotApiClone;
 }): Promise<void> {
   const failures: unknown[] = [];
+
+  if (resources.scheduledTaskService) {
+    try {
+      await resources.scheduledTaskService.stop();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
 
   if (resources.adapter) {
     try {

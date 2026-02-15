@@ -4,11 +4,12 @@ This doc is the implementation snapshot (not design intent).
 
 - Current operator-facing contract: [`README.md`](../README.md)
 
-## Implemented surface (v0)
+## Implemented surface (v1)
 
 ### HTTP API
 
 - Core run lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
+- Scheduled tasks: `POST /v1/threads/:thread_key/tasks`, `GET /v1/tasks`, `GET /v1/tasks/:task_id`, `PATCH /v1/tasks/:task_id`, `DELETE /v1/tasks/:task_id`, `POST /v1/tasks/:task_id/run-now`
 - OAuth broker: `GET /v1/auth/providers`, `POST /v1/auth/providers/:provider/login`, `GET /v1/auth/logins/:attempt_id`, `POST /v1/auth/logins/:attempt_id/input`, `POST /v1/auth/logins/:attempt_id/cancel`
 - Runtime controls: `GET /v1/models`, `GET /v1/threads/:thread_key/runtime`, `PUT /v1/threads/:thread_key/model`, `PUT /v1/threads/:thread_key/thinking`, `POST /v1/threads/:thread_key/cancel`, `DELETE /v1/threads/:thread_key/session`, `POST /v1/threads/:thread_key/share`
 
@@ -19,6 +20,7 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
+- `jagc task create|list|get|update|delete|run --now|enable|disable`
 - `jagc cancel`, `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc telegram allow|list`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
@@ -100,6 +102,20 @@ This doc is the implementation snapshot (not design intent).
 - Same-thread turn ordering (`followUp` / `steer`) is enforced by per-thread `ThreadRunController` instances in the pi executor.
 - Multi-process/global run coordination is intentionally deferred post-v0.
 
+## Scheduled task domain + scheduler
+
+- Storage tables: `scheduled_tasks`, `scheduled_task_runs` (`migrations/003_scheduled_tasks.sql`).
+- `ScheduledTaskService` runs in-process (`src/server/scheduled-task-service.ts`) with a 5s poll loop by default:
+  - claims due tasks (`enabled=1 AND next_run_at <= now`)
+  - creates/ensures task occurrence rows (`scheduled_task_runs`) with deterministic idempotency keys
+  - lazily ensures per-task execution thread (`execution_thread_key`) on first due/run-now
+  - advances schedule (`once` disables; `cron` computes first future slot strictly `> now`)
+  - dispatches pending occurrences via `RunService.ingestMessage(...)` (`source=task:<task_id>`, `deliveryMode=followUp`)
+- Completion bookkeeping is durable and restart-safe:
+  - pending task-runs are resumed on startup/ticks
+  - dispatched task-runs are reconciled against run terminal state and update `scheduled_tasks.last_run_*`
+- `run-now` creates a task occurrence row for current UTC timestamp and dispatches immediately without shifting recurring schedule anchors.
+
 ## Session/thread model (pi executor)
 
 - Session identity is per `thread_key`.
@@ -124,7 +140,7 @@ Operational note:
 ## Telegram polling behavior
 
 - Ingest source: grammY long polling (personal chats).
-- Thread mapping: `thread_key = telegram:chat:<chat_id>`.
+- Thread mapping: `thread_key = telegram:chat:<chat_id>` for base chats, and `thread_key = telegram:chat:<chat_id>:topic:<message_thread_id>` when Telegram topic/thread context is present on inbound message/callback payloads.
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Access gate: Telegram message/callback handling is allowlisted by `JAGC_TELEGRAM_ALLOWED_USER_IDS` (`from.id` values). Empty allowlist means deny all. Unauthorized users receive an in-chat command prompt (`jagc telegram allow --user-id <id>`) and no run is ingested.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
@@ -137,6 +153,8 @@ Operational note:
 - Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed, and if the run finishes without any snippets, the placeholder message is deleted.
 - Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`); when progress overflows the editable message limit, older progress lines are flushed into additional `progress log (continued):` messages and the live message keeps tail updates.
 - Adapter keeps waiting for terminal run status in the background and replies with output/error when done (no timeout handoff message).
+- Scheduled task runs reuse the same run-delivery path and are delivered into per-task Telegram topics; first run lazily creates a forum topic (`createForumTopic`) and persists the resulting `message_thread_id` route metadata.
+- Topic-thread delivery sends/edits/actions/documents/progress payloads with `message_thread_id` so all progress/final output stays inside the task topic.
 - Terminal assistant text replies are parsed as Markdown and sent via Telegram `entities` (not `parse_mode` Markdown strings) for robust formatting.
 - Other adapter-originated text replies (command/status errors, runtime-control panels, and auth/allowlist guidance) are sent as literal text to avoid markdown-driven mutation of operator commands and path snippets.
 - Fenced code blocks above inline thresholds are emitted as Telegram document uploads with language-aware filenames (for example `snippet-1.ts`); shorter blocks stay inline as `pre` entities.
@@ -172,7 +190,7 @@ Operational note:
 
 - API schemas: `src/shared/api-contracts.ts` (used by server + CLI)
 - Run progress event contract: `src/shared/run-progress.ts`
-- Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`
+- Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`, `migrations/003_scheduled_tasks.sql`
 - Migration runner: `src/server/migrations.ts` (`schema_migrations`; startup apply runs in a SQLite `BEGIN IMMEDIATE` transaction to avoid concurrent bootstrap races)
 
 ## Known gaps / intentional limitations
@@ -180,4 +198,5 @@ Operational note:
 - Telegram webhook mode is intentionally unsupported in core (polling is the only supported Telegram mode).
 - Webhook hardening beyond current baseline is pending (signatures/replay protection).
 - Linux/systemd and Windows service lifecycle commands are not implemented yet (macOS launchd is first supported target).
+- Telegram scheduled tasks require forum topics for execution-thread creation; when topics are unavailable, occurrences fail with actionable `telegram_topics_unavailable` errors (no shared-thread fallback).
 - Multi-process one-active-run-per-thread coordination is deferred.

@@ -17,6 +17,7 @@
 - Telegram chat interface for day-to-day use
 - Local server + CLI (`jagc ...`) as a control plane for operators and agent self-maintenance
 - Durable run/thread state in SQLite
+- Scheduled tasks (one-off + recurring) with per-task execution threads
 - pi-coding-agent runtime features (sessions, skills, prompts, extensions)
 
 ## Mental model (2 minutes)
@@ -126,6 +127,9 @@ jagc thinking get --thread-key cli:default --json
 jagc auth providers --json
 jagc telegram list --json
 jagc telegram allow --user-id <telegram_user_id>
+jagc task create --title "Daily plan" --instructions "Prepare priorities" --cron "0 9 * * 1-5" --timezone "America/Los_Angeles" --thread-key telegram:chat:<chat_id> --json
+jagc task list --enabled --json
+jagc task run <task_id> --now --json
 jagc share --thread-key cli:default --json
 ```
 
@@ -136,6 +140,7 @@ jagc share --thread-key cli:default --json
 ### Runtime + durability
 
 - In-process scheduling with SQLite-backed recovery after restart
+- Scheduled task domain (`scheduled_tasks`, `scheduled_task_runs`) with durable due-queue processing, idempotent dispatch, and restart recovery for pending/dispatched task runs
 - Thread→session persistence (`thread_key -> session`) survives process restarts
 - Same-thread turn ordering enforced by per-thread pi session controller
 - Structured run payload contract (`output` is structured; not plain-text-only)
@@ -143,12 +148,14 @@ jagc share --thread-key cli:default --json
 ### API
 
 - Health/lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
+- Scheduled tasks: `POST /v1/threads/:thread_key/tasks`, `GET /v1/tasks`, `GET /v1/tasks/:task_id`, `PATCH /v1/tasks/:task_id`, `DELETE /v1/tasks/:task_id`, `POST /v1/tasks/:task_id/run-now`
 - Runtime controls: cancel/new/share/model/thinking endpoints
 - OAuth broker endpoints for provider login flows
 
 ### CLI
 
 - Message/run lifecycle: `message`, `run wait`, `cancel`, `new`, `share`
+- Scheduled tasks: `task create|list|get|update|delete|run --now|enable|disable`
 - Runtime controls: `model list|get|set`, `thinking get|set`
 - Auth: `auth providers|login`
 - Workspace/runtime ops: `defaults sync`, `packages install|remove|update|list|config`
@@ -159,6 +166,7 @@ jagc share --thread-key cli:default --json
 
 - Long polling (personal chats)
 - Commands: `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
+- Scheduled task runs create and reuse Telegram forum topics lazily (`task:<short-id> <title>`) and route all progress/final delivery in the task topic thread.
 - Final assistant replies are rendered from Markdown into Telegram `entities` (no `parse_mode` string escaping path)
 - Short code fences render inline as Telegram code blocks; oversized code fences are sent as document attachments with language-aware filenames (for example `snippet-1.ts`)
 - Progress stream with thinking/tool snippets and tool completion status updates (separate thinking content blocks render as separate `~` lines)

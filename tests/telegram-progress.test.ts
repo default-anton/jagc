@@ -12,24 +12,26 @@ describe('TelegramRunProgressReporter archive flushing', () => {
 
     const bot = {
       api: {
-        sendMessage: vi.fn(async (_chatId: number, text: string) => {
-          sendAttempt += 1;
-          if (sendAttempt === 2) {
-            throw new Error('temporary telegram outage');
-          }
+        raw: {
+          sendMessage: vi.fn(async (payload: { text?: string }) => {
+            sendAttempt += 1;
+            if (sendAttempt === 2) {
+              throw new Error('temporary telegram outage');
+            }
 
-          sentChunks.push(text);
-          return { message_id: sendAttempt };
-        }),
-        editMessageText: vi.fn(),
-        sendChatAction: vi.fn(),
-        deleteMessage: vi.fn(),
+            sentChunks.push(String(payload.text ?? ''));
+            return { message_id: sendAttempt };
+          }),
+          editMessageText: vi.fn(),
+          sendChatAction: vi.fn(),
+          deleteMessage: vi.fn(),
+        },
       },
     } as unknown as Bot;
 
     const reporter = new TelegramRunProgressReporter({
       bot,
-      chatId: 101,
+      route: { chatId: 101 },
       runId: 'run-archive-mid-flush-failure',
       logger: noopLogger,
       messageLimit: 80,
@@ -62,23 +64,25 @@ describe('TelegramRunProgressReporter archive flushing', () => {
 
     const bot = {
       api: {
-        sendMessage: vi.fn(async () => {
-          if (failArchiveSend) {
-            failArchiveSend = false;
-            throw new Error('temporary telegram outage');
-          }
+        raw: {
+          sendMessage: vi.fn(async () => {
+            if (failArchiveSend) {
+              failArchiveSend = false;
+              throw new Error('temporary telegram outage');
+            }
 
-          return { message_id: 1 };
-        }),
-        editMessageText: vi.fn(async () => ({ message_id: 1 })),
-        sendChatAction: vi.fn(),
-        deleteMessage: vi.fn(),
+            return { message_id: 1 };
+          }),
+          editMessageText: vi.fn(async () => ({ message_id: 1 })),
+          sendChatAction: vi.fn(),
+          deleteMessage: vi.fn(),
+        },
       },
     } as unknown as Bot;
 
     const reporter = new TelegramRunProgressReporter({
       bot,
-      chatId: 101,
+      route: { chatId: 101 },
       runId: 'run-archive-retry-pending',
       logger: noopLogger,
       messageLimit: 120,
@@ -118,21 +122,23 @@ describe('TelegramRunProgressReporter edit recovery', () => {
 
     const bot = {
       api: {
-        sendMessage: vi.fn(async (_chatId: number, text: string, options?: { entities?: Array<{ type?: string }> }) => {
-          sendCalls.push({ text, entities: options?.entities ?? [] });
-          return { message_id: sendCalls.length };
-        }),
-        editMessageText: vi.fn(async () => {
-          throw new Error('message to edit not found');
-        }),
-        sendChatAction: vi.fn(),
-        deleteMessage: vi.fn(),
+        raw: {
+          sendMessage: vi.fn(async (payload: { text?: string; entities?: Array<{ type?: string }> }) => {
+            sendCalls.push({ text: String(payload.text ?? ''), entities: payload.entities ?? [] });
+            return { message_id: sendCalls.length };
+          }),
+          editMessageText: vi.fn(async () => {
+            throw new Error('message to edit not found');
+          }),
+          sendChatAction: vi.fn(),
+          deleteMessage: vi.fn(),
+        },
       },
     } as unknown as Bot;
 
     const reporter = new TelegramRunProgressReporter({
       bot,
-      chatId: 101,
+      route: { chatId: 101 },
       runId: 'run-thinking-format',
       logger: noopLogger,
       minEditIntervalMs: 0,
@@ -166,26 +172,21 @@ describe('TelegramRunProgressReporter edit recovery', () => {
 
     const bot = {
       api: {
-        sendMessage: vi.fn(async () => ({ message_id: 1 })),
-        editMessageText: vi.fn(
-          async (
-            _chatId: number,
-            _messageId: number,
-            text: string,
-            options?: { entities?: Array<{ type?: string }> },
-          ) => {
-            editCalls.push({ text, entities: options?.entities ?? [] });
+        raw: {
+          sendMessage: vi.fn(async () => ({ message_id: 1 })),
+          editMessageText: vi.fn(async (payload: { text?: string; entities?: Array<{ type?: string }> }) => {
+            editCalls.push({ text: String(payload.text ?? ''), entities: payload.entities ?? [] });
             return { message_id: 1 };
-          },
-        ),
-        sendChatAction: vi.fn(),
-        deleteMessage: vi.fn(),
+          }),
+          sendChatAction: vi.fn(),
+          deleteMessage: vi.fn(),
+        },
       },
     } as unknown as Bot;
 
     const reporter = new TelegramRunProgressReporter({
       bot,
-      chatId: 101,
+      route: { chatId: 101 },
       runId: 'run-thinking-format',
       logger: noopLogger,
       minEditIntervalMs: 0,
@@ -321,16 +322,18 @@ function archiveChunkLines(chunkText: string): string[] {
 function createThinkingReporter(): TelegramRunProgressReporter {
   const bot = {
     api: {
-      sendMessage: vi.fn(async () => ({ message_id: 1 })),
-      editMessageText: vi.fn(async () => ({ message_id: 1 })),
-      sendChatAction: vi.fn(),
-      deleteMessage: vi.fn(),
+      raw: {
+        sendMessage: vi.fn(async () => ({ message_id: 1 })),
+        editMessageText: vi.fn(async () => ({ message_id: 1 })),
+        sendChatAction: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
     },
   } as unknown as Bot;
 
   return new TelegramRunProgressReporter({
     bot,
-    chatId: 101,
+    route: { chatId: 101 },
     runId: 'run-thinking-format',
     logger: noopLogger,
     minEditIntervalMs: 0,

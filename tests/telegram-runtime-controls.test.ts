@@ -101,6 +101,30 @@ describe('Telegram runtime controls integration', () => {
     });
   });
 
+  test('model set callback in topic thread uses topic-scoped thread key', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+    const authService = createCatalogAuthService([createProvider('openrouter', ['deepseek/deepseek-r1'])]);
+
+    await withTelegramAdapter({ authService, threadControlService }, async ({ clone }) => {
+      clone.injectCallbackQuery({
+        chatId: testChatId,
+        fromId: testUserId,
+        data: 'm:set:openrouter:deepseek%2Fdeepseek-r1',
+        messageThreadId: 333,
+      });
+
+      await clone.waitForBotCall('editMessageText', (call) => textOf(call).includes('✅ Model set'), 4_000);
+
+      expect(threadControlService.modelSetCalls).toEqual([
+        {
+          threadKey: 'telegram:chat:101:topic:333',
+          provider: 'openrouter',
+          modelId: 'deepseek/deepseek-r1',
+        },
+      ]);
+    });
+  });
+
   test('hides model options that exceed Telegram callback size limit', async () => {
     const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
     const authService = createCatalogAuthService([
@@ -200,6 +224,23 @@ describe('Telegram runtime controls integration', () => {
       const sendMessage = await clone.waitForBotCall('sendMessage');
       expect(sendMessage.payload.text).toBe('✅ Session reset. Your next message will start a new pi session.');
       expect(threadControlService.resetCalls).toEqual(['telegram:chat:101']);
+    });
+  });
+
+  test('new command in a topic thread resets only that topic thread session', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+
+    await withTelegramAdapter({ threadControlService }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: '/new',
+        messageThreadId: 333,
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('✅ Session reset. Your next message will start a new pi session.');
+      expect(threadControlService.resetCalls).toEqual(['telegram:chat:101:topic:333']);
     });
   });
 

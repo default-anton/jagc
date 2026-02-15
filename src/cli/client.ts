@@ -4,7 +4,9 @@ import {
   type AuthProvidersResponse,
   authProvidersResponseSchema,
   type CancelThreadRunResponse,
+  type CreateTaskRequest,
   cancelThreadRunResponseSchema,
+  deleteTaskResponseSchema,
   type ModelCatalogResponse,
   modelCatalogResponseSchema,
   type OAuthLoginAttemptResponse,
@@ -12,8 +14,10 @@ import {
   oauthOwnerHeaderName,
   type PostMessageRequest,
   type ResetThreadSessionResponse,
+  type RunNowTaskResponse,
   type RunResponse,
   resetThreadSessionResponseSchema,
+  runNowTaskResponseSchema,
   runResponseSchema,
   type SetThreadModelRequest,
   type SetThreadThinkingRequest,
@@ -21,8 +25,13 @@ import {
   type SubmitOAuthLoginInputRequest,
   shareThreadSessionResponseSchema,
   submitOAuthLoginInputRequestSchema,
+  type TaskListResponse,
+  type TaskResponse,
   type ThreadRuntimeStateResponse,
+  taskListResponseSchema,
+  taskResponseSchema,
   threadRuntimeStateSchema,
+  type UpdateTaskRequest,
 } from '../shared/api-contracts.js';
 
 export type ApiRunResponse = RunResponse;
@@ -33,6 +42,9 @@ export type ApiOAuthLoginAttemptResponse = OAuthLoginAttemptResponse;
 export type ApiCancelThreadRunResponse = CancelThreadRunResponse;
 export type ApiResetThreadSessionResponse = ResetThreadSessionResponse;
 export type ApiShareThreadSessionResponse = ShareThreadSessionResponse;
+export type ApiTaskResponse = TaskResponse;
+export type ApiTaskListResponse = TaskListResponse;
+export type ApiRunNowTaskResponse = RunNowTaskResponse;
 export type MessageRequest = PostMessageRequest;
 
 export async function sendMessage(apiUrl: string, payload: MessageRequest): Promise<ApiRunResponse> {
@@ -237,6 +249,82 @@ export async function shareThreadSession(apiUrl: string, threadKey: string): Pro
   return parseShareThreadSessionResponse(response);
 }
 
+export async function createTask(
+  apiUrl: string,
+  threadKey: string,
+  payload: CreateTaskRequest,
+): Promise<ApiTaskResponse> {
+  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/tasks`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseTaskResponse(response);
+}
+
+export async function listTasks(
+  apiUrl: string,
+  options: { threadKey?: string; state?: 'all' | 'enabled' | 'disabled' } = {},
+): Promise<ApiTaskListResponse> {
+  const url = new URL('/v1/tasks', apiUrl);
+
+  if (options.threadKey) {
+    url.searchParams.set('thread_key', options.threadKey);
+  }
+
+  if (options.state) {
+    url.searchParams.set('state', options.state);
+  }
+
+  const response = await fetch(url);
+  return parseTaskListResponse(response);
+}
+
+export async function getTask(apiUrl: string, taskId: string): Promise<ApiTaskResponse> {
+  const response = await fetch(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`);
+  return parseTaskResponse(response);
+}
+
+export async function updateTask(apiUrl: string, taskId: string, payload: UpdateTaskRequest): Promise<ApiTaskResponse> {
+  const response = await fetch(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseTaskResponse(response);
+}
+
+export async function deleteTask(apiUrl: string, taskId: string): Promise<{ deleted: boolean }> {
+  const response = await fetch(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'DELETE',
+  });
+
+  const responseBody = await parseJsonResponse(response);
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return deleteTaskResponseSchema.parse(responseBody);
+}
+
+export async function runTaskNow(apiUrl: string, taskId: string): Promise<ApiRunNowTaskResponse> {
+  const response = await fetch(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}/run-now`, {
+    method: 'POST',
+  });
+
+  return parseRunNowTaskResponse(response);
+}
+
 function oauthOwnerHeader(ownerKey: string): Record<string, string> {
   return {
     [oauthOwnerHeaderName]: ownerKey,
@@ -325,6 +413,48 @@ async function parseShareThreadSessionResponse(response: Response): Promise<ApiS
   }
 
   return shareThreadSessionResponseSchema.parse(responseBody);
+}
+
+async function parseTaskResponse(response: Response): Promise<ApiTaskResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return taskResponseSchema.parse(responseBody);
+}
+
+async function parseTaskListResponse(response: Response): Promise<ApiTaskListResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return taskListResponseSchema.parse(responseBody);
+}
+
+async function parseRunNowTaskResponse(response: Response): Promise<ApiRunNowTaskResponse> {
+  const responseBody = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    const message =
+      responseBody && typeof responseBody === 'object'
+        ? extractErrorMessage(responseBody)
+        : `request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return runNowTaskResponseSchema.parse(responseBody);
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {

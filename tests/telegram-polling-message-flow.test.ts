@@ -45,6 +45,132 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
+  test('routes topic-thread messages to topic thread keys and sends topic-aware delivery payloads', async () => {
+    const topicThreadId = 333;
+    const largeCode = Array.from({ length: 90 }, (_, index) => `const item${index}: number = ${index};`).join('\n');
+    const output = ['```ts', largeCode, '```'].join('\n');
+
+    const runningState = runRecord({
+      runId: 'run-topic-route',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-topic-route',
+      status: 'succeeded',
+      output: { text: output },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService(
+      'run-topic-route',
+      [runningState, runningState, runningState, completedState],
+      {
+        progressEventsByPoll: {
+          1: [progressEvent('run-topic-route', 'started')],
+          2: [
+            progressEvent('run-topic-route', 'tool_execution_start', {
+              toolCallId: 'topic-tool-1',
+              toolName: 'bash',
+              args: { command: 'echo topic' },
+            }),
+          ],
+        },
+      },
+    );
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        pollIntervalMs: 100,
+      },
+      async ({ clone }) => {
+        const updateId = clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'topic thread please',
+          messageThreadId: topicThreadId,
+        });
+
+        await clone.waitForBotCall('sendChatAction', (call) => call.payload.message_thread_id === topicThreadId, 4_000);
+
+        await clone.waitForBotCall(
+          'editMessageText',
+          (call) => call.payload.message_thread_id === topicThreadId,
+          6_000,
+        );
+
+        await clone.waitForBotCall(
+          'sendDocument',
+          (call) => Number(call.payload.message_thread_id ?? 0) === topicThreadId,
+          8_000,
+        );
+
+        const terminal = await clone.waitForBotCall(
+          'sendMessage',
+          (call) =>
+            call.payload.message_thread_id === topicThreadId && call.payload.text === '📎 attached code: snippet-1.ts',
+          8_000,
+        );
+        expect(terminal.payload.message_thread_id).toBe(topicThreadId);
+
+        expect(runService.ingests).toEqual([
+          {
+            source: 'telegram',
+            threadKey: `telegram:chat:101:topic:${topicThreadId}`,
+            userKey: 'telegram:user:202',
+            text: 'topic thread please',
+            deliveryMode: 'followUp',
+            idempotencyKey: `telegram:update:${updateId}`,
+          },
+        ]);
+      },
+    );
+  }, 14_000);
+
+  test('deletes startup-only progress messages in topic threads with message_thread_id', async () => {
+    const topicThreadId = 444;
+    const runningState = runRecord({
+      runId: 'run-topic-delete',
+      status: 'running',
+      output: null,
+      errorMessage: null,
+    });
+    const completedState = runRecord({
+      runId: 'run-topic-delete',
+      status: 'succeeded',
+      output: { text: 'topic done' },
+      errorMessage: null,
+    });
+
+    const runService = new StubRunService('run-topic-delete', [runningState, runningState, completedState]);
+
+    await withTelegramAdapter(
+      {
+        runService: runService.asRunService(),
+        pollIntervalMs: 100,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: testChatId,
+          fromId: testUserId,
+          text: 'topic delete placeholder',
+          messageThreadId: topicThreadId,
+        });
+
+        const deleteCall = await clone.waitForBotCall(
+          'deleteMessage',
+          (call) => call.payload.message_thread_id === topicThreadId,
+          5_000,
+        );
+
+        expect(deleteCall.payload.chat_id).toBe(testChatId);
+        expect(deleteCall.payload.message_thread_id).toBe(topicThreadId);
+      },
+    );
+  });
+
   test('renders markdown output using Telegram entities', async () => {
     const markdownOutput = [
       'Hello **world** and `inline` code with [docs](https://example.com).',

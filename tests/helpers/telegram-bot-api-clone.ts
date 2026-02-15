@@ -21,6 +21,7 @@ interface InjectTextMessageInput {
   chatId: number;
   fromId: number;
   text: string;
+  messageThreadId?: number;
 }
 
 interface InjectCallbackQueryInput {
@@ -29,6 +30,7 @@ interface InjectCallbackQueryInput {
   data: string;
   messageId?: number;
   messageText?: string;
+  messageThreadId?: number;
 }
 
 interface GetUpdatesArgs {
@@ -74,6 +76,7 @@ export class TelegramBotApiClone {
   private nextUpdateId = 1;
   private nextMessageId = 1;
   private nextCallbackQueryId = 1;
+  private nextMessageThreadId = 1_000;
 
   apiRoot: string | null = null;
 
@@ -149,6 +152,7 @@ export class TelegramBotApiClone {
           is_bot: false,
           first_name: 'Tester',
         },
+        ...(input.messageThreadId ? { message_thread_id: input.messageThreadId } : {}),
         text: input.text,
       },
     };
@@ -180,6 +184,7 @@ export class TelegramBotApiClone {
             id: input.chatId,
             type: 'private',
           },
+          ...(input.messageThreadId ? { message_thread_id: input.messageThreadId } : {}),
           text: input.messageText ?? 'menu',
         },
       },
@@ -348,11 +353,26 @@ export class TelegramBotApiClone {
       case 'getUpdates': {
         return this.getUpdates(parseGetUpdatesArgs(payload));
       }
+      case 'createForumTopic': {
+        this.recordBotCall({ method, payload });
+
+        return {
+          name: typeof payload.name === 'string' ? payload.name : 'topic',
+          icon_color: 7322096,
+          icon_custom_emoji_id: null,
+          message_thread_id: this.nextMessageThreadId++,
+        };
+      }
+      case 'editForumTopic': {
+        this.recordBotCall({ method, payload });
+        return true;
+      }
       case 'sendMessage': {
         this.recordBotCall({ method, payload });
 
         const chatId = toNumber(payload.chat_id) ?? 0;
         const text = typeof payload.text === 'string' ? payload.text : '';
+        const messageThreadId = toNumber(payload.message_thread_id);
 
         return {
           message_id: this.nextMessageId++,
@@ -361,6 +381,7 @@ export class TelegramBotApiClone {
             id: chatId,
             type: 'private',
           },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
           text,
         };
       }
@@ -370,6 +391,7 @@ export class TelegramBotApiClone {
         const chatId = toNumber(payload.chat_id) ?? 0;
         const messageId = toNumber(payload.message_id) ?? 0;
         const text = typeof payload.text === 'string' ? payload.text : '';
+        const messageThreadId = toNumber(payload.message_thread_id);
 
         return {
           message_id: messageId,
@@ -378,6 +400,7 @@ export class TelegramBotApiClone {
             id: chatId,
             type: 'private',
           },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
           text,
         };
       }
@@ -387,6 +410,7 @@ export class TelegramBotApiClone {
         const chatId = toNumber(payload.chat_id) ?? 0;
         const caption = typeof payload.caption === 'string' ? payload.caption : '';
         const document = parseDocumentPayload(payload.document, payload);
+        const messageThreadId = toNumber(payload.message_thread_id);
 
         return {
           message_id: this.nextMessageId++,
@@ -395,6 +419,7 @@ export class TelegramBotApiClone {
             id: chatId,
             type: 'private',
           },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
           caption,
           document: {
             file_id: `file-${this.nextMessageId}`,

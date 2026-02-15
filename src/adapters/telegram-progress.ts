@@ -4,6 +4,7 @@ import type { Bot } from 'grammy';
 import type { MessageEntity } from 'grammy/types';
 import type { Logger } from '../shared/logger.js';
 import type { RunProgressEvent } from '../shared/run-progress.js';
+import type { TelegramRoute } from '../shared/telegram-threading.js';
 import { extractTelegramRetryAfterSeconds, isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
 import { renderTelegramText, type TelegramRenderedMessage } from './telegram-markdown.js';
 import {
@@ -22,7 +23,7 @@ type ProgressPhase = 'queued' | 'running' | 'succeeded' | 'failed';
 
 interface TelegramRunProgressReporterOptions {
   bot: Bot;
-  chatId: number;
+  route: TelegramRoute;
   runId: string;
   logger: Logger;
   messageLimit?: number;
@@ -105,11 +106,7 @@ export class TelegramRunProgressReporter {
     const initialRender = this.renderProgressMessage();
 
     try {
-      const message = await this.callWithRetry(() =>
-        this.options.bot.api.sendMessage(this.options.chatId, initialRender.text, {
-          entities: initialRender.entities,
-        }),
-      );
+      const message = await this.callWithRetry(() => this.sendMessage(initialRender.text, initialRender.entities));
       this.progressMessageId = message.message_id;
       this.lastRenderedText = initialRender.text;
       this.lastRenderedEntitiesJson = JSON.stringify(initialRender.entities);
@@ -118,7 +115,7 @@ export class TelegramRunProgressReporter {
       this.options.logger.warn({
         event: 'telegram_progress_start_failed',
         run_id: this.options.runId,
-        chat_id: this.options.chatId,
+        chat_id: this.options.route.chatId,
         message: error instanceof Error ? error.message : String(error),
       });
     }
@@ -322,13 +319,13 @@ export class TelegramRunProgressReporter {
     }
 
     try {
-      await this.callWithRetry(() => this.options.bot.api.deleteMessage(this.options.chatId, messageId));
+      await this.callWithRetry(() => this.deleteMessage(messageId));
     } catch (error) {
       if (!isDeleteMessageGoneError(error)) {
         this.options.logger.warn({
           event: 'telegram_progress_delete_failed',
           run_id: this.options.runId,
-          chat_id: this.options.chatId,
+          chat_id: this.options.route.chatId,
           message: error instanceof Error ? error.message : String(error),
         });
       }
@@ -406,9 +403,7 @@ export class TelegramRunProgressReporter {
         return;
       }
 
-      await this.options.bot.api.editMessageText(this.options.chatId, this.progressMessageId, rendered.text, {
-        entities: rendered.entities,
-      });
+      await this.editMessageText(this.progressMessageId, rendered.text, rendered.entities);
       this.lastRenderedText = rendered.text;
       this.lastRenderedEntitiesJson = entitiesJson;
       this.lastEditAt = Date.now();
@@ -428,7 +423,7 @@ export class TelegramRunProgressReporter {
           this.options.logger.warn({
             event: 'telegram_progress_edit_failed',
             run_id: this.options.runId,
-            chat_id: this.options.chatId,
+            chat_id: this.options.route.chatId,
             message: error instanceof Error ? error.message : String(error),
           });
 
@@ -447,11 +442,7 @@ export class TelegramRunProgressReporter {
 
   private async recreateProgressMessage(rendered: TelegramRenderedMessage, entitiesJson: string): Promise<void> {
     try {
-      const message = await this.callWithRetry(() =>
-        this.options.bot.api.sendMessage(this.options.chatId, rendered.text, {
-          entities: rendered.entities,
-        }),
-      );
+      const message = await this.callWithRetry(() => this.sendMessage(rendered.text, rendered.entities));
       this.progressMessageId = message.message_id;
       this.lastRenderedText = rendered.text;
       this.lastRenderedEntitiesJson = entitiesJson;
@@ -460,7 +451,7 @@ export class TelegramRunProgressReporter {
       this.options.logger.warn({
         event: 'telegram_progress_recreate_failed',
         run_id: this.options.runId,
-        chat_id: this.options.chatId,
+        chat_id: this.options.route.chatId,
         message: error instanceof Error ? error.message : String(error),
       });
     }
@@ -496,7 +487,7 @@ export class TelegramRunProgressReporter {
     }
 
     try {
-      await this.options.bot.api.sendChatAction(this.options.chatId, 'typing');
+      await this.sendChatAction('typing');
     } catch (error) {
       const retryAfterSeconds = extractTelegramRetryAfterSeconds(error);
       if (retryAfterSeconds !== null) {
@@ -507,10 +498,49 @@ export class TelegramRunProgressReporter {
       this.options.logger.warn({
         event: 'telegram_typing_indicator_failed',
         run_id: this.options.runId,
-        chat_id: this.options.chatId,
+        chat_id: this.options.route.chatId,
         message: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private sendMessage(text: string, entities: MessageEntity[]): Promise<{ message_id: number }> {
+    const payload = {
+      ...routePayload(this.options.route),
+      text,
+      entities,
+    };
+
+    return this.options.bot.api.raw.sendMessage(payload) as Promise<{ message_id: number }>;
+  }
+
+  private editMessageText(messageId: number, text: string, entities: MessageEntity[]): Promise<unknown> {
+    const payload = {
+      ...routePayload(this.options.route),
+      message_id: messageId,
+      text,
+      entities,
+    };
+
+    return this.options.bot.api.raw.editMessageText(payload);
+  }
+
+  private deleteMessage(messageId: number): Promise<unknown> {
+    const payload = {
+      ...routePayload(this.options.route),
+      message_id: messageId,
+    };
+
+    return this.options.bot.api.raw.deleteMessage(payload);
+  }
+
+  private sendChatAction(action: 'typing'): Promise<unknown> {
+    const payload = {
+      ...routePayload(this.options.route),
+      action,
+    };
+
+    return this.options.bot.api.raw.sendChatAction(payload);
   }
 
   private renderProgressText(): string {
@@ -731,11 +761,7 @@ export class TelegramRunProgressReporter {
     }
 
     for (const chunk of chunks) {
-      await this.callWithRetry(() =>
-        this.options.bot.api.sendMessage(this.options.chatId, chunk.text, {
-          entities: [],
-        }),
-      );
+      await this.callWithRetry(() => this.sendMessage(chunk.text, []));
       this.pendingArchiveLines.splice(0, chunk.lineCount);
     }
   }
@@ -774,6 +800,13 @@ export class TelegramRunProgressReporter {
       }
     }
   }
+}
+
+function routePayload(route: TelegramRoute): { chat_id: number; message_thread_id?: number } {
+  return {
+    chat_id: route.chatId,
+    ...(route.messageThreadId ? { message_thread_id: route.messageThreadId } : {}),
+  };
 }
 
 interface ArchiveChunk {

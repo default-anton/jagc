@@ -8,6 +8,8 @@ import { createApp } from './app.js';
 import { applyNodeEnvFileOverrides } from './env-file-overrides.js';
 import { EchoRunExecutor, type RunExecutor } from './executor.js';
 import { runMigrations } from './migrations.js';
+import { ScheduledTaskService } from './scheduled-task-service.js';
+import { SqliteScheduledTaskStore } from './scheduled-task-store.js';
 import { LocalRunScheduler } from './scheduler.js';
 import { RunService } from './service.js';
 import { openSqliteDatabase } from './sqlite.js';
@@ -77,13 +79,6 @@ async function main(): Promise<void> {
 
   const authService = new PiAuthService(config.JAGC_WORKSPACE_DIR);
 
-  const app = createApp({
-    runService,
-    authService,
-    threadControlService,
-    logger: rootLogger.child({ component: 'http_server' }),
-  });
-
   let telegramAdapter: TelegramPollingAdapter | undefined;
   if (config.JAGC_TELEGRAM_BOT_TOKEN) {
     telegramAdapter = new TelegramPollingAdapter({
@@ -97,6 +92,48 @@ async function main(): Promise<void> {
     });
   }
 
+  const scheduledTaskStore = new SqliteScheduledTaskStore(database);
+  const scheduledTaskService = new ScheduledTaskService(scheduledTaskStore, runService, {
+    logger: rootLogger.child({ component: 'scheduled_tasks' }),
+    telegramBridge: {
+      createTaskTopic: async ({ chatId, taskId, title }) => {
+        if (!telegramAdapter) {
+          throw new Error(
+            'telegram_topics_unavailable: Telegram adapter is not configured; set JAGC_TELEGRAM_BOT_TOKEN and restart',
+          );
+        }
+
+        return telegramAdapter.createTaskTopic({ chatId, taskId, title });
+      },
+      syncTaskTopicTitle: async (route, taskId, title) => {
+        if (!telegramAdapter) {
+          throw new Error(
+            'telegram_topics_unavailable: Telegram adapter is not configured; set JAGC_TELEGRAM_BOT_TOKEN and restart',
+          );
+        }
+
+        await telegramAdapter.syncTaskTopicTitle(route, taskId, title);
+      },
+      deliverRun: async (runId, route) => {
+        if (!telegramAdapter) {
+          throw new Error(
+            'telegram_topics_unavailable: Telegram adapter is not configured; set JAGC_TELEGRAM_BOT_TOKEN and restart',
+          );
+        }
+
+        await telegramAdapter.deliverRun(runId, route);
+      },
+    },
+  });
+
+  const app = createApp({
+    runService,
+    authService,
+    threadControlService,
+    scheduledTaskService,
+    logger: rootLogger.child({ component: 'http_server' }),
+  });
+
   let closePromise: Promise<void> | null = null;
   const close = async (signal?: string) => {
     if (closePromise) {
@@ -105,6 +142,7 @@ async function main(): Promise<void> {
 
     closePromise = (async () => {
       mainLogger.info({ event: 'server_shutdown_started', signal: signal ?? null });
+      await scheduledTaskService.stop();
       await telegramAdapter?.stop();
       await app.close();
       await runService.shutdown();
@@ -137,6 +175,8 @@ async function main(): Promise<void> {
   if (telegramAdapter) {
     await telegramAdapter.start();
   }
+
+  await scheduledTaskService.start();
 }
 
 const startupLogger = createLogger({

@@ -13,15 +13,18 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added end-to-end scheduled task support (one-off + recurring) with HTTP API (`/v1/threads/:thread_key/tasks`, `/v1/tasks*`), CLI command group (`jagc task create|list|get|update|delete|run --now|enable|disable`), SQLite migrations (`scheduled_tasks`, `scheduled_task_runs`), and in-process scheduler/recovery service.
+- Added per-task execution threads for scheduled tasks, including Telegram lazy topic creation (`createForumTopic`) and persisted `execution_thread_key` routing.
 
 ### Changed
 
-- None.
+- Telegram thread routing is now topic-aware (`telegram:chat:<chat_id>:topic:<message_thread_id>` when available) across inbound message/callback mapping and runtime controls.
+- Telegram run delivery now uses a reusable delivery path shared by normal inbound runs and scheduled task runs, with topic-aware `message_thread_id` payload propagation for send/edit/action/delete/document operations.
+- Runtime harness context extension now includes scheduled-task operational guidance (`jagc task ... --json`, no direct DB edits, post-mutation verification, lazy thread creation semantics).
 
 ### Fixed
 
-- None.
+- Scheduled task occurrence bookkeeping now survives restarts by resuming pending task-runs and reconciling dispatched task-runs against terminal run state.
 
 ## [0.3.7] - 2026-02-13
 

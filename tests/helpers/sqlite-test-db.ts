@@ -33,6 +33,8 @@ function resetDatabase(database: SqliteDatabase): void {
   database.exec(`
     DELETE FROM message_ingest;
     DELETE FROM thread_sessions;
+    DELETE FROM scheduled_task_runs;
+    DELETE FROM scheduled_tasks;
     DELETE FROM runs;
   `);
 }

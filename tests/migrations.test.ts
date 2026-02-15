@@ -34,7 +34,7 @@ describe('runMigrations', () => {
         .all()
         .map((row) => row.name);
 
-      expect(applied).toEqual(['001_runs_and_ingest.sql', '002_thread_sessions.sql']);
+      expect(applied).toEqual(['001_runs_and_ingest.sql', '002_thread_sessions.sql', '003_scheduled_tasks.sql']);
     } finally {
       first.close();
       second.close();

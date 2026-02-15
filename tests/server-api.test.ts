@@ -8,6 +8,8 @@ import {
 } from '../src/runtime/pi-auth.js';
 import { createApp } from '../src/server/app.js';
 import type { RunExecutor } from '../src/server/executor.js';
+import { ScheduledTaskService } from '../src/server/scheduled-task-service.js';
+import { SqliteScheduledTaskStore } from '../src/server/scheduled-task-store.js';
 import type { RunScheduler } from '../src/server/scheduler.js';
 import { RunService } from '../src/server/service.js';
 import { SqliteRunStore } from '../src/server/store.js';
@@ -771,6 +773,104 @@ describe('server API', () => {
 
     await app.close();
   });
+
+  test('task CRUD and run-now flow works', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const createdResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/tasks',
+      payload: {
+        title: 'Daily plan',
+        instructions: 'Prepare priorities',
+        schedule: {
+          kind: 'cron',
+          cron: '0 9 * * 1-5',
+          timezone: 'America/Los_Angeles',
+        },
+      },
+    });
+
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json();
+    expect(created.task.task_id).toEqual(expect.any(String));
+    expect(created.task.creator_thread_key).toBe('cli:default');
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/v1/tasks?thread_key=cli%3Adefault&state=enabled',
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().tasks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ task_id: created.task.task_id })]),
+    );
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: `/v1/tasks/${encodeURIComponent(created.task.task_id)}`,
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json().task.task_id).toBe(created.task.task_id);
+
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/v1/tasks/${encodeURIComponent(created.task.task_id)}`,
+      payload: {
+        title: 'Daily plan updated',
+        enabled: false,
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json().task.title).toBe('Daily plan updated');
+    expect(updateResponse.json().task.enabled).toBe(false);
+
+    const runNowResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/tasks/${encodeURIComponent(created.task.task_id)}/run-now`,
+    });
+
+    expect(runNowResponse.statusCode).toBe(200);
+    expect(runNowResponse.json().task_run.task_id).toBe(created.task.task_id);
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/v1/tasks/${encodeURIComponent(created.task.task_id)}`,
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toEqual({ deleted: true });
+
+    await app.close();
+  });
+
+  test('task create validates schedule payload', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const invalidResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/tasks',
+      payload: {
+        title: 'Bad task',
+        instructions: 'Missing schedule fields',
+        schedule: {
+          kind: 'cron',
+          timezone: 'UTC',
+        },
+      },
+    });
+
+    expect(invalidResponse.statusCode).toBe(400);
+    expect(invalidResponse.json()).toMatchObject({
+      error: {
+        code: 'invalid_task_payload',
+      },
+    });
+
+    await app.close();
+  });
 });
 
 async function createTestApp(
@@ -778,9 +878,11 @@ async function createTestApp(
   options: {
     authService?: Parameters<typeof createApp>[0]['authService'];
     threadControlService?: FakeThreadControlService;
+    scheduledTaskService?: ScheduledTaskService;
   } = {},
 ) {
   const runStore = new SqliteRunStore(testDb.database);
+  const scheduledTaskStore = new SqliteScheduledTaskStore(testDb.database);
 
   let runService!: RunService;
   const runScheduler: RunScheduler = {
@@ -797,12 +899,20 @@ async function createTestApp(
   runService = new RunService(runStore, runExecutor, runScheduler);
   await runService.init();
 
+  const scheduledTaskService =
+    options.scheduledTaskService ??
+    new ScheduledTaskService(scheduledTaskStore, runService, {
+      pollIntervalMs: 60_000,
+    });
+
   const app = createApp({
     runService,
     authService: options.authService,
     threadControlService: options.threadControlService,
+    scheduledTaskService,
   });
   app.addHook('onClose', async () => {
+    await scheduledTaskService.stop();
     await runService.shutdown();
   });
 
@@ -810,5 +920,7 @@ async function createTestApp(
     app,
     runService,
     runStore,
+    scheduledTaskStore,
+    scheduledTaskService,
   };
 }

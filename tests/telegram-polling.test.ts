@@ -98,6 +98,23 @@ describe('TelegramPollingAdapter commands', () => {
     });
   });
 
+  test('/cancel in topic thread targets the topic-scoped thread key', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+
+    await withTelegramAdapter({ threadControlService }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: telegramTestChatId,
+        fromId: telegramTestUserId,
+        text: '/cancel',
+        messageThreadId: 333,
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('🛑 Stopped the active run. Session context is preserved.');
+      expect(threadControlService.cancelCalls).toEqual(['telegram:chat:101:topic:333']);
+    });
+  });
+
   test('/new resets thread session and confirms next message starts fresh', async () => {
     const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
 
@@ -123,7 +140,7 @@ describe('TelegramPollingAdapter commands', () => {
       });
 
       const sendMessage = await clone.waitForBotCall('sendMessage');
-      expect(sendMessage.payload.text).toContain('/cancel — stop the active run in this chat (session stays intact)');
+      expect(sendMessage.payload.text).toContain('/cancel — stop the active run in this thread (session stays intact)');
     });
   });
 });

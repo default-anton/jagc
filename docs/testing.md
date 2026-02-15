@@ -17,19 +17,26 @@ Telegram tests use a local behavioral Bot API clone (`tests/helpers/telegram-bot
 
 Primary coverage lives in:
 
-- shared harness: `tests/helpers/telegram-test-kit.ts` (common bot token/chat fixtures, adapter+clone lifecycle helper, thread control fake)
-- `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, no-timeout long-run delivery, entity-based Markdown terminal rendering, language-aware code attachments, progress overflow splitting into additional Telegram messages, long-output chunking, and adapter-level recovery from transient polling errors)
-- `tests/telegram-runtime-controls.test.ts` (settings/model/thinking/auth callback flows)
+- provider-agnostic scheduled task coverage:
+  - `tests/scheduled-task-store.test.ts` (scheduled task schema/index/constraint invariants)
+  - `tests/scheduled-task-service.test.ts` (due dispatch, recurring advancement, pending/dispatched recovery)
+  - `tests/server-api.test.ts` (task CRUD + run-now API contract)
+  - `tests/cli-task-commands.test.ts` and `tests/cli-client.test.ts` (task CLI surface + client bindings)
+- shared Telegram harness: `tests/helpers/telegram-test-kit.ts` (common bot token/chat fixtures, adapter+clone lifecycle helper, thread control fake)
+- `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, topic-thread key mapping, topic-aware delivery payloads, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, no-timeout long-run delivery, entity-based Markdown terminal rendering, language-aware code attachments, progress overflow splitting into additional Telegram messages, long-output chunking, and adapter-level recovery from transient polling errors)
+- `tests/telegram-runtime-controls.test.ts` (settings/model/thinking/auth callback flows, including topic-thread `/new`/callback scoping)
 - `tests/telegram-polling.test.ts` (command/callback parsing and stale callback recovery)
-- `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), malformed payload handling, urlencoded payload parsing, and multipart `sendDocument` payload parsing)
+- `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), topic API support (`createForumTopic`), malformed payload handling, urlencoded payload parsing, and multipart `sendDocument` payload parsing)
 - `tests/telegram-markdown.test.ts` (Markdown AST-to-entity rendering, entity-safe chunking, language-aware code attachment filename mapping, and a small fixture corpus of realistic messy LLM markdown inputs)
-- `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + SQLite + Fastify app + polling adapter + clone)
+- `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + scheduled-task service + SQLite + Fastify app + polling adapter + clone)
 - `tests/cli-service-manager.test.ts` (launchd service-manager helpers: plist rendering, server entrypoint resolution, launchctl output parsing)
 
 This clone is intentionally narrow: it only implements the polling and messaging surface that jagc uses in v0:
 
 - `getMe`
 - `getUpdates` (including `offset`, `limit`, `allowed_updates`, and long-poll timeout behavior)
+- `createForumTopic`
+- `editForumTopic`
 - `sendMessage`
 - `editMessageText`
 - `sendChatAction`
