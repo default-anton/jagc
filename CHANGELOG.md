@@ -21,13 +21,19 @@ All notable changes to `jagc` are documented here.
 ### Changed
 
 - Telegram thread routing is now topic-aware (`telegram:chat:<chat_id>:topic:<message_thread_id>` when available) across inbound message/callback mapping and runtime controls.
+- Telegram general topic (`message_thread_id=1`) is now normalized to base-chat routing and outbound payloads omit `message_thread_id=1` to avoid Bot API `message thread not found` errors.
 - Telegram run delivery now uses a reusable delivery path shared by normal inbound runs and scheduled task runs, with topic-aware `message_thread_id` payload propagation for send/edit/action/delete/document operations.
+- Telegram scheduled tasks now always allocate a dedicated per-task topic on first due/run-now via `createForumTopic`, even when the task was created from a Telegram topic thread.
+- Telegram topic-mode capability checks now document startup caching behavior (`has_topics_enabled` is read at adapter startup; BotFather toggles require jagc restart).
 - Scheduled-task CLI ergonomics were simplified: `jagc task list` now uses `--state <all|enabled|disabled>` with default `all`; `jagc task run` no longer requires `--now` and now supports `--wait` + polling controls for terminal status in one command.
 - `jagc task create|update` now supports `--rrule <rule>` for calendar-style recurrences (for example first Monday monthly, biweekly Monday).
 - Runtime harness context task guidance is now intentionally terse and points to the dedicated `task-ops` skill for operational workflows.
 - Runtime harness context task guidance now distinguishes approval flow: direct user task/scheduling requests execute via `skills/task-ops/SKILL.md` without extra confirmation, while agent-suggested automation requires explicit user approval before creating/updating tasks.
 - `defaults/skills/task-ops/SKILL.md` description now explicitly states when to use the skill (user-asked scheduling/task management and agent-proposed automation with approval) and what it covers (command contract, JSON-first workflow, scheduling/time conversion, verification policy).
 - `pnpm dev` now prepends a repo-local `jagc` shim to `PATH`, so in-process agent `bash` calls resolve `jagc` to `pnpm dev:cli` from the current checkout instead of a globally installed CLI.
+- Pi runtime bash tool executions are now thread-aware by default: each command receives `JAGC_THREAD_KEY` and `JAGC_TRANSPORT`, plus Telegram route vars (`JAGC_TELEGRAM_CHAT_ID`, `JAGC_TELEGRAM_TOPIC_ID`) for Telegram thread keys.
+- `jagc task create` now defaults creator thread to `$JAGC_THREAD_KEY` when present (falling back to `cli:default`), so agent-created tasks in Telegram inherit the active chat/topic thread without requiring explicit `--thread-key`.
+- Task-ops skill examples now avoid hardcoded `cli:*` thread keys and default to current-thread task creation unless cross-thread targeting is explicitly requested.
 
 ### Fixed
 
@@ -35,6 +41,8 @@ All notable changes to `jagc` are documented here.
 - Cron next-run computation now handles midnight (`0 0 ...`) correctly across timezones.
 - Once-schedule timestamps now accept UTC ISO-8601 variants (for example `...Z` or `...+00:00`) and normalize to canonical UTC storage.
 - `jagc task ... --json` failures now emit structured JSON error envelopes instead of plain stderr text.
+- Telegram topic creation now surfaces explicit `telegram_topics_unavailable` guidance when bot private topics are disabled (`has_topics_enabled=false`) or the Bot API reports unresolved topic mode (`chat is not a forum` / `message thread not found`).
+- Task title updates no longer rename creator-origin topics for legacy tasks whose execution thread matches the creator topic; topic-title sync now applies only to task-owned Telegram topics.
 
 ## [0.3.7] - 2026-02-13
 

@@ -15,6 +15,21 @@ description: >
 Use `bash` + `jagc task` only. Never edit `jagc.sqlite*`.
 Prefer `--json` for every command.
 
+## Thread targeting
+
+Bash tool calls include thread-scoped env:
+
+- `JAGC_THREAD_KEY`: canonical current conversation thread key.
+- `JAGC_TRANSPORT`: current transport/provider (for example `telegram`, `cli`).
+- `JAGC_TELEGRAM_CHAT_ID`: Telegram chat id when current thread is Telegram.
+- `JAGC_TELEGRAM_TOPIC_ID`: Telegram topic id for topic threads (unset in base/default chat thread).
+
+Rules:
+
+- In jagc runtime, `jagc task create` defaults to `$JAGC_THREAD_KEY` when set.
+- Omit `--thread-key` to target the current conversation thread.
+- Pass `--thread-key` only when the user explicitly wants a different thread.
+
 ## Command contract
 
 - Create recurring (cron):
@@ -46,13 +61,13 @@ Use `--rrule` for calendar patterns cron cannot express.
 - First Monday of every month at 09:00:
 ```bash
 RRULE='FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0'
-jagc task create --title "Monthly planning" --instructions "Prepare monthly priorities" --rrule "$RRULE" --timezone "America/Los_Angeles" --thread-key "cli:ops" --json
+jagc task create --title "Monthly planning" --instructions "Prepare monthly priorities" --rrule "$RRULE" --timezone "America/Los_Angeles" --json
 ```
 
 - Every 2 weeks on Monday at 09:00:
 ```bash
 RRULE='FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;BYHOUR=9;BYMINUTE=0;BYSECOND=0'
-jagc task create --title "Biweekly sync" --instructions "Prepare sync agenda" --rrule "$RRULE" --timezone "America/Los_Angeles" --thread-key "cli:ops" --json
+jagc task create --title "Biweekly sync" --instructions "Prepare sync agenda" --rrule "$RRULE" --timezone "America/Los_Angeles" --json
 ```
 
 Notes:
@@ -76,7 +91,7 @@ ONCE_AT=$(TZ="$TZ_NAME" date -u -d 'tomorrow 09:00' '+%Y-%m-%dT%H:%M:%S.000Z' 2>
 
 Then create:
 ```bash
-jagc task create --title "..." --instructions "..." --once-at "$ONCE_AT" --timezone "$TZ_NAME" --thread-key "cli:ops" --json
+jagc task create --title "..." --instructions "..." --once-at "$ONCE_AT" --timezone "$TZ_NAME" --json
 ```
 
 ## Verification policy

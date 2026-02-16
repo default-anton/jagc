@@ -13,7 +13,8 @@ import {
 } from './client.js';
 import { exitWithError, parsePositiveNumber, printJson } from './common.js';
 
-const defaultThreadKey = 'cli:default';
+const fallbackThreadKey = 'cli:default';
+const taskThreadKeyEnvVar = 'JAGC_THREAD_KEY';
 
 type TaskStateFilter = 'all' | 'enabled' | 'disabled';
 
@@ -39,6 +40,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
   const waitForRunImpl = dependencies.waitForRunImpl ?? waitForRun;
   const printJsonImpl = dependencies.printJsonImpl ?? printJson;
   const writeStdoutImpl = dependencies.writeStdoutImpl ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const defaultThreadKey = resolveDefaultTaskThreadKey();
 
   const taskCommand = program.command('task').description('manage scheduled tasks');
 
@@ -51,7 +53,11 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
     .option('--cron <expr>', 'cron expression (5 fields)')
     .option('--rrule <rule>', 'RRULE expression (for example FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1)')
     .option('--timezone <iana>', 'IANA timezone (for example America/Los_Angeles)')
-    .option('--thread-key <threadKey>', 'creator thread key', defaultThreadKey)
+    .option(
+      '--thread-key <threadKey>',
+      'creator thread key (defaults to $JAGC_THREAD_KEY when set, else cli:default)',
+      defaultThreadKey,
+    )
     .option('--json', 'JSON output')
     .addHelpText(
       'after',
@@ -313,6 +319,15 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
 
 function apiUrl(root: Command): string {
   return root.opts<{ apiUrl: string }>().apiUrl;
+}
+
+function resolveDefaultTaskThreadKey(env: NodeJS.ProcessEnv = process.env): string {
+  const configuredThreadKey = env[taskThreadKeyEnvVar]?.trim();
+  if (configuredThreadKey) {
+    return configuredThreadKey;
+  }
+
+  return fallbackThreadKey;
 }
 
 function buildScheduleFromOptions(input: { onceAt?: string; cronExpr?: string; rruleExpr?: string; timezone?: string }):

@@ -5,20 +5,37 @@ export interface TelegramRoute {
 
 const telegramThreadKeyPattern = /^telegram:chat:(-?\d+)(?::topic:(\d+))?$/u;
 
+export function normalizeTelegramMessageThreadId(messageThreadId: number | undefined): number | undefined {
+  if (messageThreadId === undefined) {
+    return undefined;
+  }
+
+  if (!Number.isInteger(messageThreadId)) {
+    throw new Error('telegram route message_thread_id must be an integer when provided');
+  }
+
+  if (messageThreadId <= 0) {
+    throw new Error('telegram route message_thread_id must be a positive integer when provided');
+  }
+
+  if (messageThreadId === 1) {
+    return undefined;
+  }
+
+  return messageThreadId;
+}
+
 export function telegramThreadKeyFromRoute(route: TelegramRoute): string {
   if (!Number.isFinite(route.chatId)) {
     throw new Error('telegram route chatId must be a finite number');
   }
 
-  if (route.messageThreadId === undefined) {
+  const normalizedThreadId = normalizeTelegramMessageThreadId(route.messageThreadId);
+  if (normalizedThreadId === undefined) {
     return `telegram:chat:${route.chatId}`;
   }
 
-  if (!Number.isInteger(route.messageThreadId) || route.messageThreadId <= 0) {
-    throw new Error('telegram route messageThreadId must be a positive integer when provided');
-  }
-
-  return `telegram:chat:${route.chatId}:topic:${route.messageThreadId}`;
+  return `telegram:chat:${route.chatId}:topic:${normalizedThreadId}`;
 }
 
 export function telegramRouteFromThreadKey(threadKey: string): TelegramRoute | null {
@@ -44,6 +61,12 @@ export function telegramRouteFromThreadKey(threadKey: string): TelegramRoute | n
     return null;
   }
 
+  if (messageThreadId === 1) {
+    return {
+      chatId,
+    };
+  }
+
   return {
     chatId,
     messageThreadId,
@@ -55,18 +78,15 @@ export function telegramRoute(chatId: number | undefined, messageThreadId?: numb
     throw new Error('telegram message has no chat id');
   }
 
-  if (messageThreadId === undefined) {
+  const normalizedThreadId = normalizeTelegramMessageThreadId(messageThreadId);
+  if (normalizedThreadId === undefined) {
     return {
       chatId,
     };
   }
 
-  if (!Number.isInteger(messageThreadId) || messageThreadId <= 0) {
-    throw new Error('telegram message_thread_id must be a positive integer when present');
-  }
-
   return {
     chatId,
-    messageThreadId,
+    messageThreadId: normalizedThreadId,
   };
 }

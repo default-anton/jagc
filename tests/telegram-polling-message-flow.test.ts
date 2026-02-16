@@ -129,6 +129,42 @@ describe('TelegramPollingAdapter message flow integration', () => {
     );
   }, 14_000);
 
+  test('normalizes general topic thread id 1 to base chat routing and payloads', async () => {
+    const runService = new StubRunService('run-general-topic', [
+      runRecord({
+        runId: 'run-general-topic',
+        status: 'succeeded',
+        output: { text: 'general topic normalized' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      const updateId = clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: 'general topic route',
+        messageThreadId: 1,
+      });
+
+      const sendMessage = await clone.waitForBotCall(
+        'sendMessage',
+        (call) => call.payload.text === 'general topic normalized',
+      );
+      expect(sendMessage.payload.message_thread_id).toBeUndefined();
+
+      expect(runService.ingests).toEqual([
+        {
+          source: 'telegram',
+          threadKey: 'telegram:chat:101',
+          userKey: 'telegram:user:202',
+          text: 'general topic route',
+          deliveryMode: 'followUp',
+          idempotencyKey: `telegram:update:${updateId}`,
+        },
+      ]);
+    });
+  });
+
   test('deletes startup-only progress messages in topic threads with message_thread_id', async () => {
     const topicThreadId = 444;
     const runningState = runRecord({

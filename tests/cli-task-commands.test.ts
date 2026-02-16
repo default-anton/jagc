@@ -4,8 +4,17 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { registerTaskCommands } from '../src/cli/task-commands.js';
 
 describe('registerTaskCommands', () => {
+  const initialTaskThreadEnv = process.env.JAGC_THREAD_KEY;
+
   afterEach(() => {
     vi.restoreAllMocks();
+
+    if (initialTaskThreadEnv === undefined) {
+      delete process.env.JAGC_THREAD_KEY;
+      return;
+    }
+
+    process.env.JAGC_THREAD_KEY = initialTaskThreadEnv;
   });
 
   test('create forwards schedule payload and prints JSON', async () => {
@@ -78,6 +87,72 @@ describe('registerTaskCommands', () => {
         task: expect.objectContaining({ task_id: 'task-1' }),
       }),
     );
+  });
+
+  test('create defaults thread key from JAGC_THREAD_KEY when set', async () => {
+    process.env.JAGC_THREAD_KEY = 'telegram:chat:101:topic:333';
+
+    const createTaskImpl = vi.fn().mockResolvedValue({
+      task: {
+        task_id: 'task-telegram',
+        title: 'Topic task',
+        instructions: 'Stay in current telegram thread',
+        schedule: {
+          kind: 'once',
+          cron: null,
+          once_at: '2026-02-16T00:00:00.000Z',
+          rrule: null,
+          timezone: 'UTC',
+        },
+        enabled: true,
+        next_run_at: '2026-02-16T00:00:00.000Z',
+        creator_thread_key: 'telegram:chat:101:topic:333',
+        owner_user_key: null,
+        delivery_target: {
+          provider: 'telegram',
+        },
+        execution_thread_key: null,
+        created_at: '2026-02-15T00:00:00.000Z',
+        updated_at: '2026-02-15T00:00:00.000Z',
+        last_run_at: null,
+        last_run_status: null,
+        last_error_message: null,
+      },
+    });
+
+    const program = new Command();
+    program.option('--api-url <url>', 'api', 'http://127.0.0.1:31415');
+    registerTaskCommands(program, {
+      createTaskImpl,
+    });
+
+    await program.parseAsync(
+      [
+        'node',
+        'jagc',
+        'task',
+        'create',
+        '--title',
+        'Topic task',
+        '--instructions',
+        'Stay in current telegram thread',
+        '--once-at',
+        '2026-02-16T00:00:00.000Z',
+        '--timezone',
+        'UTC',
+      ],
+      { from: 'node' },
+    );
+
+    expect(createTaskImpl).toHaveBeenCalledWith('http://127.0.0.1:31415', 'telegram:chat:101:topic:333', {
+      title: 'Topic task',
+      instructions: 'Stay in current telegram thread',
+      schedule: {
+        kind: 'once',
+        once_at: '2026-02-16T00:00:00.000Z',
+        timezone: 'UTC',
+      },
+    });
   });
 
   test('create supports rrule schedule payload', async () => {

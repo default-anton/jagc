@@ -145,6 +145,20 @@ describe('TelegramPollingAdapter commands', () => {
   });
 });
 
+describe('TelegramPollingAdapter task topic creation', () => {
+  test('returns actionable error when private topics are disabled', async () => {
+    await withTelegramAdapter({ hasTopicsEnabled: false }, async ({ adapter }) => {
+      await expect(
+        adapter.createTaskTopic({
+          chatId: telegramTestChatId,
+          taskId: 'task-1',
+          title: 'Disabled topics',
+        }),
+      ).rejects.toThrow(/telegram_topics_unavailable/u);
+    });
+  });
+});
+
 describe('TelegramPollingAdapter callback recovery', () => {
   test('invalid callback data recovers to the latest settings panel', async () => {
     await withTelegramAdapter(

@@ -20,7 +20,7 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc task create|list|get|update|delete|run [--wait]|enable|disable` (`task list --state <all|enabled|disabled>`, `task create|update --rrule <rule>`)
+- `jagc task create|list|get|update|delete|run [--wait]|enable|disable` (`task list --state <all|enabled|disabled>`, `task create|update --rrule <rule>`); `task create` defaults creator thread to `$JAGC_THREAD_KEY` when set, else `cli:default`
 - `jagc cancel`, `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc telegram allow|list`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
@@ -120,6 +120,7 @@ This doc is the implementation snapshot (not design intent).
 ## Session/thread model (pi executor)
 
 - Session identity is per `thread_key`.
+- `PiRunExecutor` configures bash tool spawn hooks per thread and injects thread-scoped env (`JAGC_THREAD_KEY`, `JAGC_TRANSPORT`, plus Telegram `JAGC_TELEGRAM_CHAT_ID` / `JAGC_TELEGRAM_TOPIC_ID`) on every command execution.
 - `thread_sessions` persists `thread_key`, `session_id`, `session_file`.
 - `PiRunExecutor` reopens persisted sessions when possible; creates/persists when missing/invalid.
 - After each run, `PiRunExecutor` reconciles `thread_sessions` with the live `AgentSession` (`session_id`/`session_file`) so extension-driven session switches during a run remain durable across restarts.
@@ -141,7 +142,7 @@ Operational note:
 ## Telegram polling behavior
 
 - Ingest source: grammY long polling (personal chats).
-- Thread mapping: `thread_key = telegram:chat:<chat_id>` for base chats, and `thread_key = telegram:chat:<chat_id>:topic:<message_thread_id>` when Telegram topic/thread context is present on inbound message/callback payloads.
+- Thread mapping: `thread_key = telegram:chat:<chat_id>` for base chats, and `thread_key = telegram:chat:<chat_id>:topic:<message_thread_id>` when Telegram topic/thread context is present on inbound message/callback payloads; Telegram general topic (`message_thread_id=1`) is normalized to base-chat routing (no `:topic:1` key).
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Access gate: Telegram message/callback handling is allowlisted by `JAGC_TELEGRAM_ALLOWED_USER_IDS` (`from.id` values). Empty allowlist means deny all. Unauthorized users receive an in-chat command prompt (`jagc telegram allow --user-id <id>`) and no run is ingested.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
@@ -154,8 +155,10 @@ Operational note:
 - Until the first visible thinking/tool snippet arrives, the progress message shows a short single-word placeholder (for immediate feedback); once the first snippet arrives, that placeholder is removed, and if the run finishes without any snippets, the placeholder message is deleted.
 - Status updates are edit-throttled and retry-aware for Telegram rate limits (`retry_after`); when progress overflows the editable message limit, older progress lines are flushed into additional `progress log (continued):` messages and the live message keeps tail updates.
 - Adapter keeps waiting for terminal run status in the background and replies with output/error when done (no timeout handoff message).
-- Scheduled task runs reuse the same run-delivery path and are delivered into per-task Telegram topics; first run lazily creates a forum topic (`createForumTopic`) and persists the resulting `message_thread_id` route metadata.
+- Scheduled task runs reuse the same run-delivery path and are delivered into Telegram topics; first run always lazily creates a dedicated per-task topic via `createForumTopic` and persists the resulting `message_thread_id` route metadata (including tasks created from base/default Telegram chat routing and creator topic threads).
 - Topic-thread delivery sends/edits/actions/documents/progress payloads with `message_thread_id` so all progress/final output stays inside the task topic.
+- Task title sync (`editForumTopic`) applies only to task-owned topics; creator-origin topics are intentionally left unchanged.
+- Topic creation checks Telegram bot capability (`getMe().has_topics_enabled`) and returns actionable `telegram_topics_unavailable` errors when private-topic mode is disabled or unresolved by Telegram API.
 - Terminal assistant text replies are parsed as Markdown and sent via Telegram `entities` (not `parse_mode` Markdown strings) for robust formatting.
 - Other adapter-originated text replies (command/status errors, runtime-control panels, and auth/allowlist guidance) are sent as literal text to avoid markdown-driven mutation of operator commands and path snippets.
 - Fenced code blocks above inline thresholds are emitted as Telegram document uploads with language-aware filenames (for example `snippet-1.ts`); shorter blocks stay inline as `pre` entities.
@@ -199,5 +202,5 @@ Operational note:
 - Telegram webhook mode is intentionally unsupported in core (polling is the only supported Telegram mode).
 - Webhook hardening beyond current baseline is pending (signatures/replay protection).
 - Linux/systemd and Windows service lifecycle commands are not implemented yet (macOS launchd is first supported target).
-- Telegram scheduled tasks require forum topics for execution-thread creation; when topics are unavailable, occurrences fail with actionable `telegram_topics_unavailable` errors (no shared-thread fallback).
+- Telegram scheduled-task topic delivery depends on Telegram private-topic mode (`has_topics_enabled`); when topics are unavailable, occurrences fail with actionable `telegram_topics_unavailable` errors (no shared-thread fallback). The capability check is read at adapter startup, so BotFather topic-mode changes require a jagc restart.
 - Multi-process one-active-run-per-thread coordination is deferred.

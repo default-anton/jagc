@@ -146,6 +146,174 @@ describe('ScheduledTaskService', () => {
     expect(failedRuns[0]?.errorMessage).toMatch(/telegram_topics_unavailable/u);
   });
 
+  test('run-now always creates a dedicated task topic even when task was created from a creator topic', async () => {
+    const store = new SqliteScheduledTaskStore(testDb.database);
+    await store.init();
+
+    const task = await store.createTask({
+      title: 'Telegram dedicated topic',
+      instructions: 'Run now in task-specific topic',
+      scheduleKind: 'once',
+      onceAt: new Date(Date.now() + 60_000).toISOString(),
+      cronExpr: null,
+      rruleExpr: null,
+      timezone: 'UTC',
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      creatorThreadKey: 'telegram:chat:101:topic:333',
+      ownerUserKey: null,
+      deliveryTarget: {
+        provider: 'telegram',
+        route: {
+          chatId: 101,
+        },
+        metadata: {
+          creatorMessageThreadId: 333,
+        },
+      },
+    });
+
+    const runService = new FakeRunService();
+    const deliverCalls: Array<{ runId: string; route: { chatId: number; messageThreadId?: number } }> = [];
+    const createTopicCalls: Array<{ chatId: number; taskId: string; title: string }> = [];
+
+    const service = new ScheduledTaskService(store, runService.asRunService(), {
+      telegramBridge: {
+        createTaskTopic: async ({ chatId, taskId, title }) => {
+          createTopicCalls.push({ chatId, taskId, title });
+          return {
+            chatId,
+            messageThreadId: 777,
+          };
+        },
+        syncTaskTopicTitle: async () => {},
+        deliverRun: async (runId, route) => {
+          deliverCalls.push({ runId, route });
+        },
+      },
+    });
+
+    const result = await service.runNow(task.taskId);
+    expect(result).not.toBeNull();
+    expect(createTopicCalls).toEqual([
+      {
+        chatId: 101,
+        taskId: task.taskId,
+        title: 'Telegram dedicated topic',
+      },
+    ]);
+    expect(result?.task.executionThreadKey).toBe('telegram:chat:101:topic:777');
+    expect(result?.task.deliveryTarget.route).toMatchObject({ chatId: 101, messageThreadId: 777 });
+    expect(deliverCalls).toHaveLength(1);
+    expect(deliverCalls[0]?.route).toEqual({ chatId: 101, messageThreadId: 777 });
+  });
+
+  test('update title does not rename creator topic for legacy tasks where execution thread matches creator topic id', async () => {
+    const store = new SqliteScheduledTaskStore(testDb.database);
+    await store.init();
+
+    const deliveryTarget = {
+      provider: 'telegram' as const,
+      route: {
+        chatId: 101,
+        messageThreadId: 333,
+      },
+      metadata: {
+        creatorMessageThreadId: 333,
+      },
+    };
+
+    const task = await store.createTask({
+      title: 'Original title',
+      instructions: 'Keep creator topic intact',
+      scheduleKind: 'once',
+      onceAt: new Date(Date.now() + 60_000).toISOString(),
+      cronExpr: null,
+      rruleExpr: null,
+      timezone: 'UTC',
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      creatorThreadKey: 'telegram:chat:101:topic:333',
+      ownerUserKey: null,
+      deliveryTarget,
+    });
+
+    await store.setTaskExecutionThread(task.taskId, 'telegram:chat:101:topic:333', deliveryTarget);
+
+    const syncCalls: Array<{ route: { chatId: number; messageThreadId?: number }; taskId: string; title: string }> = [];
+
+    const service = new ScheduledTaskService(store, new FakeRunService().asRunService(), {
+      telegramBridge: {
+        createTaskTopic: async () => {
+          throw new Error('createTaskTopic should not be called for title sync');
+        },
+        syncTaskTopicTitle: async (route, taskId, title) => {
+          syncCalls.push({ route, taskId, title });
+        },
+        deliverRun: async () => {},
+      },
+    });
+
+    const updated = await service.updateTask(task.taskId, { title: 'Renamed title' });
+    expect(updated).not.toBeNull();
+    expect(updated?.warnings).toEqual([]);
+    expect(syncCalls).toEqual([]);
+  });
+
+  test('update title renames task-owned topic when execution topic is task-specific', async () => {
+    const store = new SqliteScheduledTaskStore(testDb.database);
+    await store.init();
+
+    const deliveryTarget = {
+      provider: 'telegram' as const,
+      route: {
+        chatId: 101,
+        messageThreadId: 777,
+      },
+    };
+
+    const task = await store.createTask({
+      title: 'Task-owned topic title',
+      instructions: 'Sync topic title',
+      scheduleKind: 'once',
+      onceAt: new Date(Date.now() + 60_000).toISOString(),
+      cronExpr: null,
+      rruleExpr: null,
+      timezone: 'UTC',
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      creatorThreadKey: 'telegram:chat:101',
+      ownerUserKey: null,
+      deliveryTarget,
+    });
+
+    await store.setTaskExecutionThread(task.taskId, 'telegram:chat:101:topic:777', deliveryTarget);
+
+    const syncCalls: Array<{ route: { chatId: number; messageThreadId?: number }; taskId: string; title: string }> = [];
+
+    const service = new ScheduledTaskService(store, new FakeRunService().asRunService(), {
+      telegramBridge: {
+        createTaskTopic: async () => {
+          throw new Error('createTaskTopic should not be called for title sync');
+        },
+        syncTaskTopicTitle: async (route, taskId, title) => {
+          syncCalls.push({ route, taskId, title });
+        },
+        deliverRun: async () => {},
+      },
+    });
+
+    const updated = await service.updateTask(task.taskId, { title: 'Renamed owned topic title' });
+    expect(updated).not.toBeNull();
+    expect(updated?.warnings).toEqual([]);
+    expect(syncCalls).toHaveLength(1);
+    expect(syncCalls[0]).toEqual({
+      route: { chatId: 101, messageThreadId: 777 },
+      taskId: task.taskId,
+      title: 'Renamed owned topic title',
+    });
+  });
+
   test('recovery resumes pending and dispatched task runs after restart', async () => {
     const store = new SqliteScheduledTaskStore(testDb.database);
     await store.init();

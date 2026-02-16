@@ -13,7 +13,11 @@ import type { ThreadControlService } from '../runtime/pi-executor.js';
 import type { RunService } from '../server/service.js';
 import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
-import { type TelegramRoute, telegramThreadKeyFromRoute } from '../shared/telegram-threading.js';
+import {
+  normalizeTelegramMessageThreadId,
+  type TelegramRoute,
+  telegramThreadKeyFromRoute,
+} from '../shared/telegram-threading.js';
 import { TelegramBackgroundRunRegistry } from './telegram-background-run-registry.js';
 import { parseTelegramCallbackData } from './telegram-controls-callbacks.js';
 import {
@@ -74,6 +78,7 @@ export class TelegramPollingAdapter {
   private readonly workspaceDir: string | null;
   private readonly runDelivery: TelegramRunDelivery;
   private readonly backgroundRuns = new TelegramBackgroundRunRegistry();
+  private privateTopicsEnabled: boolean | null = null;
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
     const botConfig: BotConfig<Context> = {};
@@ -128,6 +133,8 @@ export class TelegramPollingAdapter {
     }
 
     await this.bot.init();
+    this.privateTopicsEnabled = readPrivateTopicsEnabledFromBotInfo(this.bot.botInfo);
+
     this.runner = run(this.bot, {
       runner: {
         fetch: {
@@ -145,7 +152,19 @@ export class TelegramPollingAdapter {
     });
 
     const username = this.bot.botInfo.username;
-    this.logger.info({ event: 'telegram_polling_started', username });
+    this.logger.info({
+      event: 'telegram_polling_started',
+      username,
+      private_topics_enabled: this.privateTopicsEnabled,
+    });
+
+    if (this.privateTopicsEnabled === false) {
+      this.logger.warn({
+        event: 'telegram_private_topics_disabled',
+        message:
+          'Telegram private-chat topics are disabled for this bot. Scheduled task topic delivery requires topic mode.',
+      });
+    }
   }
 
   async stop(): Promise<void> {
@@ -163,16 +182,34 @@ export class TelegramPollingAdapter {
   async createTaskTopic(input: { chatId: number; taskId: string; title: string }): Promise<TelegramRoute> {
     await this.ensureReadyForOutbound();
 
-    const created = (await callTelegramWithRetry(() =>
-      this.bot.api.raw.createForumTopic({
-        chat_id: input.chatId,
-        name: formatTaskTopicTitle(input.taskId, input.title),
-      }),
-    )) as { message_thread_id?: number };
+    if (this.privateTopicsEnabled === false) {
+      throw new Error(
+        'telegram_topics_unavailable: Telegram private-chat topics are disabled for this bot; enable topics in BotFather and retry',
+      );
+    }
 
-    const messageThreadId = Number(created.message_thread_id);
-    if (!Number.isInteger(messageThreadId) || messageThreadId <= 0) {
-      throw new Error('telegram_topics_unavailable: createForumTopic did not return message_thread_id');
+    let created: { message_thread_id?: number };
+
+    try {
+      created = (await callTelegramWithRetry(() =>
+        this.bot.api.raw.createForumTopic({
+          chat_id: input.chatId,
+          name: formatTaskTopicTitle(input.taskId, input.title),
+        }),
+      )) as { message_thread_id?: number };
+    } catch (error) {
+      throw mapTelegramTopicCreationError(error);
+    }
+
+    let messageThreadId: number | undefined;
+    try {
+      messageThreadId = normalizeTelegramMessageThreadId(Number(created.message_thread_id));
+    } catch {
+      throw new Error('telegram_topics_unavailable: createForumTopic returned an invalid message_thread_id');
+    }
+
+    if (!messageThreadId) {
+      throw new Error('telegram_topics_unavailable: createForumTopic returned an unsupported message_thread_id');
     }
 
     return {
@@ -475,6 +512,37 @@ export class TelegramPollingAdapter {
       await this.start();
     }
   }
+}
+
+function readPrivateTopicsEnabledFromBotInfo(botInfo: BotConfig<Context>['botInfo']): boolean | null {
+  if (!botInfo || typeof botInfo !== 'object') {
+    return null;
+  }
+
+  const raw = (botInfo as { has_topics_enabled?: unknown }).has_topics_enabled;
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
+
+  return null;
+}
+
+function mapTelegramTopicCreationError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/chat is not a forum/iu.test(message)) {
+    return new Error(
+      'telegram_topics_unavailable: this chat has no topic mode enabled for the bot; enable private topics in BotFather and retry',
+    );
+  }
+
+  if (/message thread not found/iu.test(message)) {
+    return new Error(
+      'telegram_topics_unavailable: Telegram could not resolve the target topic; open the chat topic and retry',
+    );
+  }
+
+  return error instanceof Error ? error : new Error(message);
 }
 
 export { parseTelegramCommand };

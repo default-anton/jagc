@@ -43,6 +43,8 @@ interface GetUpdatesArgs {
 export interface TelegramBotApiCloneOptions {
   token: string;
   username?: string;
+  hasTopicsEnabled?: boolean;
+  allowsUsersToCreateTopics?: boolean;
 }
 
 export interface TelegramCloneApiErrorSpec {
@@ -66,6 +68,8 @@ class TelegramClonePayloadError extends Error {}
 export class TelegramBotApiClone {
   private readonly token: string;
   private readonly username: string;
+  private readonly hasTopicsEnabled: boolean;
+  private readonly allowsUsersToCreateTopics: boolean;
   private readonly server: Server;
   private readonly updates: Array<Record<string, unknown>> = [];
   private readonly updateWaiters = new Set<() => void>();
@@ -83,6 +87,8 @@ export class TelegramBotApiClone {
   constructor(options: TelegramBotApiCloneOptions) {
     this.token = options.token;
     this.username = options.username ?? 'jagc_test_bot';
+    this.hasTopicsEnabled = options.hasTopicsEnabled ?? true;
+    this.allowsUsersToCreateTopics = options.allowsUsersToCreateTopics ?? true;
     this.server = createServer(async (request, response) => {
       await this.handleRequest(request, response);
     });
@@ -348,6 +354,8 @@ export class TelegramBotApiClone {
           can_join_groups: true,
           can_read_all_group_messages: false,
           supports_inline_queries: false,
+          has_topics_enabled: this.hasTopicsEnabled,
+          allows_users_to_create_topics: this.allowsUsersToCreateTopics,
         };
       }
       case 'getUpdates': {
@@ -355,6 +363,13 @@ export class TelegramBotApiClone {
       }
       case 'createForumTopic': {
         this.recordBotCall({ method, payload });
+
+        if (!this.hasTopicsEnabled) {
+          throw new TelegramCloneApiError({
+            errorCode: 400,
+            description: 'Bad Request: the chat is not a forum',
+          });
+        }
 
         return {
           name: typeof payload.name === 'string' ? payload.name : 'topic',
@@ -373,6 +388,7 @@ export class TelegramBotApiClone {
         const chatId = toNumber(payload.chat_id) ?? 0;
         const text = typeof payload.text === 'string' ? payload.text : '';
         const messageThreadId = toNumber(payload.message_thread_id);
+        assertTelegramMessageThreadId(messageThreadId);
 
         return {
           message_id: this.nextMessageId++,
@@ -392,6 +408,7 @@ export class TelegramBotApiClone {
         const messageId = toNumber(payload.message_id) ?? 0;
         const text = typeof payload.text === 'string' ? payload.text : '';
         const messageThreadId = toNumber(payload.message_thread_id);
+        assertTelegramMessageThreadId(messageThreadId);
 
         return {
           message_id: messageId,
@@ -411,6 +428,7 @@ export class TelegramBotApiClone {
         const caption = typeof payload.caption === 'string' ? payload.caption : '';
         const document = parseDocumentPayload(payload.document, payload);
         const messageThreadId = toNumber(payload.message_thread_id);
+        assertTelegramMessageThreadId(messageThreadId);
 
         return {
           message_id: this.nextMessageId++,
@@ -435,10 +453,12 @@ export class TelegramBotApiClone {
         return true;
       }
       case 'sendChatAction': {
+        assertTelegramMessageThreadId(toNumber(payload.message_thread_id));
         this.recordBotCall({ method, payload });
         return true;
       }
       case 'deleteMessage': {
+        assertTelegramMessageThreadId(toNumber(payload.message_thread_id));
         this.recordBotCall({ method, payload });
         return true;
       }
@@ -593,6 +613,17 @@ export class TelegramBotApiClone {
     response.setHeader('content-type', 'application/json; charset=utf-8');
     response.end(JSON.stringify(body));
   }
+}
+
+function assertTelegramMessageThreadId(messageThreadId: number | null): void {
+  if (messageThreadId !== 1) {
+    return;
+  }
+
+  throw new TelegramCloneApiError({
+    errorCode: 400,
+    description: 'Bad Request: message thread not found',
+  });
 }
 
 function parseDocumentPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {

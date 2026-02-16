@@ -134,6 +134,8 @@ jagc task run <task_id> --wait --timeout 60 --json
 jagc share --thread-key cli:default --json
 ```
 
+`jagc task create` defaults to `$JAGC_THREAD_KEY` when present (jagc agent `bash` calls set this per active thread). Without that env var, it defaults to `cli:default`.
+
 `jagc share` / Telegram `/share` require GitHub CLI (`gh`) installed and authenticated (`gh auth login`).
 
 ## Current capabilities
@@ -168,7 +170,10 @@ jagc share --thread-key cli:default --json
 
 - Long polling (personal chats)
 - Commands: `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
-- Scheduled task runs create and reuse Telegram forum topics lazily (`task:<short-id> <title>`) and route all progress/final delivery in the task topic thread.
+- Topic-aware routing: inbound private-chat topic messages map to `telegram:chat:<chat_id>:topic:<message_thread_id>`; Telegram general topic (`message_thread_id=1`) is normalized to base chat routing (`telegram:chat:<chat_id>`) to avoid Bot API `message thread not found` sends.
+- Scheduled task runs always use a dedicated per-task topic. On first due/run-now, jagc lazily creates and persists a task-owned topic (`task:<short-id> <title>`) and routes progress/final delivery inside that topic thread (including tasks created from base/default chats and creator topic threads).
+- Task title updates rename only task-owned topics; creator-origin topics are never renamed.
+- Scheduled task topic creation requires Telegram private topics enabled for the bot (`getMe().has_topics_enabled=true`). Capability is read at adapter startup, so restart jagc after toggling topic mode in BotFather.
 - Final assistant replies are rendered from Markdown into Telegram `entities` (no `parse_mode` string escaping path)
 - Short code fences render inline as Telegram code blocks; oversized code fences are sent as document attachments with language-aware filenames (for example `snippet-1.ts`)
 - Progress stream with thinking/tool snippets and tool completion status updates (separate thinking content blocks render as separate `~` lines)
@@ -178,6 +183,7 @@ jagc share --thread-key cli:default --json
 
 - Service management is macOS launchd-first (Linux/Windows not implemented yet)
 - Telegram webhook mode is intentionally unsupported in core (polling only)
+- Scheduled task topic creation in Telegram depends on bot private topics mode (`has_topics_enabled`)
 - Multi-process global per-thread locking is deferred post-v0
 
 ## Minimal configuration

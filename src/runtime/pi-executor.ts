@@ -7,6 +7,7 @@ import {
   type AgentSession,
   AuthStorage,
   createAgentSession,
+  createCodingTools,
   DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
@@ -17,6 +18,7 @@ import type { RunStore } from '../server/store.js';
 import type { RunProgressEvent, RunProgressListener } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 import { ThreadRunController } from './thread-run-controller.js';
+import { withThreadToolEnvironment } from './thread-tool-environment.js';
 
 interface PiExecutorOptions {
   workspaceDir: string;
@@ -350,7 +352,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       }
 
       try {
-        const opened = await this.createSession(SessionManager.open(persisted.sessionFile, this.sessionDir));
+        const opened = await this.createSession(SessionManager.open(persisted.sessionFile, this.sessionDir), threadKey);
 
         try {
           await this.ensureThreadSession(threadKey, opened.sessionId, opened.sessionFile, generation);
@@ -372,7 +374,10 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
   }
 
   private async createAndPersistNewSession(threadKey: string, generation: number): Promise<AgentSession> {
-    const created = await this.createSession(SessionManager.create(this.options.workspaceDir, this.sessionDir));
+    const created = await this.createSession(
+      SessionManager.create(this.options.workspaceDir, this.sessionDir),
+      threadKey,
+    );
 
     try {
       await this.ensureThreadSession(threadKey, created.sessionId, created.sessionFile, generation);
@@ -383,7 +388,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     }
   }
 
-  private async createSession(sessionManager: SessionManager): Promise<AgentSession> {
+  private async createSession(sessionManager: SessionManager, threadKey: string): Promise<AgentSession> {
     const resourceLoader = new DefaultResourceLoader({
       cwd: this.options.workspaceDir,
       agentDir: this.options.workspaceDir,
@@ -395,6 +400,16 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     });
     await resourceLoader.reload();
 
+    const tools = createCodingTools(this.options.workspaceDir, {
+      bash: {
+        spawnHook: ({ command, cwd, env }) => ({
+          command,
+          cwd,
+          env: withThreadToolEnvironment(env, threadKey),
+        }),
+      },
+    });
+
     const result = await createAgentSession({
       cwd: this.options.workspaceDir,
       agentDir: this.options.workspaceDir,
@@ -403,6 +418,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       modelRegistry: this.modelRegistry,
       settingsManager: this.settingsManager,
       resourceLoader,
+      tools,
     });
 
     return result.session;

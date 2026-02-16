@@ -109,10 +109,14 @@ export async function withTelegramAdapter(
     workspaceDir?: string;
     pollIntervalMs?: number;
     pollRequestTimeoutSeconds?: number;
+    hasTopicsEnabled?: boolean;
   },
   run: (context: { clone: TelegramBotApiClone; adapter: TelegramPollingAdapter }) => Promise<void>,
 ): Promise<void> {
-  const clone = new TelegramBotApiClone({ token: telegramTestBotToken });
+  const clone = new TelegramBotApiClone({
+    token: telegramTestBotToken,
+    hasTopicsEnabled: options.hasTopicsEnabled,
+  });
   let adapter: TelegramPollingAdapter | null = null;
 
   try {

@@ -1,4 +1,8 @@
-import { type TelegramRoute, telegramRouteFromThreadKey } from '../shared/telegram-threading.js';
+import {
+  normalizeTelegramMessageThreadId,
+  type TelegramRoute,
+  telegramRouteFromThreadKey,
+} from '../shared/telegram-threading.js';
 import type { ScheduledTaskDeliveryTarget, ScheduledTaskRecord } from './scheduled-task-types.js';
 
 export function parseTelegramTaskRoute(target: ScheduledTaskDeliveryTarget): TelegramRoute | null {
@@ -16,14 +20,40 @@ export function parseTelegramTaskRoute(target: ScheduledTaskDeliveryTarget): Tel
     return { chatId: chatIdRaw };
   }
 
-  if (typeof messageThreadIdRaw !== 'number' || !Number.isInteger(messageThreadIdRaw) || messageThreadIdRaw <= 0) {
+  if (typeof messageThreadIdRaw !== 'number') {
     return null;
   }
 
-  return {
-    chatId: chatIdRaw,
-    messageThreadId: messageThreadIdRaw,
-  };
+  try {
+    const messageThreadId = normalizeTelegramMessageThreadId(messageThreadIdRaw);
+    if (messageThreadId === undefined) {
+      return { chatId: chatIdRaw };
+    }
+
+    return {
+      chatId: chatIdRaw,
+      messageThreadId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseCreatorTelegramTopicThreadId(target: ScheduledTaskDeliveryTarget): number | null {
+  if (target.provider !== 'telegram' || !target.metadata) {
+    return null;
+  }
+
+  const threadIdRaw = target.metadata.creatorMessageThreadId;
+  if (typeof threadIdRaw !== 'number') {
+    return null;
+  }
+
+  try {
+    return normalizeTelegramMessageThreadId(threadIdRaw) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function deliveryTargetFromCreatorThread(threadKey: string): ScheduledTaskDeliveryTarget {

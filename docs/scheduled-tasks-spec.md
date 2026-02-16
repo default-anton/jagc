@@ -305,7 +305,7 @@ Add top-level command group:
   - `--once-at <ISO8601>` + `--timezone <IANA>`
   - `--cron <expr>` + `--timezone <IANA>`
   - `--rrule <rule>` + `--timezone <IANA>`
-- `--thread-key <threadKey>` (optional; default `cli:default`)
+- `--thread-key <threadKey>` (optional; default `$JAGC_THREAD_KEY` when set, else `cli:default`)
 - `--json`
 
 `list`

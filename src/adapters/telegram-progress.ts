@@ -4,7 +4,7 @@ import type { Bot } from 'grammy';
 import type { MessageEntity } from 'grammy/types';
 import type { Logger } from '../shared/logger.js';
 import type { RunProgressEvent } from '../shared/run-progress.js';
-import type { TelegramRoute } from '../shared/telegram-threading.js';
+import { normalizeTelegramMessageThreadId, type TelegramRoute } from '../shared/telegram-threading.js';
 import { extractTelegramRetryAfterSeconds, isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
 import { renderTelegramText, type TelegramRenderedMessage } from './telegram-markdown.js';
 import {
@@ -803,9 +803,11 @@ export class TelegramRunProgressReporter {
 }
 
 function routePayload(route: TelegramRoute): { chat_id: number; message_thread_id?: number } {
+  const messageThreadId = normalizeTelegramMessageThreadId(route.messageThreadId);
+
   return {
     chat_id: route.chatId,
-    ...(route.messageThreadId ? { message_thread_id: route.messageThreadId } : {}),
+    ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
   };
 }
 

@@ -5,6 +5,7 @@ import {
   buildTaskRunInstructions,
   deliveryTargetFromCreatorThread,
   idempotencyKeyForTaskOccurrence,
+  parseCreatorTelegramTopicThreadId,
   parseTelegramTaskRoute,
   sanitizeThreadPrefix,
   toErrorMessage,
@@ -440,8 +441,14 @@ export class ScheduledTaskService {
 
     if (provider === 'telegram') {
       const route = parseTelegramTaskRoute(task.deliveryTarget);
+      if (!route) {
+        throw new Error(
+          'telegram_topics_unavailable: this task requires Telegram topics; enable topic mode for this chat and retry',
+        );
+      }
+
       const telegramBridge = this.options.telegramBridge;
-      if (!telegramBridge || !route) {
+      if (!telegramBridge) {
         throw new Error(
           'telegram_topics_unavailable: this task requires Telegram topics; enable topic mode for this chat and retry',
         );
@@ -492,6 +499,11 @@ export class ScheduledTaskService {
 
     const route = parseTelegramTaskRoute(task.deliveryTarget);
     if (!route?.messageThreadId) {
+      return null;
+    }
+
+    const creatorTopicThreadId = parseCreatorTelegramTopicThreadId(task.deliveryTarget);
+    if (creatorTopicThreadId && creatorTopicThreadId === route.messageThreadId) {
       return null;
     }
 
