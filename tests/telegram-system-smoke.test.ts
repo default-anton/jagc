@@ -150,7 +150,7 @@ describe('Telegram system smoke', () => {
     expect(runNowResponse.status).toBe(200);
 
     const createTopicCall = await stack.clone.waitForBotCall('createForumTopic', () => true, 5_000);
-    expect(String(createTopicCall.payload.name)).toContain('task:');
+    expect(String(createTopicCall.payload.name)).toBe('Daily plan');
 
     const topicReply = await stack.clone.waitForBotCall(
       'sendMessage',
@@ -181,11 +181,129 @@ describe('Telegram system smoke', () => {
     expect(patchTaskResponse.status).toBe(200);
 
     const editTopicCall = await stack.clone.waitForBotCall('editForumTopic', () => true, 5_000);
-    expect(String(editTopicCall.payload.name)).toBe(`task:${createdTask.task.task_id.slice(0, 8)} ${updatedTitle}`);
+    expect(String(editTopicCall.payload.name)).toBe(updatedTitle);
 
     await stack.stop();
     runningStacks.delete(stack);
   }, 20_000);
+
+  test('deleting a task topic clears execution thread mapping and run-now recreates a fresh topic', async () => {
+    const stack = await startTelegramSystemStack(testDb.database);
+    runningStacks.add(stack);
+
+    const createTaskResponse = await fetch(
+      `${stack.apiBaseUrl}/v1/threads/${encodeURIComponent('telegram:chat:101')}/tasks`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: 'Cleanup me',
+          instructions: 'Topic cleanup test',
+          schedule: {
+            kind: 'cron',
+            cron: '*/15 * * * *',
+            timezone: 'UTC',
+          },
+        }),
+      },
+    );
+
+    expect(createTaskResponse.status).toBe(201);
+    const createdTask = (await createTaskResponse.json()) as { task: { task_id: string } };
+
+    const firstRunNowResponse = await fetch(
+      `${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}/run-now`,
+      {
+        method: 'POST',
+      },
+    );
+    expect(firstRunNowResponse.status).toBe(200);
+
+    await expect.poll(() => stack.clone.getApiCallCount('createForumTopic')).toBe(1);
+
+    const firstTopicReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) =>
+        typeof call.payload.message_thread_id === 'number' &&
+        typeof call.payload.text === 'string' &&
+        String(call.payload.text).includes('[SCHEDULED TASK]'),
+      8_000,
+    );
+
+    const firstMessageThreadId = Number(firstTopicReply.payload.message_thread_id);
+    expect(Number.isInteger(firstMessageThreadId)).toBe(true);
+    expect(firstMessageThreadId).toBeGreaterThan(1);
+
+    stack.clone.injectTextMessage({
+      chatId: telegramTestChatId,
+      fromId: telegramTestUserId,
+      text: '/delete',
+      messageThreadId: firstMessageThreadId,
+    });
+
+    await stack.clone.waitForBotCall(
+      'deleteForumTopic',
+      (call) => call.payload.message_thread_id === firstMessageThreadId,
+      5_000,
+    );
+
+    await expect
+      .poll(async () => {
+        const taskResponse = await fetch(
+          `${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}`,
+        );
+        if (taskResponse.status !== 200) {
+          return null;
+        }
+
+        const taskJson = (await taskResponse.json()) as {
+          task: {
+            execution_thread_key: string | null;
+            delivery_target: { route?: { messageThreadId?: unknown } };
+          };
+        };
+
+        return {
+          executionThreadKey: taskJson.task.execution_thread_key,
+          hasMessageThreadId:
+            Object.hasOwn(taskJson.task.delivery_target.route ?? {}, 'messageThreadId') &&
+            taskJson.task.delivery_target.route?.messageThreadId !== undefined,
+        };
+      })
+      .toEqual({
+        executionThreadKey: null,
+        hasMessageThreadId: false,
+      });
+
+    const secondRunNowResponse = await fetch(
+      `${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}/run-now`,
+      {
+        method: 'POST',
+      },
+    );
+    expect(secondRunNowResponse.status).toBe(200);
+
+    await expect.poll(() => stack.clone.getApiCallCount('createForumTopic')).toBe(2);
+
+    const secondTopicReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) =>
+        typeof call.payload.message_thread_id === 'number' &&
+        Number(call.payload.message_thread_id) !== firstMessageThreadId &&
+        typeof call.payload.text === 'string' &&
+        String(call.payload.text).includes('[SCHEDULED TASK]'),
+      8_000,
+    );
+
+    const secondMessageThreadId = Number(secondTopicReply.payload.message_thread_id);
+    expect(Number.isInteger(secondMessageThreadId)).toBe(true);
+    expect(secondMessageThreadId).toBeGreaterThan(firstMessageThreadId);
+
+    await stack.stop();
+    runningStacks.delete(stack);
+  }, 25_000);
 });
 
 interface PersistedRunRow {
@@ -240,6 +358,8 @@ async function startTelegramSystemStack(database: SqliteDatabase): Promise<Runni
     adapter = new TelegramPollingAdapter({
       botToken: telegramTestBotToken,
       runService,
+      clearScheduledTaskExecutionThreadByKey: async (threadKey) =>
+        (await scheduledTaskService?.clearExecutionThreadByThreadKey(threadKey)) ?? 0,
       allowedTelegramUserIds: [String(telegramTestUserId)],
       telegramApiRoot: clone.apiRoot ?? undefined,
       pollRequestTimeoutSeconds: 1,

@@ -104,6 +104,7 @@ jagc packages update
 - `/settings` — runtime/settings panel
 - `/cancel` — stop active run in this chat (session preserved)
 - `/new` — reset this chat's session
+- `/delete` — delete the current Telegram topic thread
 - `/share` — export session HTML + upload secret gist
 - `/model` — model picker
 - `/thinking` — thinking level picker
@@ -169,9 +170,10 @@ jagc share --thread-key cli:default --json
 ### Telegram adapter
 
 - Long polling (personal chats)
-- Commands: `/settings`, `/cancel`, `/new`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
+- Commands: `/settings`, `/cancel`, `/new`, `/delete`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
 - Topic-aware routing: inbound private-chat topic messages map to `telegram:chat:<chat_id>:topic:<message_thread_id>`; Telegram general topic (`message_thread_id=1`) is normalized to base chat routing (`telegram:chat:<chat_id>`) to avoid Bot API `message thread not found` sends.
-- Scheduled task runs always use a dedicated per-task topic. On first due/run-now, jagc lazily creates and persists a task-owned topic (`task:<short-id> <title>`) and routes progress/final delivery inside that topic thread (including tasks created from base/default chats and creator topic threads).
+- `/delete` removes the current Telegram topic thread (only when called inside a topic), clears the corresponding jagc session mapping, and clears any scheduled-task execution-thread binding for that topic so the next task run recreates a fresh topic.
+- Scheduled task runs always use a dedicated per-task topic. On first due/run-now, jagc lazily creates and persists a task-owned topic named from the task title (`<title>`, trimmed to Telegram limits) and routes progress/final delivery inside that topic thread (including tasks created from base/default chats and creator topic threads).
 - Task title updates rename only task-owned topics; creator-origin topics are never renamed.
 - Scheduled task topic creation requires Telegram private topics enabled for the bot (`getMe().has_topics_enabled=true`). Capability is read at adapter startup, so restart jagc after toggling topic mode in BotFather.
 - Final assistant replies are rendered from Markdown into Telegram `entities` (no `parse_mode` string escaping path)

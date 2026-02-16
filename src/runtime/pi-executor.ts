@@ -7,18 +7,18 @@ import {
   type AgentSession,
   AuthStorage,
   createAgentSession,
-  createCodingTools,
   DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
   SettingsManager,
+  type ToolDefinition,
 } from '@mariozechner/pi-coding-agent';
 import type { RunExecutor } from '../server/executor.js';
 import type { RunStore } from '../server/store.js';
 import type { RunProgressEvent, RunProgressListener } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 import { ThreadRunController } from './thread-run-controller.js';
-import { withThreadToolEnvironment } from './thread-tool-environment.js';
+import { createThreadScopedBashToolDefinition } from './thread-scoped-bash-tool.js';
 
 interface PiExecutorOptions {
   workspaceDir: string;
@@ -400,16 +400,6 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     });
     await resourceLoader.reload();
 
-    const tools = createCodingTools(this.options.workspaceDir, {
-      bash: {
-        spawnHook: ({ command, cwd, env }) => ({
-          command,
-          cwd,
-          env: withThreadToolEnvironment(env, threadKey),
-        }),
-      },
-    });
-
     const result = await createAgentSession({
       cwd: this.options.workspaceDir,
       agentDir: this.options.workspaceDir,
@@ -418,7 +408,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       modelRegistry: this.modelRegistry,
       settingsManager: this.settingsManager,
       resourceLoader,
-      tools,
+      customTools: [createThreadScopedBashToolDefinition(this.options.workspaceDir, threadKey) as ToolDefinition],
     });
 
     return result.session;

@@ -208,6 +208,74 @@ describe('ScheduledTaskService', () => {
     expect(deliverCalls[0]?.route).toEqual({ chatId: 101, messageThreadId: 777 });
   });
 
+  test('clearExecutionThreadByThreadKey clears Telegram execution-thread mapping so next run can recreate topic', async () => {
+    const store = new SqliteScheduledTaskStore(testDb.database);
+    await store.init();
+
+    const task = await store.createTask({
+      title: 'Telegram cleanup task',
+      instructions: 'Needs topic recreation after /delete',
+      scheduleKind: 'cron',
+      onceAt: null,
+      cronExpr: '*/10 * * * *',
+      rruleExpr: null,
+      timezone: 'UTC',
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      creatorThreadKey: 'telegram:chat:101',
+      ownerUserKey: null,
+      deliveryTarget: {
+        provider: 'telegram',
+        route: {
+          chatId: 101,
+          messageThreadId: 777,
+        },
+      },
+    });
+
+    await store.setTaskExecutionThread(task.taskId, 'telegram:chat:101:topic:777', task.deliveryTarget);
+
+    const untouchedTask = await store.createTask({
+      title: 'Unrelated task',
+      instructions: 'Must not be modified',
+      scheduleKind: 'cron',
+      onceAt: null,
+      cronExpr: '*/10 * * * *',
+      rruleExpr: null,
+      timezone: 'UTC',
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 120_000).toISOString(),
+      creatorThreadKey: 'telegram:chat:101',
+      ownerUserKey: null,
+      deliveryTarget: {
+        provider: 'telegram',
+        route: {
+          chatId: 101,
+          messageThreadId: 888,
+        },
+      },
+    });
+
+    await store.setTaskExecutionThread(
+      untouchedTask.taskId,
+      'telegram:chat:101:topic:888',
+      untouchedTask.deliveryTarget,
+    );
+
+    const service = new ScheduledTaskService(store, new FakeRunService().asRunService());
+
+    const clearedCount = await service.clearExecutionThreadByThreadKey('telegram:chat:101:topic:777');
+    expect(clearedCount).toBe(1);
+
+    const clearedTask = await store.getTask(task.taskId);
+    expect(clearedTask?.executionThreadKey).toBeNull();
+    expect(clearedTask?.deliveryTarget.route).toEqual({ chatId: 101 });
+
+    const unchangedTask = await store.getTask(untouchedTask.taskId);
+    expect(unchangedTask?.executionThreadKey).toBe('telegram:chat:101:topic:888');
+    expect(unchangedTask?.deliveryTarget.route).toMatchObject({ chatId: 101, messageThreadId: 888 });
+  });
+
   test('update title does not rename creator topic for legacy tasks where execution thread matches creator topic id', async () => {
     const store = new SqliteScheduledTaskStore(testDb.database);
     await store.init();

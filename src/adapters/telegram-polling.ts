@@ -58,6 +58,7 @@ interface TelegramPollingAdapterOptions {
     cancelOAuthLogin(attemptId: string, ownerKey: string): OAuthLoginAttemptSnapshot;
   };
   threadControlService?: ThreadControlService;
+  clearScheduledTaskExecutionThreadByKey?: (threadKey: string) => Promise<number>;
   allowedTelegramUserIds?: string[];
   workspaceDir?: string;
   pollIntervalMs?: number;
@@ -182,9 +183,22 @@ export class TelegramPollingAdapter {
   async createTaskTopic(input: { chatId: number; taskId: string; title: string }): Promise<TelegramRoute> {
     await this.ensureReadyForOutbound();
 
+    const { taskId, chatId, title } = input;
+
+    this.logger.info({
+      event: 'telegram_task_topic_create_requested',
+      task_id: taskId,
+      chat_id: chatId,
+      private_topics_enabled: this.privateTopicsEnabled,
+    });
+
     if (this.privateTopicsEnabled === false) {
-      throw new Error(
-        'telegram_topics_unavailable: Telegram private-chat topics are disabled for this bot; enable topics in BotFather and retry',
+      throw this.logTaskTopicCreateFailure(
+        taskId,
+        chatId,
+        new Error(
+          'telegram_topics_unavailable: Telegram private-chat topics are disabled for this bot; enable topics in BotFather and retry',
+        ),
       );
     }
 
@@ -193,27 +207,42 @@ export class TelegramPollingAdapter {
     try {
       created = (await callTelegramWithRetry(() =>
         this.bot.api.raw.createForumTopic({
-          chat_id: input.chatId,
-          name: formatTaskTopicTitle(input.taskId, input.title),
+          chat_id: chatId,
+          name: formatTaskTopicTitle(taskId, title),
         }),
       )) as { message_thread_id?: number };
     } catch (error) {
-      throw mapTelegramTopicCreationError(error);
+      throw this.logTaskTopicCreateFailure(taskId, chatId, mapTelegramTopicCreationError(error));
     }
 
     let messageThreadId: number | undefined;
     try {
       messageThreadId = normalizeTelegramMessageThreadId(Number(created.message_thread_id));
     } catch {
-      throw new Error('telegram_topics_unavailable: createForumTopic returned an invalid message_thread_id');
+      throw this.logTaskTopicCreateFailure(
+        taskId,
+        chatId,
+        new Error('telegram_topics_unavailable: createForumTopic returned an invalid message_thread_id'),
+      );
     }
 
     if (!messageThreadId) {
-      throw new Error('telegram_topics_unavailable: createForumTopic returned an unsupported message_thread_id');
+      throw this.logTaskTopicCreateFailure(
+        taskId,
+        chatId,
+        new Error('telegram_topics_unavailable: createForumTopic returned an unsupported message_thread_id'),
+      );
     }
 
+    this.logger.info({
+      event: 'telegram_task_topic_create_succeeded',
+      task_id: taskId,
+      chat_id: chatId,
+      message_thread_id: messageThreadId,
+    });
+
     return {
-      chatId: input.chatId,
+      chatId,
       messageThreadId,
     };
   }
@@ -236,10 +265,20 @@ export class TelegramPollingAdapter {
   }
 
   async deliverRun(runId: string, route: TelegramRoute): Promise<void> {
+    const threadKey = telegramThreadKeyFromRoute(route);
+
+    this.logger.info({
+      event: 'telegram_run_delivery_requested',
+      run_id: runId,
+      chat_id: route.chatId,
+      message_thread_id: route.messageThreadId,
+      thread_key: threadKey,
+    });
+
     this.startBackgroundRunDelivery({
       runId,
       route,
-      threadKey: telegramThreadKeyFromRoute(route),
+      threadKey,
     });
   }
 
@@ -290,6 +329,10 @@ export class TelegramPollingAdapter {
         }
         case 'new': {
           await this.runtimeControls.handleNewCommand(ctx);
+          return;
+        }
+        case 'delete': {
+          await this.handleDeleteTopicCommand(ctx);
           return;
         }
         case 'share': {
@@ -419,6 +462,58 @@ export class TelegramPollingAdapter {
     }
   }
 
+  private async handleDeleteTopicCommand(ctx: Context): Promise<void> {
+    const route = routeFromMessageContext(ctx);
+    const messageThreadId = route.messageThreadId;
+    if (!messageThreadId) {
+      await this.reply(ctx, 'This command only works inside a Telegram topic thread.');
+      return;
+    }
+
+    try {
+      await callTelegramWithRetry(() =>
+        this.bot.api.raw.deleteForumTopic({
+          chat_id: route.chatId,
+          message_thread_id: messageThreadId,
+        }),
+      );
+    } catch (error) {
+      throw mapTelegramTopicDeletionError(error);
+    }
+
+    const threadKey = telegramThreadKeyFromRoute(route);
+    this.abortBackgroundRunsForThread(threadKey);
+
+    let clearedTaskCount = 0;
+    if (this.options.clearScheduledTaskExecutionThreadByKey) {
+      clearedTaskCount = await this.options.clearScheduledTaskExecutionThreadByKey(threadKey);
+    }
+
+    if (this.options.threadControlService) {
+      await this.options.threadControlService.resetThreadSession(threadKey);
+    }
+
+    this.logger.info({
+      event: 'telegram_topic_deleted_via_command',
+      chat_id: route.chatId,
+      message_thread_id: messageThreadId,
+      thread_key: threadKey,
+      cleared_task_count: clearedTaskCount,
+      command: 'delete',
+    });
+  }
+
+  private logTaskTopicCreateFailure(taskId: string, chatId: number, error: Error): Error {
+    this.logger.warn({
+      event: 'telegram_task_topic_create_failed',
+      task_id: taskId,
+      chat_id: chatId,
+      error_message: error.message,
+    });
+
+    return error;
+  }
+
   private async reply(ctx: Context, text: string): Promise<void> {
     await ctx.reply(text);
   }
@@ -540,6 +635,22 @@ function mapTelegramTopicCreationError(error: unknown): Error {
     return new Error(
       'telegram_topics_unavailable: Telegram could not resolve the target topic; open the chat topic and retry',
     );
+  }
+
+  return error instanceof Error ? error : new Error(message);
+}
+
+function mapTelegramTopicDeletionError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/chat is not a forum/iu.test(message)) {
+    return new Error(
+      'telegram_topics_unavailable: this chat has no topic mode enabled for the bot; enable private topics in BotFather and retry',
+    );
+  }
+
+  if (/message thread not found/iu.test(message)) {
+    return new Error('telegram_topic_not_found: this topic no longer exists or is already deleted.');
   }
 
   return error instanceof Error ? error : new Error(message);

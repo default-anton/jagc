@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import { parseTelegramCallbackData } from '../src/adapters/telegram-controls-callbacks.js';
 import { parseTelegramCommand } from '../src/adapters/telegram-polling.js';
+import { formatTaskTopicTitle } from '../src/adapters/telegram-polling-helpers.js';
 import {
   createThreadRuntimeState,
   FakeThreadControlService,
@@ -27,6 +28,21 @@ describe('parseTelegramCommand', () => {
 
   test('returns null for plain text', () => {
     expect(parseTelegramCommand('hello there')).toBeNull();
+  });
+});
+
+describe('formatTaskTopicTitle', () => {
+  test('uses only the task title for Telegram topic names', () => {
+    expect(formatTaskTopicTitle('task-123', '  Brush your teeth  ')).toBe('Brush your teeth');
+  });
+
+  test('falls back to task when title is empty', () => {
+    expect(formatTaskTopicTitle('task-123', '   ')).toBe('task');
+  });
+
+  test('truncates long titles to Telegram topic title limits', () => {
+    const title = 'a'.repeat(140);
+    expect(formatTaskTopicTitle('task-123', title)).toHaveLength(128);
   });
 });
 
@@ -131,7 +147,127 @@ describe('TelegramPollingAdapter commands', () => {
     });
   });
 
-  test('/help includes /cancel command', async () => {
+  test('/delete removes the current topic, clears scheduled-task execution mapping, and resets that topic session', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+    const clearedThreadKeys: string[] = [];
+
+    await withTelegramAdapter(
+      {
+        threadControlService,
+        clearScheduledTaskExecutionThreadByKey: async (threadKey) => {
+          clearedThreadKeys.push(threadKey);
+          return 1;
+        },
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: telegramTestChatId,
+          fromId: telegramTestUserId,
+          text: '/delete',
+          messageThreadId: 333,
+        });
+
+        const deleteTopic = await clone.waitForBotCall('deleteForumTopic');
+        expect(deleteTopic.payload).toMatchObject({
+          chat_id: telegramTestChatId,
+          message_thread_id: 333,
+        });
+
+        await expect.poll(() => clearedThreadKeys).toEqual(['telegram:chat:101:topic:333']);
+        await expect.poll(() => threadControlService.resetCalls).toEqual(['telegram:chat:101:topic:333']);
+      },
+    );
+  });
+
+  test('/delete outside a topic thread returns guidance and does not call Telegram delete', async () => {
+    await withTelegramAdapter({}, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: telegramTestChatId,
+        fromId: telegramTestUserId,
+        text: '/delete',
+      });
+
+      const sendMessage = await clone.waitForBotCall('sendMessage');
+      expect(sendMessage.payload.text).toBe('This command only works inside a Telegram topic thread.');
+
+      expect(clone.getBotCalls().some((call) => call.method === 'deleteForumTopic')).toBe(false);
+    });
+  });
+
+  test('/delete maps missing-topic Telegram errors to telegram_topic_not_found', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+    const clearedThreadKeys: string[] = [];
+
+    await withTelegramAdapter(
+      {
+        threadControlService,
+        clearScheduledTaskExecutionThreadByKey: async (threadKey) => {
+          clearedThreadKeys.push(threadKey);
+          return 1;
+        },
+      },
+      async ({ clone }) => {
+        clone.failNextApiCall('deleteForumTopic', {
+          errorCode: 400,
+          description: 'Bad Request: message thread not found',
+        });
+
+        clone.injectTextMessage({
+          chatId: telegramTestChatId,
+          fromId: telegramTestUserId,
+          text: '/delete',
+          messageThreadId: 333,
+        });
+
+        const sendMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) =>
+            typeof call.payload.text === 'string' &&
+            String(call.payload.text).includes(
+              'telegram_topic_not_found: this topic no longer exists or is already deleted.',
+            ),
+        );
+
+        expect(sendMessage.payload.text).toContain(
+          'telegram_topic_not_found: this topic no longer exists or is already deleted.',
+        );
+        expect(clearedThreadKeys).toEqual([]);
+        expect(threadControlService.resetCalls).toEqual([]);
+      },
+    );
+  });
+
+  test('/delete maps disabled-topic Telegram errors to telegram_topics_unavailable', async () => {
+    const threadControlService = new FakeThreadControlService(createThreadRuntimeState());
+
+    await withTelegramAdapter(
+      {
+        hasTopicsEnabled: false,
+        threadControlService,
+      },
+      async ({ clone }) => {
+        clone.injectTextMessage({
+          chatId: telegramTestChatId,
+          fromId: telegramTestUserId,
+          text: '/delete',
+          messageThreadId: 333,
+        });
+
+        const sendMessage = await clone.waitForBotCall(
+          'sendMessage',
+          (call) =>
+            typeof call.payload.text === 'string' && String(call.payload.text).includes('telegram_topics_unavailable:'),
+        );
+
+        expect(sendMessage.payload.text).toContain(
+          'telegram_topics_unavailable: this chat has no topic mode enabled for the bot; enable private topics in BotFather and retry',
+        );
+        expect(threadControlService.resetCalls).toEqual([]);
+      },
+    );
+  });
+
+  test('/help includes /delete command', async () => {
     await withTelegramAdapter({}, async ({ clone }) => {
       clone.injectTextMessage({
         chatId: telegramTestChatId,
@@ -140,7 +276,7 @@ describe('TelegramPollingAdapter commands', () => {
       });
 
       const sendMessage = await clone.waitForBotCall('sendMessage');
-      expect(sendMessage.payload.text).toContain('/cancel — stop the active run in this thread (session stays intact)');
+      expect(sendMessage.payload.text).toContain('/delete — delete the current Telegram topic thread');
     });
   });
 });

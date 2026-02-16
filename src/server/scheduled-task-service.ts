@@ -1,6 +1,6 @@
 import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
-import { telegramThreadKeyFromRoute } from '../shared/telegram-threading.js';
+import { telegramRouteFromThreadKey, telegramThreadKeyFromRoute } from '../shared/telegram-threading.js';
 import {
   buildTaskRunInstructions,
   deliveryTargetFromCreatorThread,
@@ -119,7 +119,9 @@ export class ScheduledTaskService {
       now,
     });
 
-    return this.store.createTask({
+    const deliveryTarget = deliveryTargetFromCreatorThread(input.creatorThreadKey);
+
+    const created = await this.store.createTask({
       title: input.title,
       instructions: input.instructions,
       scheduleKind: input.schedule.kind,
@@ -131,8 +133,21 @@ export class ScheduledTaskService {
       nextRunAt,
       creatorThreadKey: input.creatorThreadKey,
       ownerUserKey: input.ownerUserKey ?? null,
-      deliveryTarget: deliveryTargetFromCreatorThread(input.creatorThreadKey),
+      deliveryTarget,
     });
+
+    this.logger.info({
+      event: 'scheduled_task_created',
+      task_id: created.taskId,
+      creator_thread_key: created.creatorThreadKey,
+      delivery_provider: created.deliveryTarget.provider,
+      delivery_route: created.deliveryTarget.route ?? null,
+      schedule_kind: created.scheduleKind,
+      next_run_at: created.nextRunAt,
+      timezone: created.timezone,
+    });
+
+    return created;
   }
 
   async listTasks(
@@ -146,6 +161,50 @@ export class ScheduledTaskService {
 
   async getTask(taskId: string): Promise<ScheduledTaskRecord | null> {
     return this.store.getTask(taskId);
+  }
+
+  async clearExecutionThreadByThreadKey(threadKey: string): Promise<number> {
+    const routeFromThreadKey = telegramRouteFromThreadKey(threadKey);
+    if (!routeFromThreadKey?.messageThreadId) {
+      return 0;
+    }
+
+    const tasks = await this.store.listTasks();
+    const matchedTasks = tasks.filter((task) => task.executionThreadKey === threadKey);
+    let clearedTaskCount = 0;
+
+    for (const task of matchedTasks) {
+      if (task.deliveryTarget.provider !== 'telegram') {
+        this.logger.warn({
+          event: 'scheduled_task_execution_thread_clear_skipped_non_telegram',
+          task_id: task.taskId,
+          execution_thread_key: threadKey,
+          delivery_provider: task.deliveryTarget.provider,
+        });
+        continue;
+      }
+
+      const route = parseTelegramTaskRoute(task.deliveryTarget);
+      const chatId = route?.chatId ?? routeFromThreadKey.chatId;
+      const updatedTarget: ScheduledTaskDeliveryTarget = {
+        ...task.deliveryTarget,
+        route: {
+          chatId,
+        },
+      };
+
+      await this.store.clearTaskExecutionThread(task.taskId, updatedTarget);
+      clearedTaskCount += 1;
+
+      this.logger.info({
+        event: 'scheduled_task_execution_thread_cleared',
+        task_id: task.taskId,
+        execution_thread_key: threadKey,
+        chat_id: chatId,
+      });
+    }
+
+    return clearedTaskCount;
   }
 
   async updateTask(taskId: string, input: ScheduledTaskUpdateInput): Promise<ScheduledTaskUpdateResult | null> {
@@ -258,7 +317,12 @@ export class ScheduledTaskService {
     try {
       executionTask = await this.ensureExecutionThread(task);
     } catch (error) {
-      await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', toErrorMessage(error));
+      await this.markTaskRunExecutionThreadEnsureFailed(
+        'scheduled_task_run_now_execution_thread_ensure_failed',
+        task,
+        taskRun,
+        error,
+      );
       throw error;
     }
 
@@ -295,6 +359,30 @@ export class ScheduledTaskService {
     return this.tickInFlight;
   }
 
+  private async markTaskRunExecutionThreadEnsureFailed(
+    event:
+      | 'scheduled_task_run_now_execution_thread_ensure_failed'
+      | 'scheduled_task_execution_thread_ensure_failed'
+      | 'scheduled_task_pending_run_execution_thread_ensure_failed',
+    task: ScheduledTaskRecord,
+    taskRun: ScheduledTaskRunRecord,
+    error: unknown,
+  ): Promise<void> {
+    const failureMessage = toErrorMessage(error);
+    await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', failureMessage);
+
+    this.logger.warn({
+      event,
+      task_id: task.taskId,
+      task_run_id: taskRun.taskRunId,
+      creator_thread_key: task.creatorThreadKey,
+      execution_thread_key: task.executionThreadKey,
+      delivery_provider: task.deliveryTarget.provider,
+      delivery_route: task.deliveryTarget.route ?? null,
+      error_message: failureMessage,
+    });
+  }
+
   private async processDueTasks(): Promise<void> {
     const dueTasks = await this.store.listDueTasks(new Date().toISOString(), this.dueBatchSize);
 
@@ -329,16 +417,12 @@ export class ScheduledTaskService {
       try {
         executionTask = await this.ensureExecutionThread(task);
       } catch (error) {
-        const failureMessage = toErrorMessage(error);
-        await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', failureMessage);
-
-        this.logger.warn({
-          event: 'scheduled_task_execution_thread_ensure_failed',
-          task_id: task.taskId,
-          task_run_id: taskRun.taskRunId,
-          error_message: failureMessage,
-        });
-
+        await this.markTaskRunExecutionThreadEnsureFailed(
+          'scheduled_task_execution_thread_ensure_failed',
+          task,
+          taskRun,
+          error,
+        );
         continue;
       }
 
@@ -361,7 +445,12 @@ export class ScheduledTaskService {
       try {
         executionTask = await this.ensureExecutionThread(task);
       } catch (error) {
-        await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', toErrorMessage(error));
+        await this.markTaskRunExecutionThreadEnsureFailed(
+          'scheduled_task_pending_run_execution_thread_ensure_failed',
+          task,
+          taskRun,
+          error,
+        );
         continue;
       }
 
@@ -404,6 +493,13 @@ export class ScheduledTaskService {
   private async dispatchTaskRun(task: ScheduledTaskRecord, taskRun: ScheduledTaskRunRecord): Promise<void> {
     if (task.executionThreadKey === null) {
       await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', 'task execution thread is not available');
+      this.logger.warn({
+        event: 'scheduled_task_dispatch_missing_execution_thread',
+        task_id: task.taskId,
+        task_run_id: taskRun.taskRunId,
+        creator_thread_key: task.creatorThreadKey,
+        delivery_provider: task.deliveryTarget.provider,
+      });
       return;
     }
 
@@ -416,6 +512,16 @@ export class ScheduledTaskService {
       text: instructions,
       deliveryMode: 'followUp',
       idempotencyKey: taskRun.idempotencyKey,
+    });
+
+    this.logger.info({
+      event: 'scheduled_task_dispatch_ingest_result',
+      task_id: task.taskId,
+      task_run_id: taskRun.taskRunId,
+      run_id: ingested.run.runId,
+      run_status: ingested.run.status,
+      deduplicated: ingested.deduplicated,
+      execution_thread_key: task.executionThreadKey,
     });
 
     if (ingested.run.status === 'running') {
@@ -454,6 +560,14 @@ export class ScheduledTaskService {
         );
       }
 
+      this.logger.info({
+        event: 'scheduled_task_telegram_topic_create_requested',
+        task_id: task.taskId,
+        chat_id: route.chatId,
+        creator_thread_key: task.creatorThreadKey,
+        delivery_route: task.deliveryTarget.route ?? null,
+      });
+
       const topicRoute = await telegramBridge.createTaskTopic({
         chatId: route.chatId,
         taskId: task.taskId,
@@ -472,24 +586,39 @@ export class ScheduledTaskService {
       const executionThreadKey = telegramThreadKeyFromRoute(topicRoute);
       await this.store.setTaskExecutionThread(task.taskId, executionThreadKey, updatedTarget);
 
-      const refreshed = await this.store.getTask(task.taskId);
-      if (!refreshed) {
-        throw new Error(`task ${task.taskId} disappeared while creating execution thread`);
-      }
+      this.logger.info({
+        event: 'scheduled_task_telegram_topic_created',
+        task_id: task.taskId,
+        chat_id: topicRoute.chatId,
+        message_thread_id: topicRoute.messageThreadId,
+        execution_thread_key: executionThreadKey,
+      });
 
-      return refreshed;
+      return this.loadTaskOrThrow(task.taskId, 'creating execution thread');
     }
 
     const defaultThreadPrefix = sanitizeThreadPrefix(provider);
     const executionThreadKey = `${defaultThreadPrefix}:task:${task.taskId}`;
     await this.store.setTaskExecutionThread(task.taskId, executionThreadKey, task.deliveryTarget);
 
-    const refreshed = await this.store.getTask(task.taskId);
-    if (!refreshed) {
-      throw new Error(`task ${task.taskId} disappeared while creating execution thread`);
+    this.logger.info({
+      event: 'scheduled_task_execution_thread_assigned',
+      task_id: task.taskId,
+      execution_thread_key: executionThreadKey,
+      delivery_provider: provider,
+      delivery_route: task.deliveryTarget.route ?? null,
+    });
+
+    return this.loadTaskOrThrow(task.taskId, 'creating execution thread');
+  }
+
+  private async loadTaskOrThrow(taskId: string, reason: string): Promise<ScheduledTaskRecord> {
+    const task = await this.store.getTask(taskId);
+    if (!task) {
+      throw new Error(`task ${taskId} disappeared while ${reason}`);
     }
 
-    return refreshed;
+    return task;
   }
 
   private async syncTaskExecutionTitleBestEffort(task: ScheduledTaskRecord): Promise<string | null> {
@@ -521,27 +650,61 @@ export class ScheduledTaskService {
   }
 
   private async deliverRunBestEffort(task: ScheduledTaskRecord, runId: string): Promise<void> {
+    const baseLogContext = {
+      task_id: task.taskId,
+      run_id: runId,
+      execution_thread_key: task.executionThreadKey,
+    };
+
     if (task.deliveryTarget.provider !== 'telegram') {
+      this.logger.info({
+        event: 'scheduled_task_delivery_skipped_non_telegram',
+        ...baseLogContext,
+        delivery_provider: task.deliveryTarget.provider,
+      });
       return;
     }
 
     const route = parseTelegramTaskRoute(task.deliveryTarget);
     if (!route?.messageThreadId) {
+      this.logger.warn({
+        event: 'scheduled_task_telegram_delivery_skipped_missing_topic_route',
+        ...baseLogContext,
+        delivery_route: task.deliveryTarget.route ?? null,
+      });
       return;
     }
+
+    const routeLogContext = {
+      ...baseLogContext,
+      chat_id: route.chatId,
+      message_thread_id: route.messageThreadId,
+    };
 
     const telegramBridge = this.options.telegramBridge;
     if (!telegramBridge) {
+      this.logger.warn({
+        event: 'scheduled_task_telegram_delivery_skipped_bridge_unavailable',
+        ...routeLogContext,
+      });
       return;
     }
 
+    this.logger.info({
+      event: 'scheduled_task_telegram_delivery_started',
+      ...routeLogContext,
+    });
+
     try {
       await telegramBridge.deliverRun(runId, route);
+      this.logger.info({
+        event: 'scheduled_task_telegram_delivery_enqueued',
+        ...routeLogContext,
+      });
     } catch (error) {
       this.logger.warn({
         event: 'scheduled_task_telegram_delivery_failed',
-        task_id: task.taskId,
-        run_id: runId,
+        ...routeLogContext,
         error_message: toErrorMessage(error),
       });
     }

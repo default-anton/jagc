@@ -382,6 +382,19 @@ export class TelegramBotApiClone {
         this.recordBotCall({ method, payload });
         return true;
       }
+      case 'deleteForumTopic': {
+        this.recordBotCall({ method, payload });
+
+        if (!this.hasTopicsEnabled) {
+          throw new TelegramCloneApiError({
+            errorCode: 400,
+            description: 'Bad Request: the chat is not a forum',
+          });
+        }
+
+        assertTelegramMessageThreadId(toNumber(payload.message_thread_id));
+        return true;
+      }
       case 'sendMessage': {
         this.recordBotCall({ method, payload });
 

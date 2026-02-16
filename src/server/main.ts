@@ -79,6 +79,8 @@ async function main(): Promise<void> {
 
   const authService = new PiAuthService(config.JAGC_WORKSPACE_DIR);
 
+  let scheduledTaskService: ScheduledTaskService;
+
   let telegramAdapter: TelegramPollingAdapter | undefined;
   if (config.JAGC_TELEGRAM_BOT_TOKEN) {
     telegramAdapter = new TelegramPollingAdapter({
@@ -86,6 +88,8 @@ async function main(): Promise<void> {
       runService,
       authService,
       threadControlService,
+      clearScheduledTaskExecutionThreadByKey: async (threadKey) =>
+        scheduledTaskService.clearExecutionThreadByThreadKey(threadKey),
       allowedTelegramUserIds: config.JAGC_TELEGRAM_ALLOWED_USER_IDS,
       workspaceDir: config.JAGC_WORKSPACE_DIR,
       logger: rootLogger.child({ component: 'telegram_polling' }),
@@ -93,7 +97,7 @@ async function main(): Promise<void> {
   }
 
   const scheduledTaskStore = new SqliteScheduledTaskStore(database);
-  const scheduledTaskService = new ScheduledTaskService(scheduledTaskStore, runService, {
+  scheduledTaskService = new ScheduledTaskService(scheduledTaskStore, runService, {
     logger: rootLogger.child({ component: 'scheduled_tasks' }),
     telegramBridge: {
       createTaskTopic: async ({ chatId, taskId, title }) => {

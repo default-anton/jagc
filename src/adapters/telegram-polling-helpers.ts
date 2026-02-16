@@ -47,6 +47,7 @@ export function helpText(): string {
     '/settings — open runtime settings',
     '/cancel — stop the active run in this thread (session stays intact)',
     '/new — reset this thread session (next message starts fresh)',
+    '/delete — delete the current Telegram topic thread',
     '/share — export this thread session and upload a secret gist',
     '/model — open model picker',
     '/thinking — open thinking picker',
@@ -77,8 +78,8 @@ export function trimTopicTitle(value: string): string {
   return trimmed.slice(0, 128);
 }
 
-export function formatTaskTopicTitle(taskId: string, title: string): string {
-  return trimTopicTitle(`task:${taskId.slice(0, 8)} ${title}`);
+export function formatTaskTopicTitle(_taskId: string, title: string): string {
+  return trimTopicTitle(title);
 }
 
 export function telegramUserKey(userId: number | undefined): string | undefined {

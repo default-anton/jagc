@@ -32,6 +32,13 @@ export class TelegramRunDelivery {
   }
 
   async deliverRun(runId: string, route: TelegramRoute, signal?: AbortSignal): Promise<void> {
+    this.options.logger.info({
+      event: 'telegram_run_delivery_started',
+      run_id: runId,
+      chat_id: route.chatId,
+      message_thread_id: route.messageThreadId,
+    });
+
     const progressReporter = new TelegramRunProgressReporter({
       bot: this.options.bot,
       route,
@@ -59,6 +66,13 @@ export class TelegramRunDelivery {
       }
 
       await this.replyRunResult(route, formatRunResult(completedRun));
+      this.options.logger.info({
+        event: 'telegram_run_delivery_completed',
+        run_id: runId,
+        chat_id: route.chatId,
+        message_thread_id: route.messageThreadId,
+        run_status: completedRun.status,
+      });
     } catch (error) {
       if (isAbortError(error)) {
         return;

@@ -35,6 +35,7 @@ export interface ScheduledTaskStore {
     executionThreadKey: string,
     deliveryTarget: ScheduledTaskDeliveryTarget,
   ): Promise<void>;
+  clearTaskExecutionThread(taskId: string, deliveryTarget: ScheduledTaskDeliveryTarget): Promise<void>;
   advanceTaskAfterOccurrence(
     taskId: string,
     scheduledFor: string,
@@ -401,6 +402,24 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
 
     if (result.changes !== 1) {
       throw new Error(`cannot set execution thread for task ${taskId}: task not found`);
+    }
+  }
+
+  async clearTaskExecutionThread(taskId: string, deliveryTarget: ScheduledTaskDeliveryTarget): Promise<void> {
+    const result = this.database
+      .prepare(
+        `
+          UPDATE scheduled_tasks
+          SET execution_thread_key = NULL,
+              delivery_target = ?,
+              updated_at = ?
+          WHERE task_id = ?
+        `,
+      )
+      .run(JSON.stringify(deliveryTarget), nowIsoTimestamp(), taskId);
+
+    if (result.changes !== 1) {
+      throw new Error(`cannot clear execution thread for task ${taskId}: task not found`);
     }
   }
 

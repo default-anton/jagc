@@ -271,6 +271,29 @@ describe('TelegramBotApiClone', () => {
     }
   });
 
+  test('supports deleteForumTopic for topic thread cleanup', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const result = await apiCall<boolean>(clone, 'deleteForumTopic', {
+        chat_id: 101,
+        message_thread_id: 333,
+      });
+
+      expect(result).toBe(true);
+      expect(clone.getBotCalls()[0]).toMatchObject({
+        method: 'deleteForumTopic',
+        payload: {
+          chat_id: 101,
+          message_thread_id: 333,
+        },
+      });
+    } finally {
+      await clone.stop();
+    }
+  });
+
   test('preserves message_thread_id payload fields for topic-aware methods', async () => {
     const clone = new TelegramBotApiClone({ token: testBotToken });
     await clone.start();
