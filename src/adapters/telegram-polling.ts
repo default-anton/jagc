@@ -40,6 +40,7 @@ const defaultPollIntervalMs = 500;
 const defaultPollRequestTimeoutSeconds = 30;
 const telegramMessageLimit = 3500;
 const defaultWorkspaceDir = join(homedir(), '.jagc');
+const telegramWorkingReactionEmojis = ['👍', '🔥', '👏', '😁', '🤔', '🤯', '🎉', '🤩', '🙏', '👌', '❤'] as const;
 
 interface TelegramPollingAdapterOptions {
   botToken: string;
@@ -580,6 +581,8 @@ export class TelegramPollingAdapter {
     const threadKey = telegramThreadKeyFromRoute(route);
     const userKey = telegramUserKey(ctx.from?.id);
 
+    void this.sendWorkingReaction(ctx, route, threadKey);
+
     const ingested = await this.options.runService.ingestMessage({
       source: 'telegram',
       threadKey,
@@ -590,6 +593,38 @@ export class TelegramPollingAdapter {
     });
 
     await this.deliverRun(ingested.run.runId, route);
+  }
+
+  private async sendWorkingReaction(ctx: Context, route: TelegramRoute, threadKey: string): Promise<void> {
+    const messageId = ctx.message?.message_id;
+    if (typeof messageId !== 'number') {
+      return;
+    }
+
+    const reactionEmoji = pickWorkingReaction();
+
+    try {
+      await callTelegramWithRetry(() =>
+        this.bot.api.raw.setMessageReaction({
+          chat_id: route.chatId,
+          message_id: messageId,
+          reaction: [
+            {
+              type: 'emoji',
+              emoji: reactionEmoji,
+            },
+          ],
+        }),
+      );
+    } catch (error) {
+      this.logger.debug({
+        event: 'telegram_message_reaction_failed',
+        chat_id: route.chatId,
+        message_thread_id: route.messageThreadId,
+        thread_key: threadKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private startBackgroundRunDelivery(options: { runId: string; route: TelegramRoute; threadKey: string }): void {
@@ -607,6 +642,12 @@ export class TelegramPollingAdapter {
       await this.start();
     }
   }
+}
+
+function pickWorkingReaction(randomSource: () => number = Math.random): string {
+  const fallbackEmoji = telegramWorkingReactionEmojis[0] ?? '👍';
+  const randomIndex = Math.floor(randomSource() * telegramWorkingReactionEmojis.length);
+  return telegramWorkingReactionEmojis[randomIndex] ?? fallbackEmoji;
 }
 
 function readPrivateTopicsEnabledFromBotInfo(botInfo: BotConfig<Context>['botInfo']): boolean | null {

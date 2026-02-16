@@ -45,6 +45,80 @@ describe('TelegramPollingAdapter message flow integration', () => {
     });
   });
 
+  test('adds one working reaction to incoming assistant messages', async () => {
+    const runService = new StubRunService('run-react', [
+      runRecord({
+        runId: 'run-react',
+        status: 'succeeded',
+        output: { text: 'Reaction done' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: 'react to this',
+      });
+
+      const reactionCall = await clone.waitForBotCall('setMessageReaction', () => true, 4_000);
+      expect(reactionCall.payload.chat_id).toBe(testChatId);
+      expect(typeof reactionCall.payload.message_id).toBe('number');
+
+      const reactionPayload = reactionCall.payload.reaction as Array<{
+        type?: string;
+        emoji?: string;
+      }>;
+      expect(reactionPayload).toHaveLength(1);
+      expect(reactionPayload[0]?.type).toBe('emoji');
+      expect(typeof reactionPayload[0]?.emoji).toBe('string');
+      expect((reactionPayload[0]?.emoji ?? '').length).toBeGreaterThan(0);
+
+      await clone.waitForBotCall('sendMessage', (call) => call.payload.text === 'Reaction done');
+    });
+  });
+
+  test('continues ingest and delivery when working reaction call fails', async () => {
+    const runService = new StubRunService('run-react-failure', [
+      runRecord({
+        runId: 'run-react-failure',
+        status: 'succeeded',
+        output: { text: 'Reaction failure fallback done' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      clone.failNextApiCall('setMessageReaction', {
+        errorCode: 400,
+        description: 'Bad Request: as non-premium users, bots can set up to one reaction per message',
+      });
+
+      const updateId = clone.injectTextMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        text: 'react failure still runs',
+      });
+
+      const sendMessage = await clone.waitForBotCall(
+        'sendMessage',
+        (call) => call.payload.text === 'Reaction failure fallback done',
+      );
+      expect(sendMessage.payload.text).toBe('Reaction failure fallback done');
+      expect(clone.getApiCallCount('setMessageReaction')).toBeGreaterThanOrEqual(1);
+
+      expect(runService.ingests).toEqual([
+        {
+          source: 'telegram',
+          threadKey: 'telegram:chat:101',
+          userKey: 'telegram:user:202',
+          text: 'react failure still runs',
+          deliveryMode: 'followUp',
+          idempotencyKey: `telegram:update:${updateId}`,
+        },
+      ]);
+    });
+  });
+
   test('routes topic-thread messages to topic thread keys and sends topic-aware delivery payloads', async () => {
     const topicThreadId = 333;
     const largeCode = Array.from({ length: 90 }, (_, index) => `const item${index}: number = ${index};`).join('\n');

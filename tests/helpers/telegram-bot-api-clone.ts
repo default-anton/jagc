@@ -465,6 +465,18 @@ export class TelegramBotApiClone {
         this.recordBotCall({ method, payload });
         return true;
       }
+      case 'setMessageReaction': {
+        const reaction = payload.reaction;
+        if (Array.isArray(reaction) && reaction.length > 1) {
+          throw new TelegramCloneApiError({
+            errorCode: 400,
+            description: 'Bad Request: as non-premium users, bots can set up to one reaction per message',
+          });
+        }
+
+        this.recordBotCall({ method, payload });
+        return true;
+      }
       case 'sendChatAction': {
         assertTelegramMessageThreadId(toNumber(payload.message_thread_id));
         this.recordBotCall({ method, payload });

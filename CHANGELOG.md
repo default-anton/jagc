@@ -17,7 +17,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Telegram now adds a best-effort random emoji reaction on inbound assistant-bound user messages (`followUp`/`steer`) while preserving the existing typing indicator/progress flow.
 
 ### Fixed
 

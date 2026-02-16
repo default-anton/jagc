@@ -294,6 +294,52 @@ describe('TelegramBotApiClone', () => {
     }
   });
 
+  test('supports setMessageReaction payloads with a single reaction', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const result = await apiCall<boolean>(clone, 'setMessageReaction', {
+        chat_id: 101,
+        message_id: 22,
+        reaction: [{ type: 'emoji', emoji: '🤔' }],
+      });
+
+      expect(result).toBe(true);
+      expect(clone.getBotCalls()[0]).toMatchObject({
+        method: 'setMessageReaction',
+        payload: {
+          chat_id: 101,
+          message_id: 22,
+          reaction: [{ type: 'emoji', emoji: '🤔' }],
+        },
+      });
+    } finally {
+      await clone.stop();
+    }
+  });
+
+  test('rejects setMessageReaction payloads with more than one reaction', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const errorResult = await apiCallExpectingError(clone, 'setMessageReaction', {
+        chat_id: 101,
+        message_id: 22,
+        reaction: [
+          { type: 'emoji', emoji: '🤔' },
+          { type: 'emoji', emoji: '🔥' },
+        ],
+      });
+
+      expect(errorResult.body.description).toContain('bots can set up to one reaction per message');
+      expect(clone.getBotCalls()).toHaveLength(0);
+    } finally {
+      await clone.stop();
+    }
+  });
+
   test('preserves message_thread_id payload fields for topic-aware methods', async () => {
     const clone = new TelegramBotApiClone({ token: testBotToken });
     await clone.start();
