@@ -12,6 +12,8 @@ import {
 import {
   computeInitialNextRunAt,
   computeNextRunAfterOccurrence,
+  normalizeIsoUtcTimestamp,
+  normalizeRRuleExpression,
   validateScheduleInput,
 } from './scheduled-task-schedule.js';
 import type {
@@ -88,18 +90,30 @@ export class ScheduledTaskService {
   }
 
   async createTask(input: ScheduledTaskCreateInput): Promise<ScheduledTaskRecord> {
+    const now = new Date();
+    const scheduleOnceAt =
+      input.schedule.kind === 'once'
+        ? (normalizeIsoUtcTimestamp(input.schedule.onceAt) ?? input.schedule.onceAt)
+        : undefined;
+    const scheduleCronExpr = input.schedule.kind === 'cron' ? input.schedule.cronExpr : undefined;
+    const scheduleRRuleExpr =
+      input.schedule.kind === 'rrule'
+        ? normalizeRRuleExpression(input.schedule.rruleExpr, input.schedule.timezone, now)
+        : undefined;
+
     validateScheduleInput({
       kind: input.schedule.kind,
-      onceAt: input.schedule.kind === 'once' ? input.schedule.onceAt : undefined,
-      cronExpr: input.schedule.kind === 'cron' ? input.schedule.cronExpr : undefined,
+      onceAt: scheduleOnceAt,
+      cronExpr: scheduleCronExpr,
+      rruleExpr: scheduleRRuleExpr,
       timezone: input.schedule.timezone,
     });
 
-    const now = new Date();
     const nextRunAt = computeInitialNextRunAt({
       kind: input.schedule.kind,
-      onceAt: input.schedule.kind === 'once' ? input.schedule.onceAt : undefined,
-      cronExpr: input.schedule.kind === 'cron' ? input.schedule.cronExpr : undefined,
+      onceAt: scheduleOnceAt,
+      cronExpr: scheduleCronExpr,
+      rruleExpr: scheduleRRuleExpr,
       timezone: input.schedule.timezone,
       now,
     });
@@ -108,8 +122,9 @@ export class ScheduledTaskService {
       title: input.title,
       instructions: input.instructions,
       scheduleKind: input.schedule.kind,
-      onceAt: input.schedule.kind === 'once' ? input.schedule.onceAt : null,
+      onceAt: input.schedule.kind === 'once' ? (scheduleOnceAt ?? null) : null,
       cronExpr: input.schedule.kind === 'cron' ? input.schedule.cronExpr : null,
+      rruleExpr: input.schedule.kind === 'rrule' ? (scheduleRRuleExpr ?? null) : null,
       timezone: input.schedule.timezone,
       enabled: true,
       nextRunAt,
@@ -139,22 +154,32 @@ export class ScheduledTaskService {
     }
 
     const warnings: string[] = [];
+    const now = new Date();
 
     let scheduleKind: ScheduledTaskScheduleKind = existing.scheduleKind;
     let onceAt = existing.onceAt;
     let cronExpr = existing.cronExpr;
+    let rruleExpr = existing.rruleExpr;
     let timezone = existing.timezone;
 
     if (input.schedule) {
       scheduleKind = input.schedule.kind;
-      onceAt = input.schedule.kind === 'once' ? input.schedule.onceAt : null;
+      onceAt =
+        input.schedule.kind === 'once'
+          ? (normalizeIsoUtcTimestamp(input.schedule.onceAt) ?? input.schedule.onceAt)
+          : null;
       cronExpr = input.schedule.kind === 'cron' ? input.schedule.cronExpr : null;
+      rruleExpr =
+        input.schedule.kind === 'rrule'
+          ? normalizeRRuleExpression(input.schedule.rruleExpr, input.schedule.timezone, now)
+          : null;
       timezone = input.schedule.timezone;
 
       validateScheduleInput({
         kind: scheduleKind,
         onceAt: onceAt ?? undefined,
         cronExpr: cronExpr ?? undefined,
+        rruleExpr: rruleExpr ?? undefined,
         timezone,
       });
     }
@@ -165,6 +190,7 @@ export class ScheduledTaskService {
       scheduleKind !== existing.scheduleKind ||
       onceAt !== existing.onceAt ||
       cronExpr !== existing.cronExpr ||
+      rruleExpr !== existing.rruleExpr ||
       timezone !== existing.timezone;
 
     let nextRunAt = existing.nextRunAt;
@@ -175,8 +201,9 @@ export class ScheduledTaskService {
         kind: scheduleKind,
         onceAt: onceAt ?? undefined,
         cronExpr: cronExpr ?? undefined,
+        rruleExpr: rruleExpr ?? undefined,
         timezone,
-        now: new Date(),
+        now,
       });
     }
 
@@ -186,6 +213,7 @@ export class ScheduledTaskService {
       scheduleKind,
       onceAt,
       cronExpr,
+      rruleExpr,
       timezone,
       enabled,
       nextRunAt,
@@ -284,6 +312,7 @@ export class ScheduledTaskService {
       const scheduleAdvance = computeNextRunAfterOccurrence({
         kind: task.scheduleKind,
         cronExpr: task.cronExpr ?? undefined,
+        rruleExpr: task.rruleExpr ?? undefined,
         timezone: task.timezone,
         now: new Date(),
       });

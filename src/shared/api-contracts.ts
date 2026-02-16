@@ -168,9 +168,16 @@ const scheduleCreateCronSchema = z.object({
   timezone: z.string().trim().min(1),
 });
 
+const scheduleCreateRRuleSchema = z.object({
+  kind: z.literal('rrule'),
+  rrule: z.string().trim().min(1),
+  timezone: z.string().trim().min(1),
+});
+
 export const taskCreateScheduleSchema = z.discriminatedUnion('kind', [
   scheduleCreateOnceSchema,
   scheduleCreateCronSchema,
+  scheduleCreateRRuleSchema,
 ]);
 
 export const createTaskRequestSchema = z.object({
@@ -200,9 +207,10 @@ export const taskDeliveryTargetSchema = z.object({
 });
 
 const taskScheduleResponseSchema = z.object({
-  kind: z.enum(['once', 'cron']),
+  kind: z.enum(['once', 'cron', 'rrule']),
   once_at: z.string().nullable(),
   cron: z.string().nullable(),
+  rrule: z.string().nullable(),
   timezone: z.string(),
 });
 

@@ -62,6 +62,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
             schedule_kind,
             once_at,
             cron_expr,
+            rrule_expr,
             timezone,
             enabled,
             next_run_at,
@@ -75,7 +76,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
             last_run_status,
             last_error_message
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL)
         `,
       )
       .run(
@@ -85,6 +86,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         input.scheduleKind,
         input.onceAt,
         input.cronExpr,
+        input.rruleExpr,
         input.timezone,
         input.enabled ? 1 : 0,
         input.nextRunAt,
@@ -148,6 +150,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       scheduleKind: patch.scheduleKind ?? existing.scheduleKind,
       onceAt: patch.onceAt === undefined ? existing.onceAt : patch.onceAt,
       cronExpr: patch.cronExpr === undefined ? existing.cronExpr : patch.cronExpr,
+      rruleExpr: patch.rruleExpr === undefined ? existing.rruleExpr : patch.rruleExpr,
       timezone: patch.timezone ?? existing.timezone,
       enabled: patch.enabled ?? existing.enabled,
       nextRunAt: patch.nextRunAt === undefined ? existing.nextRunAt : patch.nextRunAt,
@@ -162,6 +165,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
               schedule_kind = ?,
               once_at = ?,
               cron_expr = ?,
+              rrule_expr = ?,
               timezone = ?,
               enabled = ?,
               next_run_at = ?,
@@ -175,6 +179,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         nextValues.scheduleKind,
         nextValues.onceAt,
         nextValues.cronExpr,
+        nextValues.rruleExpr,
         nextValues.timezone,
         nextValues.enabled ? 1 : 0,
         nextValues.nextRunAt,

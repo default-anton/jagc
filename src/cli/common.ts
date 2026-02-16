@@ -14,8 +14,14 @@ export function parsePositiveNumber(value: string): number {
   return parsed;
 }
 
-export function exitWithError(error: unknown): never {
+export function exitWithError(error: unknown, options: { json?: boolean } = {}): never {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify({ error: { message } })}\n`);
+  } else {
+    process.stderr.write(`${message}\n`);
+  }
+
   process.exit(1);
 }

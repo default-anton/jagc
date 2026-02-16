@@ -128,8 +128,9 @@ jagc auth providers --json
 jagc telegram list --json
 jagc telegram allow --user-id <telegram_user_id>
 jagc task create --title "Daily plan" --instructions "Prepare priorities" --cron "0 9 * * 1-5" --timezone "America/Los_Angeles" --thread-key telegram:chat:<chat_id> --json
-jagc task list --enabled --json
-jagc task run <task_id> --now --json
+jagc task create --title "Monthly planning" --instructions "Prepare monthly priorities" --rrule "FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0" --timezone "America/Los_Angeles" --thread-key telegram:chat:<chat_id> --json
+jagc task list --state all --json
+jagc task run <task_id> --wait --timeout 60 --json
 jagc share --thread-key cli:default --json
 ```
 
@@ -141,6 +142,7 @@ jagc share --thread-key cli:default --json
 
 - In-process scheduling with SQLite-backed recovery after restart
 - Scheduled task domain (`scheduled_tasks`, `scheduled_task_runs`) with durable due-queue processing, idempotent dispatch, and restart recovery for pending/dispatched task runs
+- Recurrence scheduling supports one-off (`once_at`), cron (`cron`), and calendar rules (`rrule`) with timezone-aware next-run computation
 - Thread→session persistence (`thread_key -> session`) survives process restarts
 - Same-thread turn ordering enforced by per-thread pi session controller
 - Structured run payload contract (`output` is structured; not plain-text-only)
@@ -155,7 +157,7 @@ jagc share --thread-key cli:default --json
 ### CLI
 
 - Message/run lifecycle: `message`, `run wait`, `cancel`, `new`, `share`
-- Scheduled tasks: `task create|list|get|update|delete|run --now|enable|disable`
+- Scheduled tasks: `task create|list|get|update|delete|run [--wait]|enable|disable` (`task list --state <all|enabled|disabled>`, `task create|update --rrule <rule>`)
 - Runtime controls: `model list|get|set`, `thinking get|set`
 - Auth: `auth providers|login`
 - Workspace/runtime ops: `defaults sync`, `packages install|remove|update|list|config`

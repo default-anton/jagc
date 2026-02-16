@@ -21,6 +21,7 @@ describe('ScheduledTaskService', () => {
       scheduleKind: 'once',
       onceAt: '2026-02-15T00:00:00.000Z',
       cronExpr: null,
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: new Date(Date.now() - 60_000).toISOString(),
@@ -61,6 +62,7 @@ describe('ScheduledTaskService', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '*/5 * * * *',
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: new Date(Date.now() - 60_000).toISOString(),
@@ -87,6 +89,29 @@ describe('ScheduledTaskService', () => {
     await service.stop();
   });
 
+  test('createTask supports rrule schedules and normalizes expression', async () => {
+    const store = new SqliteScheduledTaskStore(testDb.database);
+    await store.init();
+
+    const service = new ScheduledTaskService(store, new FakeRunService().asRunService());
+
+    const created = await service.createTask({
+      creatorThreadKey: 'cli:default',
+      title: 'First Monday planning',
+      instructions: 'Prepare monthly priorities',
+      schedule: {
+        kind: 'rrule',
+        rruleExpr: 'FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0',
+        timezone: 'UTC',
+      },
+    });
+
+    expect(created.scheduleKind).toBe('rrule');
+    expect(created.rruleExpr).toContain('DTSTART;TZID=UTC:');
+    expect(created.rruleExpr).toContain('RRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0');
+    expect(created.nextRunAt).toEqual(expect.any(String));
+  });
+
   test('run-now records failed occurrence when execution thread creation fails', async () => {
     const store = new SqliteScheduledTaskStore(testDb.database);
     await store.init();
@@ -97,6 +122,7 @@ describe('ScheduledTaskService', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '*/5 * * * *',
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: new Date(Date.now() + 60_000).toISOString(),
@@ -130,6 +156,7 @@ describe('ScheduledTaskService', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '*/10 * * * *',
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: new Date(Date.now() + 60_000).toISOString(),
@@ -156,6 +183,7 @@ describe('ScheduledTaskService', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '*/10 * * * *',
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: new Date(Date.now() + 60_000).toISOString(),

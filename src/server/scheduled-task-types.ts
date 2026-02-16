@@ -1,4 +1,4 @@
-export type ScheduledTaskScheduleKind = 'once' | 'cron';
+export type ScheduledTaskScheduleKind = 'once' | 'cron' | 'rrule';
 export type ScheduledTaskRunStatus = 'pending' | 'dispatched' | 'succeeded' | 'failed';
 
 export interface ScheduledTaskDeliveryTarget {
@@ -14,6 +14,7 @@ export interface ScheduledTaskRecord {
   scheduleKind: ScheduledTaskScheduleKind;
   onceAt: string | null;
   cronExpr: string | null;
+  rruleExpr: string | null;
   timezone: string;
   enabled: boolean;
   nextRunAt: string | null;
@@ -46,6 +47,7 @@ export interface CreateScheduledTaskInput {
   scheduleKind: ScheduledTaskScheduleKind;
   onceAt: string | null;
   cronExpr: string | null;
+  rruleExpr: string | null;
   timezone: string;
   creatorThreadKey: string;
   ownerUserKey: string | null;
@@ -60,6 +62,7 @@ export interface UpdateScheduledTaskInput {
   scheduleKind?: ScheduledTaskScheduleKind;
   onceAt?: string | null;
   cronExpr?: string | null;
+  rruleExpr?: string | null;
   timezone?: string;
   enabled?: boolean;
   nextRunAt?: string | null;

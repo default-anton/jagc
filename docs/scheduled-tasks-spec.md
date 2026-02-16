@@ -92,16 +92,17 @@ Use this for **all** outbound adapter sends/edits/actions/documents/progress.
 
 ## 5) Scheduled task domain model (DB)
 
-Add migration `003_scheduled_tasks.sql`.
+Add migrations `003_scheduled_tasks.sql` (task domain) and `004_scheduled_tasks_rrule.sql` (rrule schedule-kind expansion).
 
 ## 5.1 `scheduled_tasks`
 Required fields:
 - `task_id TEXT PRIMARY KEY` (UUID)
 - `title TEXT NOT NULL`
 - `instructions TEXT NOT NULL`
-- `schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('once','cron'))`
+- `schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('once','cron','rrule'))`
 - `once_at TEXT` (UTC ISO, required for `once`)
 - `cron_expr TEXT` (required for `cron`)
+- `rrule_expr TEXT` (required for `rrule`; normalized `DTSTART` + `RRULE` lines)
 - `timezone TEXT NOT NULL` (IANA, e.g. `America/Los_Angeles`)
 - `enabled INTEGER NOT NULL DEFAULT 1`
 - `next_run_at TEXT` (UTC ISO; null only when disabled/completed once)
@@ -152,6 +153,7 @@ Implement `ScheduledTaskService` (start/stop lifecycle in `src/server/main.ts`).
   4. Advance task `next_run_at`:
      - `once`: set `enabled=0`, `next_run_at=NULL`
      - `cron`: compute first future occurrence strictly `> now` (skip backlog flood)
+     - `rrule`: compute first future occurrence strictly `> now` (calendar recurrence)
   5. Dispatch `pending` task-runs via `RunService.ingestMessage(...)`.
 
 ## 6.2 Run ingest contract
@@ -254,6 +256,17 @@ Add task endpoints in HTTP app.
 }
 ```
 
+Alternative recurring payload uses rrule:
+```json
+{
+  "schedule": {
+    "kind": "rrule",
+    "rrule": "FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+    "timezone": "America/Los_Angeles"
+  }
+}
+```
+
 Rules:
 - No provider-specific routing fields in payload.
 - New task is bound to `:thread_key` from the endpoint path (`creator_thread_key`).
@@ -267,7 +280,7 @@ Patchable fields:
 
 ### 9.3 Run-now
 - Creates a `scheduled_task_runs` row for current timestamp slot and dispatches immediately.
-- Does **not** shift recurring schedule anchor.
+- Does **not** shift recurring schedule anchor (`cron` or `rrule`).
 
 ---
 
@@ -280,7 +293,7 @@ Add top-level command group:
 - `jagc task get <taskId>`
 - `jagc task update <taskId>`
 - `jagc task delete <taskId>`
-- `jagc task run <taskId> --now`
+- `jagc task run <taskId> [--wait]`
 - `jagc task enable <taskId>`
 - `jagc task disable <taskId>`
 
@@ -291,32 +304,38 @@ Add top-level command group:
 - one of:
   - `--once-at <ISO8601>` + `--timezone <IANA>`
   - `--cron <expr>` + `--timezone <IANA>`
+  - `--rrule <rule>` + `--timezone <IANA>`
 - `--thread-key <threadKey>` (optional; default `cli:default`)
 - `--json`
 
 `list`
 - `--thread-key <threadKey>` (optional filter)
-- `--all | --enabled | --disabled` (default enabled)
+- `--state <all|enabled|disabled>` (default `all`)
+- `--json`
+
+`run`
+- immediate dispatch by default
+- optional `--wait` with `--timeout <seconds>` and `--interval-ms <ms>` for terminal run polling
 - `--json`
 
 `update`
 - patch flags matching create + `--enable/--disable`
 - `--json`
 
-All commands must support machine-readable `--json` output.
+All commands must support machine-readable `--json` output (success and failures when `--json` is set).
 
 ---
 
-## 11) Agent guidance in runtime harness context
+## 11) Agent guidance (runtime context + dedicated skill)
 
-Do **not** add a new extension for tasks. Update `defaults/extensions/20-runtime-harness-context.ts` to include scheduled-task guidance in its `before_agent_start` injected system context.
+Keep the runtime extension terse and move task-operating detail into a dedicated skill.
 
 Requirements:
-- Tell model to manage scheduled tasks via `jagc task ... --json` using `bash`.
+- Add/update `defaults/skills/task-ops/SKILL.md` with canonical command patterns and low-turn workflows.
+- Keep `defaults/extensions/20-runtime-harness-context.ts` minimal: point to the skill, enforce CLI/API-only task management, and keep lazy execution-thread behavior explicit.
 - Explicitly prohibit direct DB edits.
-- Include minimal command patterns for create/list/update/delete/run-now.
-- Include “verify after mutation” rule (`jagc task get/list --json`).
-- Mention that task execution threads are created lazily at first due/run-now execution, not at task creation time.
+- Include run-now + wait workflow (`jagc task run <taskId> --wait ... --json`) in the skill.
+- Include post-mutation verification policy in the skill (`mutation response first`, then `task get/list` for confirmation/troubleshooting).
 
 ---
 

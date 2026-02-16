@@ -9,9 +9,10 @@ export interface ScheduledTaskRow {
   task_id: string;
   title: string;
   instructions: string;
-  schedule_kind: 'once' | 'cron';
+  schedule_kind: 'once' | 'cron' | 'rrule';
   once_at: string | null;
   cron_expr: string | null;
+  rrule_expr: string | null;
   timezone: string;
   enabled: number;
   next_run_at: string | null;
@@ -46,6 +47,7 @@ export function mapTaskRow(row: ScheduledTaskRow): ScheduledTaskRecord {
     scheduleKind: row.schedule_kind,
     onceAt: row.once_at,
     cronExpr: row.cron_expr,
+    rruleExpr: row.rrule_expr,
     timezone: row.timezone,
     enabled: row.enabled === 1,
     nextRunAt: row.next_run_at,

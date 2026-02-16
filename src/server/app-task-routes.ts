@@ -56,11 +56,17 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: TaskRoute
                 onceAt: bodyResult.data.schedule.once_at,
                 timezone: bodyResult.data.schedule.timezone,
               }
-            : {
-                kind: 'cron',
-                cronExpr: bodyResult.data.schedule.cron,
-                timezone: bodyResult.data.schedule.timezone,
-              },
+            : bodyResult.data.schedule.kind === 'cron'
+              ? {
+                  kind: 'cron',
+                  cronExpr: bodyResult.data.schedule.cron,
+                  timezone: bodyResult.data.schedule.timezone,
+                }
+              : {
+                  kind: 'rrule',
+                  rruleExpr: bodyResult.data.schedule.rrule,
+                  timezone: bodyResult.data.schedule.timezone,
+                },
       });
 
       return reply.status(201).send(taskResponseSchema.parse({ task: scheduledTaskResponse(created) }));
@@ -157,11 +163,17 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: TaskRoute
                 onceAt: bodyResult.data.schedule.once_at,
                 timezone: bodyResult.data.schedule.timezone,
               }
-            : {
-                kind: 'cron',
-                cronExpr: bodyResult.data.schedule.cron,
-                timezone: bodyResult.data.schedule.timezone,
-              }
+            : bodyResult.data.schedule.kind === 'cron'
+              ? {
+                  kind: 'cron',
+                  cronExpr: bodyResult.data.schedule.cron,
+                  timezone: bodyResult.data.schedule.timezone,
+                }
+              : {
+                  kind: 'rrule',
+                  rruleExpr: bodyResult.data.schedule.rrule,
+                  timezone: bodyResult.data.schedule.timezone,
+                }
           : undefined,
       });
 
@@ -255,6 +267,7 @@ function scheduledTaskResponse(task: ScheduledTaskRecord) {
       kind: task.scheduleKind,
       once_at: task.onceAt,
       cron: task.cronExpr,
+      rrule: task.rruleExpr,
       timezone: task.timezone,
     },
     enabled: task.enabled,

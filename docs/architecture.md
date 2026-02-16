@@ -20,7 +20,7 @@ This doc is the implementation snapshot (not design intent).
 - `jagc message`
 - `jagc run wait`
 - `jagc auth providers`, `jagc auth login <provider>`
-- `jagc task create|list|get|update|delete|run --now|enable|disable`
+- `jagc task create|list|get|update|delete|run [--wait]|enable|disable` (`task list --state <all|enabled|disabled>`, `task create|update --rrule <rule>`)
 - `jagc cancel`, `jagc new`, `jagc share`, `jagc defaults sync`, `jagc packages install|remove|update|list|config`, `jagc telegram allow|list`, `jagc model list|get|set`, `jagc thinking get|set`
 - Service lifecycle + diagnostics: `jagc install|status|restart|uninstall|doctor` (macOS launchd implementation, future Linux/Windows planned)
 
@@ -110,7 +110,7 @@ This doc is the implementation snapshot (not design intent).
   - claims due tasks (`enabled=1 AND next_run_at <= now`)
   - creates/ensures task occurrence rows (`scheduled_task_runs`) with deterministic idempotency keys
   - lazily ensures per-task execution thread (`execution_thread_key`) on first due/run-now
-  - advances schedule (`once` disables; `cron` computes first future slot strictly `> now`)
+  - advances schedule (`once` disables; `cron`/`rrule` compute first future slot strictly `> now`)
   - dispatches pending occurrences via `RunService.ingestMessage(...)` (`source=task:<task_id>`, `deliveryMode=followUp`)
 - Completion bookkeeping is durable and restart-safe:
   - pending task-runs are resumed on startup/ticks

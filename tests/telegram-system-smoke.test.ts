@@ -165,15 +165,18 @@ describe('Telegram system smoke', () => {
     expect(typeof topicReply.payload.message_thread_id).toBe('number');
 
     const updatedTitle = 'Daily plan updated';
-    const patchTaskResponse = await fetch(`${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}`, {
-      method: 'PATCH',
-      headers: {
-        'content-type': 'application/json',
+    const patchTaskResponse = await fetch(
+      `${stack.apiBaseUrl}/v1/tasks/${encodeURIComponent(createdTask.task.task_id)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: updatedTitle,
+        }),
       },
-      body: JSON.stringify({
-        title: updatedTitle,
-      }),
-    });
+    );
 
     expect(patchTaskResponse.status).toBe(200);
 

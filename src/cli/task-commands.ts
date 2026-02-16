@@ -1,6 +1,7 @@
-import type { Command } from 'commander';
+import { type Command, Option } from 'commander';
 import {
   type ApiRunNowTaskResponse,
+  type ApiRunResponse,
   type ApiTaskResponse,
   createTask,
   deleteTask,
@@ -8,8 +9,9 @@ import {
   listTasks,
   runTaskNow,
   updateTask,
+  waitForRun,
 } from './client.js';
-import { exitWithError, printJson } from './common.js';
+import { exitWithError, parsePositiveNumber, printJson } from './common.js';
 
 const defaultThreadKey = 'cli:default';
 
@@ -22,6 +24,7 @@ interface RegisterTaskCommandsDependencies {
   updateTaskImpl?: typeof updateTask;
   deleteTaskImpl?: typeof deleteTask;
   runTaskNowImpl?: typeof runTaskNow;
+  waitForRunImpl?: typeof waitForRun;
   printJsonImpl?: typeof printJson;
   writeStdoutImpl?: (line: string) => void;
 }
@@ -33,6 +36,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
   const updateTaskImpl = dependencies.updateTaskImpl ?? updateTask;
   const deleteTaskImpl = dependencies.deleteTaskImpl ?? deleteTask;
   const runTaskNowImpl = dependencies.runTaskNowImpl ?? runTaskNow;
+  const waitForRunImpl = dependencies.waitForRunImpl ?? waitForRun;
   const printJsonImpl = dependencies.printJsonImpl ?? printJson;
   const writeStdoutImpl = dependencies.writeStdoutImpl ?? ((line: string) => process.stdout.write(`${line}\n`));
 
@@ -45,14 +49,20 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
     .requiredOption('--instructions <text>', 'task instructions')
     .option('--once-at <timestamp>', 'one-off schedule timestamp (ISO-8601 UTC)')
     .option('--cron <expr>', 'cron expression (5 fields)')
+    .option('--rrule <rule>', 'RRULE expression (for example FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1)')
     .option('--timezone <iana>', 'IANA timezone (for example America/Los_Angeles)')
     .option('--thread-key <threadKey>', 'creator thread key', defaultThreadKey)
     .option('--json', 'JSON output')
+    .addHelpText(
+      'after',
+      '\nExample (every 2 weeks on Monday at 09:00):\n  jagc task create --title "Biweekly sync" --instructions "Prepare sync agenda" --rrule "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;BYHOUR=9;BYMINUTE=0;BYSECOND=0" --timezone "America/Los_Angeles" --json\n',
+    )
     .action(async (options) => {
       try {
         const schedule = buildScheduleFromOptions({
           onceAt: options.onceAt,
           cronExpr: options.cron,
+          rruleExpr: options.rrule,
           timezone: options.timezone,
         });
 
@@ -69,7 +79,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
 
         writeStdoutImpl(`created ${formatTaskSummary(response)}`);
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -77,16 +87,15 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
     .command('list')
     .description('list scheduled tasks')
     .option('--thread-key <threadKey>', 'filter by creator thread key')
-    .option('--all', 'list all tasks')
-    .option('--enabled', 'list enabled tasks (default)')
-    .option('--disabled', 'list disabled tasks')
+    .addOption(
+      new Option('--state <state>', 'task state filter').choices(['all', 'enabled', 'disabled']).default('all'),
+    )
     .option('--json', 'JSON output')
-    .action(async (options) => {
+    .action(async (options: { threadKey?: string; state: TaskStateFilter; json?: boolean }) => {
       try {
-        const state = parseTaskStateFilter(options);
         const response = await listTasksImpl(apiUrl(program), {
           threadKey: options.threadKey,
-          state,
+          state: options.state,
         });
 
         if (options.json) {
@@ -103,7 +112,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
           writeStdoutImpl(`${task.task_id} ${task.enabled ? 'enabled' : 'disabled'} ${task.title}`);
         }
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -123,7 +132,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
 
         writeStdoutImpl(formatTaskSummary(response));
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -135,7 +144,8 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
     .option('--instructions <text>', 'updated task instructions')
     .option('--once-at <timestamp>', 'set one-off schedule timestamp (ISO-8601 UTC)')
     .option('--cron <expr>', 'set cron expression (5 fields)')
-    .option('--timezone <iana>', 'timezone for --once-at/--cron schedule updates')
+    .option('--rrule <rule>', 'set RRULE expression')
+    .option('--timezone <iana>', 'timezone for --once-at/--cron/--rrule schedule updates')
     .option('--enable', 'enable task')
     .option('--disable', 'disable task')
     .option('--json', 'JSON output')
@@ -148,6 +158,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
         const schedule = buildOptionalScheduleFromOptions({
           onceAt: options.onceAt,
           cronExpr: options.cron,
+          rruleExpr: options.rrule,
           timezone: options.timezone,
         });
 
@@ -179,7 +190,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
           writeStdoutImpl(`warning: ${warning}`);
         }
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -199,7 +210,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
 
         writeStdoutImpl(`deleted task ${taskId}`);
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -207,24 +218,51 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
     .command('run')
     .description('run a task immediately')
     .argument('<taskId>', 'task id')
-    .option('--now', 'run now (required)')
+    .option('--wait', 'wait for terminal run status')
+    .option('--timeout <seconds>', 'wait timeout in seconds (requires --wait)', parsePositiveNumber)
+    .option('--interval-ms <ms>', 'poll interval milliseconds (requires --wait)', parsePositiveNumber)
     .option('--json', 'JSON output')
-    .action(async (taskId, options) => {
+    .action(async (taskId, options: { wait?: boolean; timeout?: number; intervalMs?: number; json?: boolean }) => {
       try {
-        if (!options.now) {
-          throw new Error('task run currently requires --now');
+        if (!options.wait && (options.timeout !== undefined || options.intervalMs !== undefined)) {
+          throw new Error('task run --timeout and --interval-ms require --wait');
         }
 
         const response = await runTaskNowImpl(apiUrl(program), taskId);
 
-        if (options.json) {
-          printJsonImpl(response);
+        if (!options.wait) {
+          if (options.json) {
+            printJsonImpl(response);
+            return;
+          }
+
+          writeStdoutImpl(formatTaskRunNowSummary(response));
           return;
         }
 
-        writeStdoutImpl(formatTaskRunNowSummary(response));
+        if (!response.task_run.run_id) {
+          throw new Error('task run did not return run_id; retry without --wait and inspect task run state');
+        }
+
+        const run = await waitForRunImpl(
+          apiUrl(program),
+          response.task_run.run_id,
+          (options.timeout ?? 60) * 1000,
+          options.intervalMs ?? 500,
+        );
+
+        if (options.json) {
+          printJsonImpl({
+            task: response.task,
+            task_run: response.task_run,
+            run,
+          });
+          return;
+        }
+
+        writeStdoutImpl(formatTaskRunNowSummary(response, run));
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -246,7 +284,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
 
         writeStdoutImpl(`enabled ${formatTaskSummary(response)}`);
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 
@@ -268,7 +306,7 @@ export function registerTaskCommands(program: Command, dependencies: RegisterTas
 
         writeStdoutImpl(`disabled ${formatTaskSummary(response)}`);
       } catch (error) {
-        exitWithError(error);
+        exitWithError(error, { json: options.json });
       }
     });
 }
@@ -277,24 +315,7 @@ function apiUrl(root: Command): string {
   return root.opts<{ apiUrl: string }>().apiUrl;
 }
 
-function parseTaskStateFilter(options: { all?: boolean; enabled?: boolean; disabled?: boolean }): TaskStateFilter {
-  const enabledFilterCount = [options.all, options.enabled, options.disabled].filter(Boolean).length;
-  if (enabledFilterCount > 1) {
-    throw new Error('task list accepts only one of --all, --enabled, or --disabled');
-  }
-
-  if (options.all) {
-    return 'all';
-  }
-
-  if (options.disabled) {
-    return 'disabled';
-  }
-
-  return 'enabled';
-}
-
-function buildScheduleFromOptions(input: { onceAt?: string; cronExpr?: string; timezone?: string }):
+function buildScheduleFromOptions(input: { onceAt?: string; cronExpr?: string; rruleExpr?: string; timezone?: string }):
   | {
       kind: 'once';
       once_at: string;
@@ -304,17 +325,26 @@ function buildScheduleFromOptions(input: { onceAt?: string; cronExpr?: string; t
       kind: 'cron';
       cron: string;
       timezone: string;
+    }
+  | {
+      kind: 'rrule';
+      rrule: string;
+      timezone: string;
     } {
-  if (input.onceAt && input.cronExpr) {
-    throw new Error('task create accepts only one of --once-at or --cron');
+  const selectedScheduleFlags = [input.onceAt, input.cronExpr, input.rruleExpr].filter(
+    (value): value is string => typeof value === 'string' && value.length > 0,
+  );
+
+  if (selectedScheduleFlags.length > 1) {
+    throw new Error('task create accepts only one of --once-at, --cron, or --rrule');
   }
 
-  if (!input.onceAt && !input.cronExpr) {
-    throw new Error('task create requires either --once-at or --cron');
+  if (selectedScheduleFlags.length === 0) {
+    throw new Error('task create requires one of --once-at, --cron, or --rrule');
   }
 
   if (!input.timezone) {
-    throw new Error('task create requires --timezone when using --once-at or --cron');
+    throw new Error('task create requires --timezone when using --once-at, --cron, or --rrule');
   }
 
   if (input.onceAt) {
@@ -325,14 +355,27 @@ function buildScheduleFromOptions(input: { onceAt?: string; cronExpr?: string; t
     };
   }
 
+  if (input.cronExpr) {
+    return {
+      kind: 'cron',
+      cron: input.cronExpr,
+      timezone: input.timezone,
+    };
+  }
+
   return {
-    kind: 'cron',
-    cron: input.cronExpr as string,
+    kind: 'rrule',
+    rrule: input.rruleExpr as string,
     timezone: input.timezone,
   };
 }
 
-function buildOptionalScheduleFromOptions(input: { onceAt?: string; cronExpr?: string; timezone?: string }):
+function buildOptionalScheduleFromOptions(input: {
+  onceAt?: string;
+  cronExpr?: string;
+  rruleExpr?: string;
+  timezone?: string;
+}):
   | {
       kind: 'once';
       once_at: string;
@@ -343,13 +386,18 @@ function buildOptionalScheduleFromOptions(input: { onceAt?: string; cronExpr?: s
       cron: string;
       timezone: string;
     }
+  | {
+      kind: 'rrule';
+      rrule: string;
+      timezone: string;
+    }
   | undefined {
-  if (!input.onceAt && !input.cronExpr && !input.timezone) {
+  if (!input.onceAt && !input.cronExpr && !input.rruleExpr && !input.timezone) {
     return undefined;
   }
 
-  if (input.timezone && !input.onceAt && !input.cronExpr) {
-    throw new Error('task update timezone changes require either --once-at or --cron');
+  if (input.timezone && !input.onceAt && !input.cronExpr && !input.rruleExpr) {
+    throw new Error('task update timezone changes require --once-at, --cron, or --rrule');
   }
 
   return buildScheduleFromOptions(input);
@@ -357,10 +405,36 @@ function buildOptionalScheduleFromOptions(input: { onceAt?: string; cronExpr?: s
 
 function formatTaskSummary(response: ApiTaskResponse): string {
   const task = response.task;
-  const schedule = task.schedule.kind === 'once' ? `once@${task.schedule.once_at}` : `cron:${task.schedule.cron}`;
+  const schedule =
+    task.schedule.kind === 'once'
+      ? `once@${task.schedule.once_at}`
+      : task.schedule.kind === 'cron'
+        ? `cron:${task.schedule.cron}`
+        : `rrule:${formatRRuleSummary(task.schedule.rrule)}`;
   return `${task.task_id} ${task.enabled ? 'enabled' : 'disabled'} ${schedule} ${task.title}`;
 }
 
-function formatTaskRunNowSummary(response: ApiRunNowTaskResponse): string {
-  return `task:${response.task.task_id} run:${response.task_run.task_run_id} status:${response.task_run.status}`;
+function formatRRuleSummary(value: string | null): string {
+  if (!value) {
+    return '(missing)';
+  }
+
+  const compact = value.replace(/\s+/gu, ' ').trim();
+  if (compact.length <= 72) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 69)}...`;
+}
+
+function formatTaskRunNowSummary(response: ApiRunNowTaskResponse, run?: ApiRunResponse): string {
+  if (!run) {
+    return `task:${response.task.task_id} run:${response.task_run.task_run_id} status:${response.task_run.status}`;
+  }
+
+  if (run.error?.message) {
+    return `task:${response.task.task_id} run:${response.task_run.task_run_id} status:${run.status} error:${run.error.message}`;
+  }
+
+  return `task:${response.task.task_id} run:${response.task_run.task_run_id} status:${run.status}`;
 }

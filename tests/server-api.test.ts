@@ -795,6 +795,7 @@ describe('server API', () => {
     const created = createdResponse.json();
     expect(created.task.task_id).toEqual(expect.any(String));
     expect(created.task.creator_thread_key).toBe('cli:default');
+    expect(created.task.schedule.rrule).toBeNull();
 
     const listResponse = await app.inject({
       method: 'GET',
@@ -842,6 +843,32 @@ describe('server API', () => {
 
     expect(deleteResponse.statusCode).toBe(200);
     expect(deleteResponse.json()).toEqual({ deleted: true });
+
+    await app.close();
+  });
+
+  test('task create supports rrule schedule payload', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const createdResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/threads/cli%3Adefault/tasks',
+      payload: {
+        title: 'First Monday plan',
+        instructions: 'Prepare monthly priorities',
+        schedule: {
+          kind: 'rrule',
+          rrule: 'FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0',
+          timezone: 'UTC',
+        },
+      },
+    });
+
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json();
+    expect(created.task.schedule.kind).toBe('rrule');
+    expect(created.task.schedule.rrule).toContain('RRULE:FREQ=MONTHLY');
+    expect(created.task.schedule.rrule).toContain('DTSTART;TZID=UTC:');
 
     await app.close();
   });

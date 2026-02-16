@@ -13,19 +13,28 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- Added end-to-end scheduled task support (one-off + recurring) with HTTP API (`/v1/threads/:thread_key/tasks`, `/v1/tasks*`), CLI command group (`jagc task create|list|get|update|delete|run --now|enable|disable`), SQLite migrations (`scheduled_tasks`, `scheduled_task_runs`), and in-process scheduler/recovery service.
+- Added end-to-end scheduled task support (one-off + recurring) with HTTP API (`/v1/threads/:thread_key/tasks`, `/v1/tasks*`), CLI command group (`jagc task create|list|get|update|delete|run|enable|disable`), SQLite migrations (`scheduled_tasks`, `scheduled_task_runs`), and in-process scheduler/recovery service.
 - Added per-task execution threads for scheduled tasks, including Telegram lazy topic creation (`createForumTopic`) and persisted `execution_thread_key` routing.
+- Added `defaults/skills/task-ops/SKILL.md` as the canonical low-turn scheduled-task operating guide for agents/operators.
+- Added RRULE-based scheduled task recurrence support (`schedule.kind=rrule`) across API/CLI/store/scheduler, including migration `004_scheduled_tasks_rrule.sql` and timezone-aware next-run computation.
 
 ### Changed
 
 - Telegram thread routing is now topic-aware (`telegram:chat:<chat_id>:topic:<message_thread_id>` when available) across inbound message/callback mapping and runtime controls.
 - Telegram run delivery now uses a reusable delivery path shared by normal inbound runs and scheduled task runs, with topic-aware `message_thread_id` payload propagation for send/edit/action/delete/document operations.
-- Runtime harness context extension now uses discovery-first scheduled-task guidance (`jagc task --help` / subcommand help), clarifies one-off/recurring instruction execution semantics, and keeps post-mutation verification + lazy execution-thread behavior explicit.
+- Scheduled-task CLI ergonomics were simplified: `jagc task list` now uses `--state <all|enabled|disabled>` with default `all`; `jagc task run` no longer requires `--now` and now supports `--wait` + polling controls for terminal status in one command.
+- `jagc task create|update` now supports `--rrule <rule>` for calendar-style recurrences (for example first Monday monthly, biweekly Monday).
+- Runtime harness context task guidance is now intentionally terse and points to the dedicated `task-ops` skill for operational workflows.
+- Runtime harness context task guidance now distinguishes approval flow: direct user task/scheduling requests execute via `skills/task-ops/SKILL.md` without extra confirmation, while agent-suggested automation requires explicit user approval before creating/updating tasks.
+- `defaults/skills/task-ops/SKILL.md` description now explicitly states when to use the skill (user-asked scheduling/task management and agent-proposed automation with approval) and what it covers (command contract, JSON-first workflow, scheduling/time conversion, verification policy).
 - `pnpm dev` now prepends a repo-local `jagc` shim to `PATH`, so in-process agent `bash` calls resolve `jagc` to `pnpm dev:cli` from the current checkout instead of a globally installed CLI.
 
 ### Fixed
 
 - Scheduled task occurrence bookkeeping now survives restarts by resuming pending task-runs and reconciling dispatched task-runs against terminal run state.
+- Cron next-run computation now handles midnight (`0 0 ...`) correctly across timezones.
+- Once-schedule timestamps now accept UTC ISO-8601 variants (for example `...Z` or `...+00:00`) and normalize to canonical UTC storage.
+- `jagc task ... --json` failures now emit structured JSON error envelopes instead of plain stderr text.
 
 ## [0.3.7] - 2026-02-13
 

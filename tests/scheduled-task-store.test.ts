@@ -49,6 +49,7 @@ describe('SqliteScheduledTaskStore schema invariants', () => {
       scheduleKind: 'once',
       onceAt: '2026-02-16T17:00:00.000Z',
       cronExpr: null,
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: '2026-02-16T17:00:00.000Z',
@@ -66,12 +67,28 @@ describe('SqliteScheduledTaskStore schema invariants', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '0 9 * * 1-5',
+      rruleExpr: null,
     });
 
     expect(transitionedToCron).not.toBeNull();
     expect(transitionedToCron?.scheduleKind).toBe('cron');
     expect(transitionedToCron?.onceAt).toBeNull();
     expect(transitionedToCron?.cronExpr).toBe('0 9 * * 1-5');
+    expect(transitionedToCron?.rruleExpr).toBeNull();
+
+    const transitionedToRRule = await store.updateTask(onceTask.taskId, {
+      scheduleKind: 'rrule',
+      onceAt: null,
+      cronExpr: null,
+      rruleExpr:
+        'DTSTART;TZID=UTC:20260216T170000\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0',
+    });
+
+    expect(transitionedToRRule).not.toBeNull();
+    expect(transitionedToRRule?.scheduleKind).toBe('rrule');
+    expect(transitionedToRRule?.onceAt).toBeNull();
+    expect(transitionedToRRule?.cronExpr).toBeNull();
+    expect(transitionedToRRule?.rruleExpr).toContain('RRULE:FREQ=MONTHLY');
 
     const cronTask = await store.createTask({
       title: 'Cron task',
@@ -79,6 +96,7 @@ describe('SqliteScheduledTaskStore schema invariants', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '*/5 * * * *',
+      rruleExpr: null,
       timezone: 'UTC',
       enabled: true,
       nextRunAt: '2026-02-16T17:05:00.000Z',
@@ -96,12 +114,14 @@ describe('SqliteScheduledTaskStore schema invariants', () => {
       scheduleKind: 'once',
       onceAt: '2026-02-17T09:00:00.000Z',
       cronExpr: null,
+      rruleExpr: null,
     });
 
     expect(transitionedToOnce).not.toBeNull();
     expect(transitionedToOnce?.scheduleKind).toBe('once');
     expect(transitionedToOnce?.onceAt).toBe('2026-02-17T09:00:00.000Z');
     expect(transitionedToOnce?.cronExpr).toBeNull();
+    expect(transitionedToOnce?.rruleExpr).toBeNull();
   });
 
   test('enforces task run uniqueness by task occurrence and idempotency key', async () => {
@@ -114,6 +134,7 @@ describe('SqliteScheduledTaskStore schema invariants', () => {
       scheduleKind: 'cron',
       onceAt: null,
       cronExpr: '0 9 * * 1-5',
+      rruleExpr: null,
       timezone: 'America/Los_Angeles',
       enabled: true,
       nextRunAt: '2026-02-16T17:00:00.000Z',

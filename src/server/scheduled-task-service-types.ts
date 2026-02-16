@@ -29,6 +29,11 @@ export interface ScheduledTaskCreateInput {
         kind: 'cron';
         cronExpr: string;
         timezone: string;
+      }
+    | {
+        kind: 'rrule';
+        rruleExpr: string;
+        timezone: string;
       };
 }
 
@@ -45,6 +50,11 @@ export interface ScheduledTaskUpdateInput {
     | {
         kind: 'cron';
         cronExpr: string;
+        timezone: string;
+      }
+    | {
+        kind: 'rrule';
+        rruleExpr: string;
         timezone: string;
       };
 }
