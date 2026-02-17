@@ -6,12 +6,20 @@ import type { DeliveryMode, MessageIngest, RunOutput, RunRecord } from '../share
 import type { SqliteDatabase } from './sqlite.js';
 import {
   type ImageLogContext,
+  type PendingTelegramImageIngest,
+  type PendingTelegramImageIngestResult,
   type PurgeExpiredInputImagesResult,
   type RunInputImageRecord,
   RunInputImageStore,
 } from './store-input-images.js';
 
-export type { ImageLogContext, PurgeExpiredInputImagesResult, RunInputImageRecord } from './store-input-images.js';
+export type {
+  ImageLogContext,
+  PendingTelegramImageIngest,
+  PendingTelegramImageIngestResult,
+  PurgeExpiredInputImagesResult,
+  RunInputImageRecord,
+} from './store-input-images.js';
 
 interface RunRow {
   run_id: string;
@@ -72,6 +80,7 @@ export interface RunStore {
   listRunInputImages(runId: string): Promise<RunInputImageRecord[]>;
   deleteRunInputImages(runId: string): Promise<number>;
   purgeExpiredInputImages(context?: ImageLogContext): Promise<PurgeExpiredInputImagesResult>;
+  persistPendingTelegramInputImages(input: PendingTelegramImageIngest): Promise<PendingTelegramImageIngestResult>;
   getThreadSession(threadKey: string): Promise<ThreadSessionRecord | null>;
   upsertThreadSession(threadKey: string, sessionId: string, sessionFile: string): Promise<ThreadSessionRecord>;
   deleteThreadSession(threadKey: string): Promise<void>;
@@ -120,6 +129,18 @@ export class SqliteRunStore implements RunStore {
         .run(runId, input.source, input.threadKey, input.userKey ?? null, input.deliveryMode, input.text, now, now);
 
       this.runInputImages.insertRunInputImages(runId, input, now);
+
+      if (this.shouldClaimPendingTelegramImages(input)) {
+        this.runInputImages.claimPendingTelegramImagesToRunTx(
+          {
+            source: input.source,
+            threadKey: input.threadKey,
+            userKey: input.userKey,
+          },
+          runId,
+          now,
+        );
+      }
 
       if (input.idempotencyKey) {
         this.database
@@ -226,6 +247,12 @@ export class SqliteRunStore implements RunStore {
     return this.runInputImages.purgeExpiredInputImages(context);
   }
 
+  async persistPendingTelegramInputImages(
+    input: PendingTelegramImageIngest,
+  ): Promise<PendingTelegramImageIngestResult> {
+    return this.runInputImages.insertPendingTelegramImages(input);
+  }
+
   async getThreadSession(threadKey: string): Promise<ThreadSessionRecord | null> {
     const row = this.database
       .prepare<unknown[], ThreadSessionRow>('SELECT * FROM thread_sessions WHERE thread_key = ?')
@@ -262,6 +289,18 @@ export class SqliteRunStore implements RunStore {
 
   async deleteThreadSession(threadKey: string): Promise<void> {
     this.database.prepare('DELETE FROM thread_sessions WHERE thread_key = ?').run(threadKey);
+  }
+
+  private shouldClaimPendingTelegramImages(input: MessageIngest): input is MessageIngest & { userKey: string } {
+    if (input.source !== 'telegram') {
+      return false;
+    }
+
+    if (typeof input.userKey !== 'string' || input.userKey.length === 0) {
+      return false;
+    }
+
+    return (input.images?.length ?? 0) === 0;
   }
 
   private resolveIdempotentRun(input: MessageIngest, payloadHash: string): CreateRunResult | null {

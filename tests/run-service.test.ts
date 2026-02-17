@@ -328,6 +328,25 @@ class InMemoryRunStore implements RunStore {
     };
   }
 
+  async persistPendingTelegramInputImages(_input: {
+    source: string;
+    threadKey: string;
+    userKey: string;
+    telegramUpdateId: number;
+    telegramMediaGroupId?: string | null;
+    images: Array<{ mimeType: string; data: Buffer; filename?: string | null }>;
+  }): Promise<{
+    insertedCount: number;
+    bufferedCount: number;
+    bufferedBytes: number;
+  }> {
+    return {
+      insertedCount: 0,
+      bufferedCount: 0,
+      bufferedBytes: 0,
+    };
+  }
+
   async getThreadSession(_threadKey: string): Promise<ThreadSessionRecord | null> {
     return null;
   }

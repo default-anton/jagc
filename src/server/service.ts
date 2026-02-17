@@ -5,7 +5,12 @@ import { isTerminalRunProgressEvent } from '../shared/run-progress.js';
 import type { MessageIngest, RunRecord } from '../shared/run-types.js';
 import type { RunExecutor } from './executor.js';
 import type { RunScheduler } from './scheduler.js';
-import type { CreateRunResult, RunStore } from './store.js';
+import type {
+  CreateRunResult,
+  PendingTelegramImageIngest,
+  PendingTelegramImageIngestResult,
+  RunStore,
+} from './store.js';
 
 const runProgressBufferSize = 256;
 const runProgressTerminalRetentionMs = 5 * 60 * 1000;
@@ -16,6 +21,14 @@ interface RunProgressSubscriptionOptions {
 
 interface ProgressAwareRunExecutor {
   setRunProgressListener?(listener: RunProgressListener | null): void;
+}
+
+export interface TelegramImageBufferRequest {
+  threadKey: string;
+  userKey: string;
+  telegramUpdateId: number;
+  images: PendingTelegramImageIngest['images'];
+  telegramMediaGroupId?: string | null;
 }
 
 export class RunService {
@@ -86,6 +99,17 @@ export class RunService {
     }
 
     return result;
+  }
+
+  async bufferTelegramImages(request: TelegramImageBufferRequest): Promise<PendingTelegramImageIngestResult> {
+    return this.runStore.persistPendingTelegramInputImages({
+      source: 'telegram',
+      threadKey: request.threadKey,
+      userKey: request.userKey,
+      telegramUpdateId: request.telegramUpdateId,
+      telegramMediaGroupId: request.telegramMediaGroupId,
+      images: request.images,
+    });
   }
 
   async getRun(runId: string): Promise<RunRecord | null> {

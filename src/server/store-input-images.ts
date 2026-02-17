@@ -1,9 +1,28 @@
 import { randomUUID } from 'node:crypto';
-import { expiresAtFromIsoTimestamp } from '../shared/input-images.js';
+import {
+  computeInputImagesTotalBytes,
+  expiresAtFromIsoTimestamp,
+  InputImageValidationError,
+  maxInputImageCount,
+  maxInputImageTotalBytes,
+  validateDecodedInputImages,
+} from '../shared/input-images.js';
 import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
 import type { MessageIngest } from '../shared/run-types.js';
 import type { SqliteDatabase } from './sqlite.js';
+import type {
+  PendingTelegramImageIngest,
+  PendingTelegramImageIngestResult,
+  PendingTelegramImageScope,
+} from './store-input-images-telegram.js';
+import { isTelegramUpdateDedupConstraint } from './store-input-images-telegram.js';
+
+export type {
+  PendingTelegramImageIngest,
+  PendingTelegramImageIngestResult,
+  PendingTelegramImageScope,
+} from './store-input-images-telegram.js';
 
 interface InputImageRow {
   input_image_id: string;
@@ -26,6 +45,19 @@ interface PurgeExpiredStatsRow {
   bound_count: number;
 }
 
+interface PendingScopeStatsRow {
+  image_count: number;
+  total_bytes: number;
+  max_position: number | null;
+}
+
+interface PendingInsertTxResult {
+  insertedCount: number;
+  insertedBytes: number;
+  bufferedCount: number;
+  bufferedBytes: number;
+}
+
 const emptyDeleteStats: DeleteRunImagesStatsRow = {
   image_count: 0,
   total_bytes: 0,
@@ -33,9 +65,12 @@ const emptyDeleteStats: DeleteRunImagesStatsRow = {
   thread_key: null,
 };
 
-const emptyPurgeStats: PurgeExpiredStatsRow = {
+const emptyPurgeStats: PurgeExpiredStatsRow = { image_count: 0, bound_count: 0 };
+
+const emptyPendingScopeStats: PendingScopeStatsRow = {
   image_count: 0,
-  bound_count: 0,
+  total_bytes: 0,
+  max_position: null,
 };
 
 export interface ImageLogContext {
@@ -168,6 +203,175 @@ export class RunInputImageStore {
     };
   }
 
+  insertPendingTelegramImages(input: PendingTelegramImageIngest): PendingTelegramImageIngestResult {
+    validateDecodedInputImages(input.images);
+
+    if (input.images.length === 0) {
+      return {
+        insertedCount: 0,
+        bufferedCount: 0,
+        bufferedBytes: 0,
+      };
+    }
+
+    const nowIso = nowIsoTimestamp();
+    const insert = this.database.transaction((payload: PendingTelegramImageIngest): PendingInsertTxResult => {
+      this.purgeExpiredInputImagesTx(nowIso, {
+        source: payload.source,
+        threadKey: payload.threadKey,
+      });
+
+      const existing = this.loadPendingScopeStatsTx(payload.source, payload.threadKey, payload.userKey);
+      if (
+        this.hasTelegramUpdateBeenBufferedTx(
+          payload.source,
+          payload.threadKey,
+          payload.userKey,
+          payload.telegramUpdateId,
+        )
+      ) {
+        return {
+          insertedCount: 0,
+          insertedBytes: 0,
+          bufferedCount: existing.image_count,
+          bufferedBytes: existing.total_bytes,
+        };
+      }
+
+      const insertedBytes = computeInputImagesTotalBytes(payload.images);
+      const bufferedCount = existing.image_count + payload.images.length;
+      const bufferedBytes = existing.total_bytes + insertedBytes;
+
+      this.assertPendingBufferWithinLimits(bufferedCount, bufferedBytes);
+
+      const insertStatement = this.database.prepare(
+        `
+          INSERT INTO input_images (
+            input_image_id,
+            source,
+            thread_key,
+            user_key,
+            telegram_update_id,
+            run_id,
+            telegram_media_group_id,
+            mime_type,
+            filename,
+            byte_size,
+            image_bytes,
+            position,
+            created_at,
+            expires_at
+          )
+          VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      );
+
+      const expiresAt = expiresAtFromIsoTimestamp(nowIso);
+      let position = (existing.max_position ?? -1) + 1;
+      for (const image of payload.images) {
+        insertStatement.run(
+          randomUUID(),
+          payload.source,
+          payload.threadKey,
+          payload.userKey,
+          payload.telegramUpdateId,
+          payload.telegramMediaGroupId ?? null,
+          image.mimeType,
+          image.filename ?? null,
+          image.data.byteLength,
+          image.data,
+          position,
+          nowIso,
+          expiresAt,
+        );
+        position += 1;
+      }
+
+      return {
+        insertedCount: payload.images.length,
+        insertedBytes,
+        bufferedCount,
+        bufferedBytes,
+      };
+    });
+
+    let inserted: PendingInsertTxResult;
+    try {
+      inserted = insert(input);
+    } catch (error) {
+      if (isTelegramUpdateDedupConstraint(error)) {
+        const pending = this.loadPendingScopeStatsTx(input.source, input.threadKey, input.userKey);
+        inserted = {
+          insertedCount: 0,
+          insertedBytes: 0,
+          bufferedCount: pending.image_count,
+          bufferedBytes: pending.total_bytes,
+        };
+      } else {
+        throw error;
+      }
+    }
+    if (inserted.insertedCount > 0) {
+      this.logger.info({
+        event: 'images_ingested_count',
+        images_ingested_count: inserted.insertedCount,
+        images_ingested_bytes: inserted.insertedBytes,
+        source: input.source,
+        thread_key: input.threadKey,
+        run_id: null,
+      });
+    } else {
+      this.logger.info({
+        event: 'telegram_image_ingest_deduplicated',
+        source: input.source,
+        thread_key: input.threadKey,
+        run_id: null,
+        telegram_update_id: input.telegramUpdateId,
+      });
+    }
+
+    return {
+      insertedCount: inserted.insertedCount,
+      bufferedCount: inserted.bufferedCount,
+      bufferedBytes: inserted.bufferedBytes,
+    };
+  }
+
+  claimPendingTelegramImagesToRunTx(scope: PendingTelegramImageScope, runId: string, claimedAtIso: string): number {
+    const pending = this.loadPendingScopeStatsTx(scope.source, scope.threadKey, scope.userKey);
+    if (pending.image_count === 0) {
+      return 0;
+    }
+
+    const expiresAt = expiresAtFromIsoTimestamp(claimedAtIso);
+    const claimed = this.database
+      .prepare(
+        `
+          UPDATE input_images
+          SET run_id = ?,
+              expires_at = ?
+          WHERE source = ?
+            AND thread_key = ?
+            AND user_key = ?
+            AND run_id IS NULL
+        `,
+      )
+      .run(runId, expiresAt, scope.source, scope.threadKey, scope.userKey).changes;
+
+    if (claimed > 0) {
+      this.logger.info({
+        event: 'images_claimed_count',
+        images_claimed_count: claimed,
+        images_claimed_bytes: pending.total_bytes,
+        source: scope.source,
+        thread_key: scope.threadKey,
+        run_id: runId,
+      });
+    }
+
+    return claimed;
+  }
+
   insertRunInputImages(runId: string, input: MessageIngest, createdAtIso: string): void {
     const images = input.images ?? [];
     if (images.length === 0) {
@@ -225,6 +429,58 @@ export class RunInputImageStore {
       thread_key: input.threadKey,
       run_id: runId,
     });
+  }
+
+  private loadPendingScopeStatsTx(source: string, threadKey: string, userKey: string): PendingScopeStatsRow {
+    return (
+      this.database
+        .prepare<unknown[], PendingScopeStatsRow>(
+          `
+            SELECT
+              COUNT(*) AS image_count,
+              COALESCE(SUM(byte_size), 0) AS total_bytes,
+              MAX(position) AS max_position
+            FROM input_images
+            WHERE source = ?
+              AND thread_key = ?
+              AND user_key = ?
+              AND run_id IS NULL
+          `,
+        )
+        .get(source, threadKey, userKey) ?? emptyPendingScopeStats
+    );
+  }
+
+  private hasTelegramUpdateBeenBufferedTx(
+    source: string,
+    threadKey: string,
+    userKey: string,
+    telegramUpdateId: number,
+  ): boolean {
+    const existing = this.database
+      .prepare<unknown[], { input_image_id: string }>(
+        `
+          SELECT input_image_id
+          FROM input_images
+          WHERE source = ?
+            AND thread_key = ?
+            AND user_key = ?
+            AND telegram_update_id = ?
+          LIMIT 1
+        `,
+      )
+      .get(source, threadKey, userKey, telegramUpdateId);
+
+    return existing !== undefined;
+  }
+
+  private assertPendingBufferWithinLimits(bufferedCount: number, bufferedBytes: number): void {
+    if (bufferedCount > maxInputImageCount || bufferedBytes > maxInputImageTotalBytes) {
+      throw new InputImageValidationError(
+        'image_buffer_limit_exceeded',
+        `pending image buffer exceeds limit (${maxInputImageCount} images, ${maxInputImageTotalBytes} bytes max)`,
+      );
+    }
   }
 }
 

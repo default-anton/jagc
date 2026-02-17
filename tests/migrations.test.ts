@@ -40,6 +40,7 @@ describe('runMigrations', () => {
         '003_scheduled_tasks.sql',
         '004_scheduled_tasks_rrule.sql',
         '005_input_images.sql',
+        '006_input_images_telegram_update_id.sql',
       ]);
     } finally {
       first.close();
