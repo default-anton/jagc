@@ -13,22 +13,32 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- Added phase-1 image input support across API/CLI/runtime with temporary SQLite staging in new `input_images` storage, including `jagc message -i/--image` and `/v1/messages` `images[]` payload support.
-- Added Telegram DB-backed image buffering (`photo` + image `document`) with pending image persistence in `input_images`, deterministic claim-on-next-text attach flow, and media-group traceability via `telegram_media_group_id`.
+- None.
 
 ### Changed
 
-- Updated bundled `@mariozechner/pi-coding-agent` dependency to `^0.53.0`.
-- Telegram now adds a best-effort random emoji reaction on inbound assistant-bound user messages (`followUp`/`steer`) while preserving the existing typing indicator/progress flow.
-- Telegram image buffering now enforces pending-scope limits (10 images / 50MiB decoded) with stable reject code `image_buffer_limit_exceeded`, runs TTL purge on both image and text ingest paths (no in-memory buffering), and deduplicates replayed image updates by Telegram `update_id`.
-- Telegram image handlers now preflight `file_size` metadata and reject oversized payloads (`image_total_bytes_exceeded`) before downloading bytes.
-- `/v1/messages` now enforces image ingest limits and stable validation/conflict codes (`image_count_exceeded`, `image_total_bytes_exceeded`, `image_mime_type_unsupported`, `image_base64_invalid`, `idempotency_payload_mismatch`) and uses a 75MiB HTTP body limit for base64 overhead.
-- Refactored service install management and Telegram polling/progress internals into smaller focused modules for maintainability with no behavior change.
+- None.
 
 ### Fixed
 
-- Updated pi SDK integration for 0.53.0 breaking changes: `AuthStorage` now uses static factories and thread runtime model/thinking updates now flush settings writes before returning so persisted defaults remain durable.
-- Scheduled-task dispatch now traps ingest failures (including idempotency payload conflicts) and marks task runs failed instead of leaving background unhandled rejections.
+- None.
+
+## [0.5.0] - 2026-02-17
+
+### Added
+
+- Added phase-1 image input support across API/CLI/runtime with SQLite-backed `input_images` staging, including `jagc message --image` and `/v1/messages` `images[]` payload ingestion.
+- Added Telegram pending-image buffering (`photo` + image `document`) backed by SQLite, with deterministic attach-on-next-text behavior and media-group traceability.
+
+### Changed
+
+- Hardened image ingest limits and validation across Telegram and `/v1/messages`, including stable reject/validation codes and a 75MiB HTTP body cap for base64 overhead.
+- Updated bundled `@mariozechner/pi-coding-agent` dependency to `^0.53.0`.
+
+### Fixed
+
+- Updated pi SDK integration for 0.53.0 (`AuthStorage` static factories, plus durable settings flush before runtime model/thinking updates return).
+- Scheduled-task dispatch now marks ingest failures (including idempotency payload conflicts) as failed task runs instead of leaving background unhandled rejections.
 
 ## [0.4.0] - 2026-02-16
 
