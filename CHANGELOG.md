@@ -22,6 +22,7 @@ All notable changes to `jagc` are documented here.
 - Telegram image buffering now enforces pending-scope limits (10 images / 50MiB decoded) with stable reject code `image_buffer_limit_exceeded`, runs TTL purge on both image and text ingest paths (no in-memory buffering), and deduplicates replayed image updates by Telegram `update_id`.
 - Telegram image handlers now preflight `file_size` metadata and reject oversized payloads (`image_total_bytes_exceeded`) before downloading bytes.
 - `/v1/messages` now enforces image ingest limits and stable validation/conflict codes (`image_count_exceeded`, `image_total_bytes_exceeded`, `image_mime_type_unsupported`, `image_base64_invalid`, `idempotency_payload_mismatch`) and uses a 75MiB HTTP body limit for base64 overhead.
+- Refactored service install management and Telegram polling/progress internals into smaller focused modules for maintainability with no behavior change.
 
 ### Fixed
 

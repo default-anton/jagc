@@ -4,20 +4,23 @@ import type { Bot } from 'grammy';
 import type { MessageEntity } from 'grammy/types';
 import type { Logger } from '../shared/logger.js';
 import type { RunProgressEvent } from '../shared/run-progress.js';
-import { normalizeTelegramMessageThreadId, type TelegramRoute } from '../shared/telegram-threading.js';
+import type { TelegramRoute } from '../shared/telegram-threading.js';
 import { extractTelegramRetryAfterSeconds, isTelegramMessageNotModifiedError } from './telegram-api-errors.js';
 import { renderTelegramText, type TelegramRenderedMessage } from './telegram-markdown.js';
 import {
-  appendTail,
+  callTelegramWithRetry,
+  deleteProgressMessage,
+  editProgressMessage,
+  sendProgressChatAction,
+  sendProgressMessage,
+} from './telegram-progress-api.js';
+import {
   isDeleteMessageGoneError,
   isEditMessageGoneError,
-  maxProgressToolLabelChars,
-  normalizePreviewDelta,
   pickProgressStartupLine,
-  summarizeToolLabel,
-  truncateLine,
   truncateMessage,
 } from './telegram-progress-helpers.js';
+import { TelegramProgressLog } from './telegram-progress-log.js';
 
 type ProgressPhase = 'queued' | 'running' | 'succeeded' | 'failed';
 
@@ -31,52 +34,14 @@ interface TelegramRunProgressReporterOptions {
   typingIntervalMs?: number;
 }
 
-interface ToolProgressState {
-  label: string;
-  startedAtMs: number;
-  lineIndex: number | null;
-}
-
-const defaultMessageLimit = 3500;
-const defaultMinEditIntervalMs = 1500;
-const defaultTypingIntervalMs = 4000;
-const archiveFlushMinChars = 1_800;
-const progressArchiveHeader = 'progress log (continued):';
-const maxThinkingPreviewChars = 240;
-const maxDeltaChars = 200;
-const minThinkingLogIntervalMs = 1_800;
-
-function formatToolCompletionLabel(options: { label: string; isError: boolean; durationMs: number | null }): string {
-  const status = options.isError ? '[✗] failed' : '[✓] done';
-  const duration = options.durationMs === null ? null : formatToolDuration(options.durationMs);
-  const durationSuffix = duration ? ` (${duration})` : '';
-  return `> ${options.label} ${status}${durationSuffix}`;
-}
-
-function formatToolDuration(durationMs: number): string {
-  const seconds = Math.max(0, durationMs) / 1000;
-  return `${seconds.toFixed(1)}s`;
-}
-
 export class TelegramRunProgressReporter {
   private readonly messageLimit: number;
   private readonly minEditIntervalMs: number;
   private readonly typingIntervalMs: number;
   private readonly startupLine = pickProgressStartupLine();
-
+  private readonly progressLog = new TelegramProgressLog();
   private phase: ProgressPhase = 'queued';
-  private showStartupLine = true;
   private terminalErrorMessage: string | null = null;
-
-  private lastThinkingLoggedAt = 0;
-  private thinkingPreview = '';
-  private hasPendingThinkingPreview = false;
-  private lastThinkingContentIndex: number | null = null;
-  private forceAppendNextThinkingLine = false;
-
-  private readonly toolProgressByCallId = new Map<string, ToolProgressState>();
-  private eventLogLines: string[] = [];
-  private pendingArchiveLines: string[] = [];
 
   private progressMessageId: number | null = null;
   private lastRenderedText = '';
@@ -84,18 +49,17 @@ export class TelegramRunProgressReporter {
   private lastEditAt = 0;
   private nextEditAllowedAt = 0;
   private nextTypingAllowedAt = 0;
-
   private renderTimer: NodeJS.Timeout | null = null;
   private renderInFlight = false;
   private pendingRender = false;
-
   private typingTimer: NodeJS.Timeout | null = null;
   private stopped = false;
 
   constructor(private readonly options: TelegramRunProgressReporterOptions) {
-    this.messageLimit = options.messageLimit ?? defaultMessageLimit;
-    this.minEditIntervalMs = options.minEditIntervalMs ?? defaultMinEditIntervalMs;
-    this.typingIntervalMs = options.typingIntervalMs ?? defaultTypingIntervalMs;
+    this.messageLimit = options.messageLimit ?? 3500;
+    this.minEditIntervalMs = options.minEditIntervalMs ?? 1500;
+    this.typingIntervalMs = options.typingIntervalMs ?? 4000;
+    this.progressLog.setMessageLimitHint(this.messageLimit);
   }
 
   async start(): Promise<void> {
@@ -106,7 +70,9 @@ export class TelegramRunProgressReporter {
     const initialRender = this.renderProgressMessage();
 
     try {
-      const message = await this.callWithRetry(() => this.sendMessage(initialRender.text, initialRender.entities));
+      const message = await callTelegramWithRetry(() =>
+        sendProgressMessage(this.options.bot, this.options.route, initialRender.text, initialRender.entities),
+      );
       this.progressMessageId = message.message_id;
       this.lastRenderedText = initialRender.text;
       this.lastRenderedEntitiesJson = JSON.stringify(initialRender.entities);
@@ -131,11 +97,7 @@ export class TelegramRunProgressReporter {
     let immediateRender = false;
 
     if (event.type !== 'assistant_thinking_delta') {
-      const shouldCloseThinkingSegment = this.hasPendingThinkingPreview || this.thinkingPreview.trim().length > 0;
-      immediateRender = this.flushThinkingPreviewToLog() || immediateRender;
-      if (shouldCloseThinkingSegment) {
-        this.markThinkingSegmentBoundary();
-      }
+      immediateRender = this.progressLog.closeThinkingSegmentIfNeeded() || immediateRender;
     }
 
     switch (event.type) {
@@ -146,93 +108,41 @@ export class TelegramRunProgressReporter {
       case 'started':
       case 'delivered':
       case 'agent_start':
-      case 'turn_start': {
-        this.phase = 'running';
-        break;
-      }
-      case 'turn_end': {
-        this.phase = 'running';
-        break;
-      }
-      case 'assistant_text_delta': {
+      case 'turn_start':
+      case 'turn_end':
+      case 'assistant_text_delta':
+      case 'tool_execution_update': {
         this.phase = 'running';
         break;
       }
       case 'assistant_thinking_delta': {
         this.phase = 'running';
-        const now = Date.now();
-
-        const delta = normalizePreviewDelta(event.delta);
-        if (delta.trim().length > 0) {
-          this.showStartupLine = false;
-
-          if (typeof event.contentIndex === 'number' && Number.isFinite(event.contentIndex)) {
-            if (this.lastThinkingContentIndex !== null && this.lastThinkingContentIndex !== event.contentIndex) {
-              immediateRender = this.flushThinkingPreviewToLog(now) || immediateRender;
-              this.markThinkingSegmentBoundary();
-            }
-
-            this.lastThinkingContentIndex = event.contentIndex;
-          }
-
-          this.thinkingPreview = appendTail(this.thinkingPreview, delta.slice(-maxDeltaChars), maxThinkingPreviewChars);
-          this.hasPendingThinkingPreview = true;
-          if (now - this.lastThinkingLoggedAt >= minThinkingLogIntervalMs) {
-            immediateRender = this.flushThinkingPreviewToLog(now) || immediateRender;
-          }
-        }
+        immediateRender = this.progressLog.onThinkingDelta(event.delta, event.contentIndex) || immediateRender;
         break;
       }
       case 'tool_execution_start': {
         this.phase = 'running';
-        this.showStartupLine = false;
-        const label = summarizeToolLabel(event.toolName, event.args);
-        const lineIndex = this.appendEventLogLine(`> ${label}`);
-        this.toolProgressByCallId.set(event.toolCallId, {
-          label,
-          startedAtMs: Date.now(),
-          lineIndex,
-        });
-        immediateRender = lineIndex !== null || immediateRender;
-        break;
-      }
-      case 'tool_execution_update': {
-        this.phase = 'running';
+        immediateRender =
+          this.progressLog.onToolExecutionStart(event.toolCallId, event.toolName, event.args) || immediateRender;
         break;
       }
       case 'tool_execution_end': {
         this.phase = 'running';
-        this.showStartupLine = false;
-
-        const toolState = this.toolProgressByCallId.get(event.toolCallId);
-        const label = toolState?.label ?? summarizeToolLabel(event.toolName, undefined);
-        const durationMs = toolState ? Date.now() - toolState.startedAtMs : null;
-        this.toolProgressByCallId.delete(event.toolCallId);
-
-        const completionLabel = formatToolCompletionLabel({
-          label,
-          isError: event.isError,
-          durationMs,
-        });
-
-        if (typeof toolState?.lineIndex === 'number') {
-          immediateRender = this.replaceEventLogLine(toolState.lineIndex, completionLabel) || immediateRender;
-        } else {
-          immediateRender = this.pushEventLogLine(completionLabel) || immediateRender;
-        }
+        immediateRender =
+          this.progressLog.onToolExecutionEnd(event.toolCallId, event.toolName, event.isError) || immediateRender;
         break;
       }
       case 'succeeded': {
         this.phase = 'succeeded';
         immediateRender = true;
-        this.toolProgressByCallId.clear();
+        this.progressLog.clearToolProgress();
         this.terminalErrorMessage = null;
         break;
       }
       case 'failed': {
         this.phase = 'failed';
         immediateRender = true;
-        this.toolProgressByCallId.clear();
+        this.progressLog.clearToolProgress();
         this.terminalErrorMessage = event.errorMessage;
         break;
       }
@@ -240,7 +150,8 @@ export class TelegramRunProgressReporter {
         if (this.phase !== 'succeeded' && this.phase !== 'failed') {
           this.phase = 'running';
         }
-        this.toolProgressByCallId.clear();
+
+        this.progressLog.clearToolProgress();
         break;
       }
     }
@@ -254,7 +165,7 @@ export class TelegramRunProgressReporter {
     }
 
     this.phase = 'succeeded';
-    this.toolProgressByCallId.clear();
+    this.progressLog.clearToolProgress();
     await this.finish();
   }
 
@@ -264,7 +175,7 @@ export class TelegramRunProgressReporter {
     }
 
     this.phase = 'failed';
-    this.toolProgressByCallId.clear();
+    this.progressLog.clearToolProgress();
     this.terminalErrorMessage = errorMessage;
     await this.finish();
   }
@@ -289,7 +200,7 @@ export class TelegramRunProgressReporter {
     this.scheduleRender(true);
     await this.flushRenderIfIdle();
 
-    if (this.pendingRender && this.pendingArchiveLines.length > 0) {
+    if (this.pendingRender && this.progressLog.hasPendingArchiveLines()) {
       const waitMs = Math.max(0, this.nextEditAllowedAt - Date.now());
       if (waitMs > 0) {
         await sleep(waitMs);
@@ -303,13 +214,7 @@ export class TelegramRunProgressReporter {
   }
 
   private shouldDeleteStartupOnlyProgressMessage(): boolean {
-    return (
-      this.phase === 'succeeded' &&
-      this.progressMessageId !== null &&
-      this.showStartupLine &&
-      this.eventLogLines.length === 0 &&
-      !this.hasPendingThinkingPreview
-    );
+    return this.progressMessageId !== null && this.progressLog.shouldDeleteStartupOnlyProgressMessage(this.phase);
   }
 
   private async deleteProgressMessage(): Promise<void> {
@@ -319,7 +224,7 @@ export class TelegramRunProgressReporter {
     }
 
     try {
-      await this.callWithRetry(() => this.deleteMessage(messageId));
+      await callTelegramWithRetry(() => deleteProgressMessage(this.options.bot, this.options.route, messageId));
     } catch (error) {
       if (!isDeleteMessageGoneError(error)) {
         this.options.logger.warn({
@@ -333,6 +238,7 @@ export class TelegramRunProgressReporter {
       if (this.progressMessageId === messageId) {
         this.progressMessageId = null;
       }
+
       this.lastRenderedText = '';
       this.lastRenderedEntitiesJson = '[]';
     }
@@ -376,11 +282,7 @@ export class TelegramRunProgressReporter {
       return;
     }
 
-    if (this.renderInFlight || !this.pendingRender) {
-      return;
-    }
-
-    if (this.progressMessageId === null) {
+    if (this.renderInFlight || !this.pendingRender || this.progressMessageId === null) {
       return;
     }
 
@@ -394,8 +296,23 @@ export class TelegramRunProgressReporter {
     let entitiesJson = this.lastRenderedEntitiesJson;
 
     try {
-      this.archiveOverflowEventLogLines();
-      await this.flushPendingArchiveLines(this.phase === 'succeeded' || this.phase === 'failed');
+      this.progressLog.archiveOverflowEventLogLines(
+        () =>
+          this.progressLog
+            .buildProgressLines({
+              phase: this.phase,
+              startupLine: this.startupLine,
+              terminalErrorMessage: this.terminalErrorMessage,
+            })
+            .join('\n').length,
+      );
+      await this.progressLog.flushPendingArchiveLines({
+        force: this.phase === 'succeeded' || this.phase === 'failed',
+        messageLimit: this.messageLimit,
+        sendChunk: async (text) => {
+          await callTelegramWithRetry(() => sendProgressMessage(this.options.bot, this.options.route, text, []));
+        },
+      });
 
       rendered = this.renderProgressMessage();
       entitiesJson = JSON.stringify(rendered.entities);
@@ -403,7 +320,13 @@ export class TelegramRunProgressReporter {
         return;
       }
 
-      await this.editMessageText(this.progressMessageId, rendered.text, rendered.entities);
+      await editProgressMessage(
+        this.options.bot,
+        this.options.route,
+        this.progressMessageId,
+        rendered.text,
+        rendered.entities,
+      );
       this.lastRenderedText = rendered.text;
       this.lastRenderedEntitiesJson = entitiesJson;
       this.lastEditAt = Date.now();
@@ -427,7 +350,7 @@ export class TelegramRunProgressReporter {
             message: error instanceof Error ? error.message : String(error),
           });
 
-          if (this.pendingArchiveLines.length > 0) {
+          if (this.progressLog.hasPendingArchiveLines()) {
             this.pendingRender = true;
           }
         }
@@ -442,7 +365,9 @@ export class TelegramRunProgressReporter {
 
   private async recreateProgressMessage(rendered: TelegramRenderedMessage, entitiesJson: string): Promise<void> {
     try {
-      const message = await this.callWithRetry(() => this.sendMessage(rendered.text, rendered.entities));
+      const message = await callTelegramWithRetry(() =>
+        sendProgressMessage(this.options.bot, this.options.route, rendered.text, rendered.entities),
+      );
       this.progressMessageId = message.message_id;
       this.lastRenderedText = rendered.text;
       this.lastRenderedEntitiesJson = entitiesJson;
@@ -487,7 +412,7 @@ export class TelegramRunProgressReporter {
     }
 
     try {
-      await this.sendChatAction('typing');
+      await sendProgressChatAction(this.options.bot, this.options.route, 'typing');
     } catch (error) {
       const retryAfterSeconds = extractTelegramRetryAfterSeconds(error);
       if (retryAfterSeconds !== null) {
@@ -504,51 +429,17 @@ export class TelegramRunProgressReporter {
     }
   }
 
-  private sendMessage(text: string, entities: MessageEntity[]): Promise<{ message_id: number }> {
-    const payload = {
-      ...routePayload(this.options.route),
-      text,
-      entities,
-    };
-
-    return this.options.bot.api.raw.sendMessage(payload) as Promise<{ message_id: number }>;
-  }
-
-  private editMessageText(messageId: number, text: string, entities: MessageEntity[]): Promise<unknown> {
-    const payload = {
-      ...routePayload(this.options.route),
-      message_id: messageId,
-      text,
-      entities,
-    };
-
-    return this.options.bot.api.raw.editMessageText(payload);
-  }
-
-  private deleteMessage(messageId: number): Promise<unknown> {
-    const payload = {
-      ...routePayload(this.options.route),
-      message_id: messageId,
-    };
-
-    return this.options.bot.api.raw.deleteMessage(payload);
-  }
-
-  private sendChatAction(action: 'typing'): Promise<unknown> {
-    const payload = {
-      ...routePayload(this.options.route),
-      action,
-    };
-
-    return this.options.bot.api.raw.sendChatAction(payload);
-  }
-
-  private renderProgressText(): string {
-    return this.renderTrimmedLines(this.buildProgressLines());
-  }
-
   private renderProgressMessage(): TelegramRenderedMessage {
-    const sourceLines = this.renderProgressText().split('\n');
+    const sourceLines = truncateMessage(
+      this.progressLog
+        .buildProgressLines({
+          phase: this.phase,
+          startupLine: this.startupLine,
+          terminalErrorMessage: this.terminalErrorMessage,
+        })
+        .join('\n'),
+      this.messageLimit,
+    ).split('\n');
     const renderedLines: string[] = [];
     const entities: MessageEntity[] = [];
 
@@ -595,185 +486,6 @@ export class TelegramRunProgressReporter {
     };
   }
 
-  private markThinkingSegmentBoundary(): void {
-    this.thinkingPreview = '';
-    this.hasPendingThinkingPreview = false;
-    this.lastThinkingContentIndex = null;
-    this.forceAppendNextThinkingLine = true;
-  }
-
-  private flushThinkingPreviewToLog(now = Date.now()): boolean {
-    if (!this.hasPendingThinkingPreview) {
-      return false;
-    }
-
-    const thinkingSnippet = truncateLine(this.thinkingPreview, 220);
-    if (thinkingSnippet.length === 0) {
-      this.hasPendingThinkingPreview = false;
-      this.lastThinkingLoggedAt = now;
-      this.forceAppendNextThinkingLine = false;
-      return false;
-    }
-
-    const line = truncateLine(`~ ${thinkingSnippet}`, maxProgressToolLabelChars);
-    const canReplaceLastThinkingLine = !this.forceAppendNextThinkingLine;
-    const lastIndex = this.eventLogLines.length - 1;
-    if (canReplaceLastThinkingLine && lastIndex >= 0 && this.eventLogLines[lastIndex]?.startsWith('~ ')) {
-      if (this.eventLogLines[lastIndex] !== line) {
-        this.eventLogLines[lastIndex] = line;
-        this.hasPendingThinkingPreview = false;
-        this.lastThinkingLoggedAt = now;
-        this.forceAppendNextThinkingLine = false;
-        return true;
-      }
-
-      this.hasPendingThinkingPreview = false;
-      this.lastThinkingLoggedAt = now;
-      this.forceAppendNextThinkingLine = false;
-      return false;
-    }
-
-    const appended = this.pushEventLogLine(line);
-    this.hasPendingThinkingPreview = false;
-    this.lastThinkingLoggedAt = now;
-    this.forceAppendNextThinkingLine = false;
-    return appended;
-  }
-
-  private pushEventLogLine(line: string): boolean {
-    return this.appendEventLogLine(line) !== null;
-  }
-
-  private appendEventLogLine(line: string): number | null {
-    const normalizedLine = truncateLine(line, maxProgressToolLabelChars);
-    if (normalizedLine.length === 0) {
-      return null;
-    }
-
-    const lastLine = this.eventLogLines[this.eventLogLines.length - 1];
-    if (lastLine === normalizedLine) {
-      return null;
-    }
-
-    this.eventLogLines.push(normalizedLine);
-    return this.eventLogLines.length - 1;
-  }
-
-  private replaceEventLogLine(index: number, line: string): boolean {
-    if (index < 0 || index >= this.eventLogLines.length) {
-      return false;
-    }
-
-    const normalizedLine = truncateLine(line, maxProgressToolLabelChars);
-    if (normalizedLine.length === 0) {
-      return false;
-    }
-
-    if (this.eventLogLines[index] === normalizedLine) {
-      return false;
-    }
-
-    this.eventLogLines[index] = normalizedLine;
-    return true;
-  }
-
-  private archiveOverflowEventLogLines(): void {
-    while (this.eventLogLines.length > 0 && this.renderProgressLength() > this.messageLimit) {
-      const archivedLine = this.eventLogLines.shift();
-      if (!archivedLine) {
-        break;
-      }
-
-      this.queueArchiveLine(archivedLine);
-      this.shiftTrackedToolLineIndexes(1);
-    }
-  }
-
-  private renderProgressLength(): number {
-    const lines = this.buildProgressLines();
-    return lines.join('\n').length;
-  }
-
-  private buildProgressLines(): string[] {
-    const lines: string[] = [];
-
-    if (this.showStartupLine) {
-      lines.push(this.startupLine);
-    }
-
-    lines.push(...this.eventLogLines);
-
-    if (this.phase === 'failed' && this.terminalErrorMessage) {
-      lines.push(`error: ${truncateLine(this.terminalErrorMessage, 240)}`);
-    }
-
-    if (lines.length === 0) {
-      lines.push('...');
-    }
-
-    return lines;
-  }
-
-  private shiftTrackedToolLineIndexes(removeCount: number): void {
-    if (removeCount <= 0) {
-      return;
-    }
-
-    for (const toolState of this.toolProgressByCallId.values()) {
-      if (toolState.lineIndex === null) {
-        continue;
-      }
-
-      const shiftedIndex = toolState.lineIndex - removeCount;
-      toolState.lineIndex = shiftedIndex >= 0 ? shiftedIndex : null;
-    }
-  }
-
-  private queueArchiveLine(line: string): void {
-    if (line.length === 0) {
-      return;
-    }
-
-    this.pendingArchiveLines.push(line);
-  }
-
-  private pendingArchiveLength(): number {
-    if (this.pendingArchiveLines.length === 0) {
-      return 0;
-    }
-
-    return this.pendingArchiveLines.join('\n').length;
-  }
-
-  private async flushPendingArchiveLines(force: boolean): Promise<void> {
-    if (this.pendingArchiveLines.length === 0) {
-      return;
-    }
-
-    if (!force && this.pendingArchiveLength() < archiveFlushMinChars) {
-      return;
-    }
-
-    const chunks = chunkArchiveLines(this.pendingArchiveLines, this.messageLimit, progressArchiveHeader);
-    if (chunks.length === 0) {
-      this.pendingArchiveLines = [];
-      return;
-    }
-
-    for (const chunk of chunks) {
-      await this.callWithRetry(() => this.sendMessage(chunk.text, []));
-      this.pendingArchiveLines.splice(0, chunk.lineCount);
-    }
-  }
-
-  private renderTrimmedLines(lines: string[]): string {
-    if (lines.length === 0) {
-      return '';
-    }
-
-    return truncateMessage(lines.join('\n'), this.messageLimit);
-  }
-
   private clearRenderTimer(): void {
     if (!this.renderTimer) {
       return;
@@ -782,90 +494,4 @@ export class TelegramRunProgressReporter {
     clearTimeout(this.renderTimer);
     this.renderTimer = null;
   }
-
-  private async callWithRetry<T>(operation: () => Promise<T>, maxAttempts = 3): Promise<T> {
-    let attempt = 0;
-
-    while (true) {
-      try {
-        return await operation();
-      } catch (error) {
-        const retryAfterSeconds = extractTelegramRetryAfterSeconds(error);
-        if (retryAfterSeconds === null || attempt >= maxAttempts - 1) {
-          throw error;
-        }
-
-        attempt += 1;
-        await sleep(Math.ceil(retryAfterSeconds * 1000));
-      }
-    }
-  }
-}
-
-function routePayload(route: TelegramRoute): { chat_id: number; message_thread_id?: number } {
-  const messageThreadId = normalizeTelegramMessageThreadId(route.messageThreadId);
-
-  return {
-    chat_id: route.chatId,
-    ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
-  };
-}
-
-interface ArchiveChunk {
-  text: string;
-  lineCount: number;
-}
-
-function chunkArchiveLines(lines: string[], maxLength: number, header: string): ArchiveChunk[] {
-  if (lines.length === 0) {
-    return [];
-  }
-
-  const chunks: ArchiveChunk[] = [];
-  let current = '';
-  let currentLineCount = 0;
-
-  const headerPrefix = `${header}\n`;
-
-  for (const line of lines) {
-    const normalizedLine = truncateLine(line, maxProgressToolLabelChars);
-    if (normalizedLine.length === 0) {
-      continue;
-    }
-
-    const withLine = current.length === 0 ? normalizedLine : `${current}\n${normalizedLine}`;
-    const wrappedWithLine = `${headerPrefix}${withLine}`;
-
-    if (wrappedWithLine.length <= maxLength) {
-      current = withLine;
-      currentLineCount += 1;
-      continue;
-    }
-
-    if (current.length > 0) {
-      chunks.push({
-        text: truncateMessage(`${headerPrefix}${current}`, maxLength),
-        lineCount: currentLineCount,
-      });
-      current = normalizedLine;
-      currentLineCount = 1;
-      continue;
-    }
-
-    chunks.push({
-      text: truncateMessage(`${headerPrefix}${normalizedLine}`, maxLength),
-      lineCount: 1,
-    });
-    current = '';
-    currentLineCount = 0;
-  }
-
-  if (current.length > 0) {
-    chunks.push({
-      text: truncateMessage(`${headerPrefix}${current}`, maxLength),
-      lineCount: currentLineCount,
-    });
-  }
-
-  return chunks;
 }
