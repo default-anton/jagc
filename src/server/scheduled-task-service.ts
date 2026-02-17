@@ -505,37 +505,50 @@ export class ScheduledTaskService {
 
     const instructions = buildTaskRunInstructions(task, taskRun.scheduledFor);
 
-    const ingested = await this.runService.ingestMessage({
-      source: `task:${task.taskId}`,
-      threadKey: task.executionThreadKey,
-      userKey: task.ownerUserKey ?? undefined,
-      text: instructions,
-      deliveryMode: 'followUp',
-      idempotencyKey: taskRun.idempotencyKey,
-    });
+    try {
+      const ingested = await this.runService.ingestMessage({
+        source: `task:${task.taskId}`,
+        threadKey: task.executionThreadKey,
+        userKey: task.ownerUserKey ?? undefined,
+        text: instructions,
+        deliveryMode: 'followUp',
+        idempotencyKey: taskRun.idempotencyKey,
+      });
 
-    this.logger.info({
-      event: 'scheduled_task_dispatch_ingest_result',
-      task_id: task.taskId,
-      task_run_id: taskRun.taskRunId,
-      run_id: ingested.run.runId,
-      run_status: ingested.run.status,
-      deduplicated: ingested.deduplicated,
-      execution_thread_key: task.executionThreadKey,
-    });
+      this.logger.info({
+        event: 'scheduled_task_dispatch_ingest_result',
+        task_id: task.taskId,
+        task_run_id: taskRun.taskRunId,
+        run_id: ingested.run.runId,
+        run_status: ingested.run.status,
+        deduplicated: ingested.deduplicated,
+        execution_thread_key: task.executionThreadKey,
+      });
 
-    if (ingested.run.status === 'running') {
-      await this.store.markTaskRunDispatched(taskRun.taskRunId, ingested.run.runId);
-      await this.deliverRunBestEffort(task, ingested.run.runId);
+      if (ingested.run.status === 'running') {
+        await this.store.markTaskRunDispatched(taskRun.taskRunId, ingested.run.runId);
+        await this.deliverRunBestEffort(task, ingested.run.runId);
+        return;
+      }
+
+      if (ingested.run.status === 'succeeded') {
+        await this.store.markTaskRunTerminal(taskRun.taskRunId, 'succeeded', null);
+        return;
+      }
+
+      await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', ingested.run.errorMessage ?? 'run failed');
+    } catch (error) {
+      const failureMessage = toErrorMessage(error);
+      await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', failureMessage);
+      this.logger.error({
+        event: 'scheduled_task_dispatch_ingest_failed',
+        task_id: task.taskId,
+        task_run_id: taskRun.taskRunId,
+        execution_thread_key: task.executionThreadKey,
+        error_message: failureMessage,
+      });
       return;
     }
-
-    if (ingested.run.status === 'succeeded') {
-      await this.store.markTaskRunTerminal(taskRun.taskRunId, 'succeeded', null);
-      return;
-    }
-
-    await this.store.markTaskRunTerminal(taskRun.taskRunId, 'failed', ingested.run.errorMessage ?? 'run failed');
   }
 
   private async ensureExecutionThread(task: ScheduledTaskRecord): Promise<ScheduledTaskRecord> {

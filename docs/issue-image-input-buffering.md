@@ -255,18 +255,18 @@ Include `source`, `thread_key`, `run_id` (when present), and reason/error code f
 
 ### Phase 1: API + CLI + runtime pass-through
 
-- [ ] Add migration `005_input_images.sql` (new table + constraints + indexes).
-- [ ] Extend shared API contracts/types for image input shape.
-- [ ] Add store APIs:
-  - [ ] persist run-bound images,
-  - [ ] list run images,
-  - [ ] delete run images after delivery,
-  - [ ] purge expired images.
-- [ ] Wire purge calls on API/CLI ingest paths.
-- [ ] Update runtime submit path to include images in pi SDK calls.
-- [ ] Delete run images immediately after successful delivery call return.
-- [ ] Add CLI `-i/--image` options and payload construction.
-- [ ] Set Fastify `bodyLimit` to 75MiB.
+- [x] Add migration `005_input_images.sql` (new table + constraints + indexes).
+- [x] Extend shared API contracts/types for image input shape.
+- [x] Add store APIs:
+  - [x] persist run-bound images,
+  - [x] list run images,
+  - [x] delete run images after delivery,
+  - [x] purge expired images.
+- [x] Wire purge calls on API/CLI ingest paths.
+- [x] Update runtime submit path to include images in pi SDK calls.
+- [x] Delete run images immediately after successful delivery call return.
+- [x] Add CLI `-i/--image` options and payload construction.
+- [x] Set Fastify `bodyLimit` to 75MiB.
 
 ### Phase 2: Telegram DB-backed buffering
 

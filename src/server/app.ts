@@ -26,11 +26,18 @@ import {
   runParamsSchema,
   submitOAuthLoginInputRequestSchema,
 } from '../shared/api-contracts.js';
+import {
+  type DecodedInputImage,
+  decodeAndValidateApiInputImages,
+  InputImageValidationError,
+  messageIngressBodyLimitBytes,
+} from '../shared/input-images.js';
 import type { RunRecord } from '../shared/run-types.js';
 import { registerTaskRoutes } from './app-task-routes.js';
 import { registerThreadRoutes } from './app-thread-routes.js';
 import type { ScheduledTaskService } from './scheduled-task-service.js';
 import type { RunService } from './service.js';
+import { IdempotencyPayloadMismatchError } from './store.js';
 
 const idempotencyHeaderSchema = z.string().trim().min(1).optional();
 const oauthOwnerKeySchema = z.string().trim().min(1);
@@ -56,12 +63,17 @@ interface AppOptions {
 }
 
 export function createApp(options: AppOptions): FastifyInstance {
+  const baseOptions = {
+    bodyLimit: messageIngressBodyLimitBytes,
+  };
+
   const app = options.logger
     ? Fastify({
+        ...baseOptions,
         loggerInstance: options.logger,
         disableRequestLogging: true,
       })
-    : Fastify({ logger: false });
+    : Fastify({ ...baseOptions, logger: false });
 
   const requestStartedAt = new WeakMap<object, bigint>();
 
@@ -125,16 +137,48 @@ export function createApp(options: AppOptions): FastifyInstance {
         );
     }
 
-    const result = await options.runService.ingestMessage({
-      source: body.source,
-      threadKey: body.thread_key,
-      userKey: body.user_key,
-      text: body.text,
-      deliveryMode: body.delivery_mode,
-      idempotencyKey: body.idempotency_key ?? headerResult.data,
-    });
+    let decodedImages: DecodedInputImage[] = [];
+    try {
+      decodedImages = decodeAndValidateApiInputImages(body.images);
+    } catch (error) {
+      if (error instanceof InputImageValidationError) {
+        request.log.warn({
+          event: 'message_ingest_rejected',
+          reason: error.code,
+          source: body.source,
+          thread_key: body.thread_key,
+        });
+        return reply.status(400).send(errorResponse(error.code, error.message));
+      }
 
-    return reply.status(202).send(runResponse(result.run));
+      throw error;
+    }
+
+    try {
+      const result = await options.runService.ingestMessage({
+        source: body.source,
+        threadKey: body.thread_key,
+        userKey: body.user_key,
+        text: body.text,
+        deliveryMode: body.delivery_mode,
+        idempotencyKey: body.idempotency_key ?? headerResult.data,
+        images: decodedImages,
+      });
+
+      return reply.status(202).send(runResponse(result.run));
+    } catch (error) {
+      if (error instanceof IdempotencyPayloadMismatchError) {
+        request.log.warn({
+          event: 'message_ingest_rejected',
+          reason: 'idempotency_payload_mismatch',
+          source: body.source,
+          thread_key: body.thread_key,
+        });
+        return reply.status(409).send(errorResponse('idempotency_payload_mismatch', error.message));
+      }
+
+      throw error;
+    }
   });
 
   app.get('/v1/runs/:run_id', async (request, reply) => {

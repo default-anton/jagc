@@ -466,10 +466,25 @@ function extractErrorMessage(responseBody: object): string {
     return 'request failed';
   }
 
-  const error = responseBody.error;
-  if (!error || typeof error !== 'object') {
+  const errorObject = responseBody.error;
+  if (!errorObject || typeof errorObject !== 'object') {
     return 'request failed';
   }
 
-  return 'message' in error && typeof error.message === 'string' ? error.message : 'request failed';
+  const message = 'message' in errorObject && typeof errorObject.message === 'string' ? errorObject.message : null;
+  const code = 'code' in errorObject && typeof errorObject.code === 'string' ? errorObject.code : null;
+
+  if (code && message) {
+    return `${code}: ${message}`;
+  }
+
+  if (message) {
+    return message;
+  }
+
+  if (code) {
+    return code;
+  }
+
+  return 'request failed';
 }

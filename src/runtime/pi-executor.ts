@@ -9,12 +9,15 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   ModelRegistry,
+  type PromptOptions,
   SessionManager,
   SettingsManager,
   type ToolDefinition,
 } from '@mariozechner/pi-coding-agent';
 import type { RunExecutor } from '../server/executor.js';
-import type { RunStore } from '../server/store.js';
+import type { RunInputImageRecord, RunStore } from '../server/store.js';
+import type { Logger } from '../shared/logger.js';
+import { noopLogger } from '../shared/logger.js';
 import type { RunProgressEvent, RunProgressListener } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 import { ThreadRunController } from './thread-run-controller.js';
@@ -23,6 +26,7 @@ import { createThreadScopedBashToolDefinition } from './thread-scoped-bash-tool.
 interface PiExecutorOptions {
   workspaceDir: string;
   sessionDir?: string;
+  logger?: Logger;
 }
 
 export const supportedThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
@@ -77,6 +81,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly settingsManager: SettingsManager;
+  private readonly logger: Logger;
   private readonly threadGeneration = new Map<string, number>();
   private readonly resetInFlight = new Map<string, Promise<void>>();
   private runProgressListener: RunProgressListener | null = null;
@@ -89,6 +94,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     this.authStorage = new AuthStorage(join(options.workspaceDir, 'auth.json'));
     this.modelRegistry = new ModelRegistry(this.authStorage, join(options.workspaceDir, 'models.json'));
     this.settingsManager = SettingsManager.create(options.workspaceDir, options.workspaceDir);
+    this.logger = options.logger ?? noopLogger;
   }
 
   async execute(run: RunRecord): Promise<RunOutput> {
@@ -288,6 +294,20 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
           onProgress: (event) => {
             this.handleRunProgressEvent(event);
           },
+          loadRunImages: async (run) => toPromptImages(await this.runStore.listRunInputImages(run.runId)),
+          onDeliverySucceeded: async (run) => {
+            try {
+              await this.runStore.deleteRunInputImages(run.runId);
+            } catch (error) {
+              this.logger.warn({
+                event: 'run_input_images_cleanup_failed',
+                run_id: run.runId,
+                thread_key: run.threadKey,
+                source: run.source,
+                error_message: errorMessage(error),
+              });
+            }
+          },
         });
 
         try {
@@ -478,6 +498,16 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       throw new ThreadGenerationMismatchError(threadKey);
     }
   }
+}
+
+type SessionInputImage = NonNullable<PromptOptions['images']>[number];
+
+function toPromptImages(images: RunInputImageRecord[]): SessionInputImage[] {
+  return images.map((image) => ({
+    type: 'image',
+    data: image.imageBytes.toString('base64'),
+    mimeType: image.mimeType,
+  }));
 }
 
 const defaultShareViewerUrl = 'https://pi.dev/session/';

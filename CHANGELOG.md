@@ -13,15 +13,16 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added phase-1 image input support across API/CLI/runtime with temporary SQLite staging in new `input_images` storage, including `jagc message -i/--image` and `/v1/messages` `images[]` payload support.
 
 ### Changed
 
 - Telegram now adds a best-effort random emoji reaction on inbound assistant-bound user messages (`followUp`/`steer`) while preserving the existing typing indicator/progress flow.
+- `/v1/messages` now enforces image ingest limits and stable validation/conflict codes (`image_count_exceeded`, `image_total_bytes_exceeded`, `image_mime_type_unsupported`, `image_base64_invalid`, `idempotency_payload_mismatch`) and uses a 75MiB HTTP body limit for base64 overhead.
 
 ### Fixed
 
-- None.
+- Scheduled-task dispatch now traps ingest failures (including idempotency payload conflicts) and marks task runs failed instead of leaving background unhandled rejections.
 
 ## [0.4.0] - 2026-02-16
 

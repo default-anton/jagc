@@ -46,7 +46,7 @@ async function main(): Promise<void> {
 
   await runMigrations(database);
 
-  const runStore = new SqliteRunStore(database);
+  const runStore = new SqliteRunStore(database, rootLogger.child({ component: 'run_store' }));
 
   let runExecutor: RunExecutor;
   let threadControlService: ThreadControlService | undefined;
@@ -56,6 +56,7 @@ async function main(): Promise<void> {
   } else {
     const piRunExecutor = new PiRunExecutor(runStore, {
       workspaceDir: config.JAGC_WORKSPACE_DIR,
+      logger: rootLogger.child({ component: 'run_executor' }),
     });
 
     runExecutor = piRunExecutor;

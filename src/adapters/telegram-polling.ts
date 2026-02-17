@@ -644,7 +644,7 @@ export class TelegramPollingAdapter {
   }
 }
 
-function pickWorkingReaction(randomSource: () => number = Math.random): string {
+function pickWorkingReaction(randomSource: () => number = Math.random): (typeof telegramWorkingReactionEmojis)[number] {
   const fallbackEmoji = telegramWorkingReactionEmojis[0] ?? '👍';
   const randomIndex = Math.floor(randomSource() * telegramWorkingReactionEmojis.length);
   return telegramWorkingReactionEmojis[randomIndex] ?? fallbackEmoji;

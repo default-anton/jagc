@@ -313,6 +313,21 @@ class InMemoryRunStore implements RunStore {
     });
   }
 
+  async listRunInputImages(_runId: string) {
+    return [];
+  }
+
+  async deleteRunInputImages(_runId: string): Promise<number> {
+    return 0;
+  }
+
+  async purgeExpiredInputImages(): Promise<{ deletedCount: number; deletedBoundCount: number }> {
+    return {
+      deletedCount: 0,
+      deletedBoundCount: 0,
+    };
+  }
+
   async getThreadSession(_threadKey: string): Promise<ThreadSessionRecord | null> {
     return null;
   }

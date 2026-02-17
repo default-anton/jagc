@@ -31,6 +31,7 @@ export function useSqliteTestDb(): SqliteTestDb {
 
 function resetDatabase(database: SqliteDatabase): void {
   database.exec(`
+    DELETE FROM input_images;
     DELETE FROM message_ingest;
     DELETE FROM thread_sessions;
     DELETE FROM scheduled_task_runs;

@@ -29,7 +29,7 @@ This doc is the implementation snapshot (not design intent).
 - Executors: `echo` (deterministic), `pi` (real agent)
 - `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts` (runtime/harness context, global AGENTS hierarchy, available skills metadata, local pi docs/examples paths, and Codex harness notes)
 - Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/delete`, `/share`, `/model`, `/thinking`, `/auth` and pass-through for unknown slash commands (for prompt-template packages like `/handoff`)
-- SQLite persistence (`runs`, ingest idempotency, `thread_sessions`)
+- SQLite persistence (`runs`, ingest idempotency + payload hash, `thread_sessions`, temporary `input_images`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
 - Structured Pino JSON logging with component-scoped child loggers shared across server/runtime/adapters
 - HTTP request completion/error events are emitted from Fastify hooks with request IDs and duration fields
@@ -69,7 +69,15 @@ This doc is the implementation snapshot (not design intent).
 
 - `src/server/app.ts` validates payload.
 - Header/body idempotency key mismatch returns `400`.
+- Optional `images[]` payload (`mime_type`, `data_base64`, optional `filename`) is validated with stable error codes:
+  - `image_count_exceeded` (max 10)
+  - `image_total_bytes_exceeded` (max 50MiB decoded)
+  - `image_mime_type_unsupported` (`image/jpeg|image/png|image/webp|image/gif`)
+  - `image_base64_invalid`
+- Fastify body limit is set to 75MiB for `/v1/messages`; decoded-size validation remains authoritative at 50MiB.
 - `RunService.ingestMessage(...)` writes/gets run via `RunStore.createRun(...)`.
+- Ingest-triggered cleanup purges expired `input_images` rows (pending or run-bound, 3-day TTL) without cron/background workers.
+- Same `idempotency_key` with mismatched canonical payload (`thread_key`, `text`, `delivery_mode`, images) returns `409 idempotency_payload_mismatch`.
 - Non-deduplicated runs are enqueued into the in-process run scheduler.
 - Response is a normalized run envelope (`run_id`, `status`, `output`, `error`) with `202`.
 
@@ -130,8 +138,9 @@ This doc is the implementation snapshot (not design intent).
 
 `ThreadRunController` coordinates same-thread turns against a single pi session:
 
-- First active run uses `session.prompt(...)`.
-- Additional same-thread runs queue via `session.followUp(...)` or `session.steer(...)`.
+- First active run uses `session.prompt(...)`, including optional run-linked images.
+- Additional same-thread runs queue via `session.followUp(...)` or `session.steer(...)`, including optional run-linked images.
+- Run-linked images are loaded from `input_images` immediately before submission, and deleted immediately after the corresponding submission call returns successfully (`prompt`/`followUp`/`steer`).
 - Run completion attribution comes from session events (not prompt promise timing), using user/assistant boundary events.
 
 Operational note:
@@ -196,7 +205,7 @@ Operational note:
 
 - API schemas: `src/shared/api-contracts.ts` (used by server + CLI)
 - Run progress event contract: `src/shared/run-progress.ts`
-- Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`, `migrations/003_scheduled_tasks.sql`
+- Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`, `migrations/003_scheduled_tasks.sql`, `migrations/004_scheduled_tasks_rrule.sql`, `migrations/005_input_images.sql`
 - Migration runner: `src/server/migrations.ts` (`schema_migrations`; startup apply runs in a SQLite `BEGIN IMMEDIATE` transaction to avoid concurrent bootstrap races)
 
 ## Known gaps / intentional limitations

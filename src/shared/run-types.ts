@@ -1,4 +1,5 @@
 import type { PromptOptions } from '@mariozechner/pi-coding-agent';
+import type { DecodedInputImage } from './input-images.js';
 
 export const runStatuses = ['running', 'succeeded', 'failed'] as const;
 export const deliveryModes = ['steer', 'followUp'] as const satisfies readonly NonNullable<
@@ -30,4 +31,5 @@ export interface MessageIngest {
   text: string;
   deliveryMode: DeliveryMode;
   idempotencyKey?: string;
+  images?: DecodedInputImage[];
 }

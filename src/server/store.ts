@@ -1,6 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { hashMessageIngestPayload } from '../shared/input-images.js';
+import type { Logger } from '../shared/logger.js';
+import { noopLogger } from '../shared/logger.js';
 import type { DeliveryMode, MessageIngest, RunOutput, RunRecord } from '../shared/run-types.js';
 import type { SqliteDatabase } from './sqlite.js';
+import {
+  type ImageLogContext,
+  type PurgeExpiredInputImagesResult,
+  type RunInputImageRecord,
+  RunInputImageStore,
+} from './store-input-images.js';
+
+export type { ImageLogContext, PurgeExpiredInputImagesResult, RunInputImageRecord } from './store-input-images.js';
 
 interface RunRow {
   run_id: string;
@@ -24,6 +35,10 @@ interface ThreadSessionRow {
   updated_at: string;
 }
 
+interface MessageIngestPayloadRow {
+  payload_hash: string | null;
+}
+
 export interface ThreadSessionRecord {
   threadKey: string;
   sessionId: string;
@@ -37,6 +52,16 @@ export interface CreateRunResult {
   deduplicated: boolean;
 }
 
+export class IdempotencyPayloadMismatchError extends Error {
+  constructor(
+    readonly source: string,
+    readonly idempotencyKey: string,
+  ) {
+    super('idempotency key already exists with a different payload');
+    this.name = 'IdempotencyPayloadMismatchError';
+  }
+}
+
 export interface RunStore {
   init(): Promise<void>;
   createRun(message: MessageIngest): Promise<CreateRunResult>;
@@ -44,31 +69,47 @@ export interface RunStore {
   listRunningRuns(limit?: number): Promise<RunRecord[]>;
   markSucceeded(runId: string, output: RunOutput): Promise<void>;
   markFailed(runId: string, errorMessage: string): Promise<void>;
+  listRunInputImages(runId: string): Promise<RunInputImageRecord[]>;
+  deleteRunInputImages(runId: string): Promise<number>;
+  purgeExpiredInputImages(context?: ImageLogContext): Promise<PurgeExpiredInputImagesResult>;
   getThreadSession(threadKey: string): Promise<ThreadSessionRecord | null>;
   upsertThreadSession(threadKey: string, sessionId: string, sessionFile: string): Promise<ThreadSessionRecord>;
   deleteThreadSession(threadKey: string): Promise<void>;
 }
 
 export class SqliteRunStore implements RunStore {
-  constructor(private readonly database: SqliteDatabase) {}
+  private readonly runInputImages: RunInputImageStore;
+
+  constructor(
+    private readonly database: SqliteDatabase,
+    logger: Logger = noopLogger,
+  ) {
+    this.runInputImages = new RunInputImageStore(database, logger);
+  }
 
   async init(): Promise<void> {}
 
   async createRun(message: MessageIngest): Promise<CreateRunResult> {
-    const create = this.database.transaction((input: MessageIngest): CreateRunResult => {
-      if (input.idempotencyKey) {
-        const existingRun = this.getRunByIdempotency(input.source, input.idempotencyKey);
-        if (existingRun) {
-          return {
-            run: existingRun,
-            deduplicated: true,
-          };
-        }
+    const payloadHash = hashMessageIngestPayload({
+      threadKey: message.threadKey,
+      text: message.text,
+      deliveryMode: message.deliveryMode,
+      images: message.images ?? [],
+    });
+
+    const create = this.database.transaction((input: MessageIngest, canonicalPayloadHash: string): CreateRunResult => {
+      const now = nowIsoTimestamp();
+      this.runInputImages.purgeExpiredInputImagesTx(now, {
+        source: input.source,
+        threadKey: input.threadKey,
+      });
+
+      const deduplicated = this.resolveIdempotentRun(input, canonicalPayloadHash);
+      if (deduplicated) {
+        return deduplicated;
       }
 
       const runId = randomUUID();
-      const now = nowIsoTimestamp();
-
       this.database
         .prepare(
           `
@@ -78,15 +119,17 @@ export class SqliteRunStore implements RunStore {
         )
         .run(runId, input.source, input.threadKey, input.userKey ?? null, input.deliveryMode, input.text, now, now);
 
+      this.runInputImages.insertRunInputImages(runId, input, now);
+
       if (input.idempotencyKey) {
         this.database
           .prepare(
             `
-              INSERT INTO message_ingest (source, idempotency_key, run_id, created_at)
-              VALUES (?, ?, ?, ?)
+              INSERT INTO message_ingest (source, idempotency_key, run_id, payload_hash, created_at)
+              VALUES (?, ?, ?, ?, ?)
             `,
           )
-          .run(input.source, input.idempotencyKey, runId, now);
+          .run(input.source, input.idempotencyKey, runId, canonicalPayloadHash, now);
       }
 
       const run = this.getRunById(runId);
@@ -101,15 +144,12 @@ export class SqliteRunStore implements RunStore {
     });
 
     try {
-      return create(message);
+      return create(message, payloadHash);
     } catch (error) {
       if (message.idempotencyKey && isSqliteConstraintViolation(error)) {
-        const existingRun = this.getRunByIdempotency(message.source, message.idempotencyKey);
-        if (existingRun) {
-          return {
-            run: existingRun,
-            deduplicated: true,
-          };
+        const deduplicated = this.resolveIdempotentRun(message, payloadHash);
+        if (deduplicated) {
+          return deduplicated;
         }
       }
 
@@ -174,6 +214,18 @@ export class SqliteRunStore implements RunStore {
     }
   }
 
+  async listRunInputImages(runId: string): Promise<RunInputImageRecord[]> {
+    return this.runInputImages.listRunInputImages(runId);
+  }
+
+  async deleteRunInputImages(runId: string): Promise<number> {
+    return this.runInputImages.deleteRunInputImages(runId);
+  }
+
+  async purgeExpiredInputImages(context?: ImageLogContext): Promise<PurgeExpiredInputImagesResult> {
+    return this.runInputImages.purgeExpiredInputImages(context);
+  }
+
   async getThreadSession(threadKey: string): Promise<ThreadSessionRecord | null> {
     const row = this.database
       .prepare<unknown[], ThreadSessionRow>('SELECT * FROM thread_sessions WHERE thread_key = ?')
@@ -210,6 +262,58 @@ export class SqliteRunStore implements RunStore {
 
   async deleteThreadSession(threadKey: string): Promise<void> {
     this.database.prepare('DELETE FROM thread_sessions WHERE thread_key = ?').run(threadKey);
+  }
+
+  private resolveIdempotentRun(input: MessageIngest, payloadHash: string): CreateRunResult | null {
+    if (!input.idempotencyKey) {
+      return null;
+    }
+
+    const existingRun = this.getRunByIdempotency(input.source, input.idempotencyKey);
+    if (!existingRun) {
+      return null;
+    }
+
+    if (!this.isIdempotencyPayloadMatch(input, payloadHash, existingRun)) {
+      throw new IdempotencyPayloadMismatchError(input.source, input.idempotencyKey);
+    }
+
+    return {
+      run: existingRun,
+      deduplicated: true,
+    };
+  }
+
+  private isIdempotencyPayloadMatch(input: MessageIngest, payloadHash: string, existingRun: RunRecord): boolean {
+    if (!input.idempotencyKey) {
+      return true;
+    }
+
+    const row = this.database
+      .prepare<unknown[], MessageIngestPayloadRow>(
+        `
+          SELECT payload_hash
+          FROM message_ingest
+          WHERE source = ? AND idempotency_key = ?
+        `,
+      )
+      .get(input.source, input.idempotencyKey);
+
+    if (row?.payload_hash) {
+      return row.payload_hash === payloadHash;
+    }
+
+    if (existingRun.threadKey !== input.threadKey) {
+      return false;
+    }
+    if (existingRun.inputText !== input.text) {
+      return false;
+    }
+    if (existingRun.deliveryMode !== input.deliveryMode) {
+      return false;
+    }
+
+    return (input.images?.length ?? 0) === 0;
   }
 
   private getRunById(runId: string): RunRecord | null {

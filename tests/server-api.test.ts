@@ -360,6 +360,189 @@ describe('server API', () => {
     await app.close();
   });
 
+  test('POST /v1/messages accepts images payload and persists run image rows', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        images: [apiImage('one', 'image/png', 'one.png'), apiImage('two', 'image/jpeg', 'two.jpg')],
+      },
+    });
+
+    expect(response.statusCode).toBe(202);
+    const runId = response.json().run_id as string;
+
+    const rows = testDb.database
+      .prepare<
+        unknown[],
+        {
+          position: number;
+          mime_type: string;
+          filename: string | null;
+        }
+      >('SELECT position, mime_type, filename FROM input_images WHERE run_id = ? ORDER BY position ASC')
+      .all(runId);
+
+    expect(rows).toEqual([
+      { position: 0, mime_type: 'image/png', filename: 'one.png' },
+      { position: 1, mime_type: 'image/jpeg', filename: 'two.jpg' },
+    ]);
+
+    await app.close();
+  });
+
+  test('returns 400 for invalid image mime type', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        images: [apiImage('one', 'text/plain', 'one.txt')],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'image_mime_type_unsupported',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('returns 400 for invalid image base64', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        images: [
+          {
+            mime_type: 'image/png',
+            data_base64: '***',
+            filename: 'bad.png',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'image_base64_invalid',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('returns 400 for base64 payload with surrounding whitespace', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        images: [
+          {
+            mime_type: 'image/png',
+            data_base64: ` ${Buffer.from('ok').toString('base64')} `,
+            filename: 'bad-whitespace.png',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'image_base64_invalid',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('returns 400 when image count exceeds limit', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        images: Array.from({ length: 11 }, (_, index) => apiImage(`img-${index}`, 'image/png', `img-${index}.png`)),
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'image_count_exceeded',
+      },
+    });
+
+    await app.close();
+  });
+
+  test('returns 409 for idempotency payload mismatch when images differ', async () => {
+    const { app } = await createTestApp(new TestExecutor());
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        idempotency_key: 'idem-image',
+        images: [apiImage('one', 'image/png', 'one.png')],
+      },
+    });
+
+    expect(first.statusCode).toBe(202);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/messages',
+      payload: {
+        source: 'cli',
+        thread_key: 'cli:images',
+        text: 'describe',
+        idempotency_key: 'idem-image',
+        images: [apiImage('two', 'image/png', 'one.png')],
+      },
+    });
+
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toMatchObject({
+      error: {
+        code: 'idempotency_payload_mismatch',
+      },
+    });
+
+    await app.close();
+  });
+
   test('returns 400 when body/header idempotency keys differ', async () => {
     const { app } = await createTestApp(new TestExecutor());
 
@@ -949,5 +1132,21 @@ async function createTestApp(
     runStore,
     scheduledTaskStore,
     scheduledTaskService,
+  };
+}
+
+function apiImage(
+  data: string,
+  mimeType: string,
+  filename: string,
+): {
+  mime_type: string;
+  data_base64: string;
+  filename: string;
+} {
+  return {
+    mime_type: mimeType,
+    data_base64: Buffer.from(data).toString('base64'),
+    filename,
   };
 }

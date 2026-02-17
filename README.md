@@ -119,6 +119,7 @@ The CLI is intentionally built so **jagc can inspect, fix, and adapt itself** (w
 ```bash
 jagc --version
 jagc message "ping" --json
+jagc message "describe these" -i ./a.jpg -i ./b.png --json
 jagc run wait <run_id> --json
 jagc cancel --thread-key cli:default --json
 jagc new --thread-key cli:default --json
@@ -149,10 +150,12 @@ jagc share --thread-key cli:default --json
 - Thread→session persistence (`thread_key -> session`) survives process restarts
 - Same-thread turn ordering enforced by per-thread pi session controller
 - Structured run payload contract (`output` is structured; not plain-text-only)
+- Temporary run-linked image staging in SQLite `input_images` (purged on ingest-triggered TTL cleanup; deleted after successful pi message submission)
 
 ### API
 
 - Health/lifecycle: `GET /healthz`, `POST /v1/messages`, `GET /v1/runs/:run_id`
+- `POST /v1/messages` supports optional `images[]` (`mime_type`, `data_base64`, optional `filename`) with consistent limits: max 10 images, max 50MiB decoded total, allowed MIME types `image/jpeg|image/png|image/webp|image/gif`, and `idempotency_payload_mismatch` conflict (`409`) on same-key/different-payload retries
 - Scheduled tasks: `POST /v1/threads/:thread_key/tasks`, `GET /v1/tasks`, `GET /v1/tasks/:task_id`, `PATCH /v1/tasks/:task_id`, `DELETE /v1/tasks/:task_id`, `POST /v1/tasks/:task_id/run-now`
 - Runtime controls: cancel/new/share/model/thinking endpoints
 - OAuth broker endpoints for provider login flows

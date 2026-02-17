@@ -5,6 +5,12 @@ export const deliveryModeSchema = z.enum(deliveryModes);
 export const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 export const thinkingLevelSchema = z.enum(thinkingLevels);
 
+export const postMessageImageSchema = z.object({
+  mime_type: z.string().trim().min(1),
+  data_base64: z.string().min(1),
+  filename: z.string().trim().min(1).optional(),
+});
+
 export const postMessageRequestSchema = z.object({
   source: z.string().trim().min(1).default('cli'),
   thread_key: z.string().trim().min(1).default('cli:default'),
@@ -12,6 +18,7 @@ export const postMessageRequestSchema = z.object({
   text: z.string().min(1),
   delivery_mode: deliveryModeSchema.default('followUp'),
   idempotency_key: z.string().trim().min(1).optional(),
+  images: z.array(postMessageImageSchema).optional(),
 });
 
 export const runParamsSchema = z.object({
@@ -261,6 +268,7 @@ export const runNowTaskResponseSchema = z.object({
 });
 
 export type PostMessageRequest = z.infer<typeof postMessageRequestSchema>;
+export type PostMessageImageInput = z.infer<typeof postMessageImageSchema>;
 export type RunResponse = z.infer<typeof runResponseSchema>;
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 export type AuthProvidersResponse = z.infer<typeof authProvidersResponseSchema>;

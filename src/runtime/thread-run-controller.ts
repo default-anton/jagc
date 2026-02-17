@@ -1,4 +1,4 @@
-import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent, PromptOptions } from '@mariozechner/pi-coding-agent';
 import type { RunProgressEvent } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
 
@@ -7,6 +7,7 @@ type SessionMessage = Extract<SessionEvent, { type: 'message_start' | 'message_e
 type UserSessionMessage = Extract<SessionMessage, { role: 'user' }>;
 type AssistantSessionMessage = Extract<SessionMessage, { role: 'assistant' }>;
 type SessionTextContent = UserSessionMessage['content'] | AssistantSessionMessage['content'];
+type SessionInputImage = NonNullable<PromptOptions['images']>[number];
 
 export type TurnSession = Pick<AgentSession, 'prompt' | 'followUp' | 'steer' | 'subscribe'>;
 
@@ -31,6 +32,8 @@ interface AssistantSnapshot {
 
 interface ThreadRunControllerOptions {
   onProgress?: (event: RunProgressEvent) => void;
+  loadRunImages?: (run: RunRecord) => Promise<SessionInputImage[]>;
+  onDeliverySucceeded?: (run: RunRecord) => Promise<void>;
 }
 
 type PendingLifecycleProgressEvent =
@@ -49,12 +52,16 @@ export class ThreadRunController {
   private dispatchTail: Promise<void> = Promise.resolve();
   private readonly unsubscribe: () => void;
   private readonly onProgress?: (event: RunProgressEvent) => void;
+  private readonly loadRunImages?: (run: RunRecord) => Promise<SessionInputImage[]>;
+  private readonly onDeliverySucceeded?: (run: RunRecord) => Promise<void>;
 
   constructor(
     private readonly session: TurnSession,
     options: ThreadRunControllerOptions = {},
   ) {
     this.onProgress = options.onProgress;
+    this.loadRunImages = options.loadRunImages;
+    this.onDeliverySucceeded = options.onDeliverySucceeded;
     this.unsubscribe = session.subscribe((event) => {
       this.onSessionEvent(event);
     });
@@ -84,21 +91,36 @@ export class ThreadRunController {
       }
 
       try {
+        const images = await this.readRunImages(run);
+
         if (!this.inFlight) {
           this.inFlight = true;
 
-          const promptPromise = this.session.prompt(run.inputText);
-          void promptPromise.catch((error) => {
-            this.failRun(pending, toError(error, `run ${run.runId} prompt failed`));
-          });
+          const promptPromise = this.session.prompt(
+            run.inputText,
+            images.length > 0
+              ? {
+                  images,
+                }
+              : undefined,
+          );
+          void promptPromise
+            .then(async () => {
+              await this.afterDeliverySucceeded(run);
+            })
+            .catch((error) => {
+              this.failRun(pending, toError(error, `run ${run.runId} prompt failed`));
+            });
           return;
         }
 
         if (run.deliveryMode === 'steer') {
-          await this.session.steer(run.inputText);
+          await this.session.steer(run.inputText, images);
         } else {
-          await this.session.followUp(run.inputText);
+          await this.session.followUp(run.inputText, images);
         }
+
+        await this.afterDeliverySucceeded(run);
       } catch (error) {
         this.failRun(pending, toError(error, `run ${run.runId} enqueue failed`));
       }
@@ -302,6 +324,22 @@ export class ThreadRunController {
     }
 
     this.pendingLifecycleEvents.push(event);
+  }
+
+  private async readRunImages(run: RunRecord): Promise<SessionInputImage[]> {
+    if (!this.loadRunImages) {
+      return [];
+    }
+
+    return this.loadRunImages(run);
+  }
+
+  private async afterDeliverySucceeded(run: RunRecord): Promise<void> {
+    if (!this.onDeliverySucceeded) {
+      return;
+    }
+
+    await this.onDeliverySucceeded(run);
   }
 
   private flushPendingLifecycleEventsToActiveRun(): void {

@@ -6,6 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Command, InvalidArgumentError, Option } from 'commander';
 
 import { type OAuthLoginAttemptResponse, type OAuthLoginPromptKind, thinkingLevels } from '../shared/api-contracts.js';
+import { InputImageValidationError } from '../shared/input-images.js';
 import {
   cancelThreadRun,
   getAuthProviders,
@@ -24,6 +25,7 @@ import {
 } from './client.js';
 import { exitWithError, parsePositiveNumber, printJson } from './common.js';
 import { registerDefaultsCommands } from './defaults-commands.js';
+import { buildMessageImagesFromPaths } from './message-images.js';
 import { registerPackagesCommands } from './packages-commands.js';
 import { registerServiceCommands } from './service-commands.js';
 import { registerTaskCommands } from './task-commands.js';
@@ -80,10 +82,12 @@ program
       .choices(['steer', 'followUp'])
       .default('followUp'),
   )
+  .option('-i, --image <path>', 'attach image file (repeatable)', collectValues, [] as string[])
   .option('--idempotency-key <key>', 'idempotency key')
   .option('--json', 'JSON output')
-  .action(async (text, options) => {
+  .action(async (text, options: MessageCommandOptions) => {
     try {
+      const images = await buildMessageImagesFromPaths(options.image);
       const run = await sendMessage(apiUrl(program), {
         source: options.source,
         thread_key: options.threadKey,
@@ -91,6 +95,7 @@ program
         text,
         delivery_mode: options.deliveryMode,
         idempotency_key: options.idempotencyKey,
+        ...(images.length > 0 ? { images } : {}),
       });
 
       if (options.json) {
@@ -99,7 +104,11 @@ program
         console.log(run.run_id);
       }
     } catch (error) {
-      exitWithError(error);
+      if (error instanceof InputImageValidationError) {
+        return exitWithError(new Error(`${error.code}: ${error.message}`), { json: options.json });
+      }
+
+      exitWithError(error, { json: options.json });
     }
   });
 
@@ -400,6 +409,20 @@ function parseProviderModel(input: string): { provider: string; modelId: string 
 
 function isThinkingLevel(value: string): value is (typeof thinkingLevels)[number] {
   return thinkingLevels.includes(value as (typeof thinkingLevels)[number]);
+}
+
+interface MessageCommandOptions {
+  source: string;
+  threadKey: string;
+  userKey?: string;
+  deliveryMode: 'steer' | 'followUp';
+  image: string[];
+  idempotencyKey?: string;
+  json?: boolean;
+}
+
+function collectValues(value: string, previous: string[]): string[] {
+  return [...previous, value];
 }
 
 async function completeOAuthLogin(
