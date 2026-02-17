@@ -155,6 +155,12 @@ Operational note:
 - User mapping: `user_key = telegram:user:<from.id>`.
 - Access gate: Telegram message/callback handling is allowlisted by `JAGC_TELEGRAM_ALLOWED_USER_IDS` (`from.id` values). Empty allowlist means deny all. Unauthorized users receive an in-chat command prompt (`jagc telegram allow --user-id <id>`) and no run is ingested.
 - Default delivery mode for normal text messages: `followUp` (`/steer` is explicit).
+- Inbound Telegram `photo` and image `document` updates are persisted immediately into `input_images` as pending rows (`run_id = NULL`) scoped by `(source='telegram', thread_key, user_key)`; adapter replies with a waiting hint and does not ingest a run for image-only updates.
+- Pending Telegram image buffer limits are enforced per `(source, thread_key, user_key)` scope (max 10 images, max 50MiB decoded bytes) with stable rejection code `image_buffer_limit_exceeded`.
+- Telegram image buffering is idempotent by Telegram `update_id`; replayed updates do not duplicate staged `input_images` rows.
+- Telegram `photo`/`document` handlers short-circuit on oversized metadata (`file_size > 50MiB`) with `image_total_bytes_exceeded` before any file download call.
+- On the next text/`/steer` ingest for the same scope, run creation + pending-image claim + `expires_at` refresh happen in one DB transaction; claimed rows bind to the new `run_id` in deterministic persisted order.
+- Ingest-triggered TTL purge (`expires_at <= now`) runs on both Telegram text ingest (run creation path) and Telegram image ingest (pending buffer path).
 - Telegram `/cancel`, API `POST /v1/threads/:thread_key/cancel`, and CLI `jagc cancel` abort active work for the thread without resetting session context.
 - After a successful Telegram `/cancel`, the adapter suppresses the in-chat terminal `❌ run ... failed: This operation was aborted` reply for that cancelled run (the explicit cancel confirmation message is the terminal user-facing signal).
 - Telegram `/new` and API `DELETE /v1/threads/:thread_key/session` abort/dispose the current thread session, clear persisted `thread_sessions` mapping, and cause the next message to create a fresh pi session.
@@ -205,7 +211,7 @@ Operational note:
 
 - API schemas: `src/shared/api-contracts.ts` (used by server + CLI)
 - Run progress event contract: `src/shared/run-progress.ts`
-- Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`, `migrations/003_scheduled_tasks.sql`, `migrations/004_scheduled_tasks_rrule.sql`, `migrations/005_input_images.sql`
+- Migrations: `migrations/001_runs_and_ingest.sql`, `migrations/002_thread_sessions.sql`, `migrations/003_scheduled_tasks.sql`, `migrations/004_scheduled_tasks_rrule.sql`, `migrations/005_input_images.sql`, `migrations/006_input_images_telegram_update_id.sql`
 - Migration runner: `src/server/migrations.ts` (`schema_migrations`; startup apply runs in a SQLite `BEGIN IMMEDIATE` transaction to avoid concurrent bootstrap races)
 
 ## Known gaps / intentional limitations

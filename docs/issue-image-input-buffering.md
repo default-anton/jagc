@@ -270,18 +270,18 @@ Include `source`, `thread_key`, `run_id` (when present), and reason/error code f
 
 ### Phase 2: Telegram DB-backed buffering
 
-- [ ] Add store APIs:
-  - [ ] persist pending Telegram images,
-  - [ ] claim pending images to run (transactional),
-  - [ ] pending-buffer limit checks by `(source, thread_key, user_key)`.
-- [ ] Add Telegram image handlers (`photo` + image `document`) with immediate DB persistence.
-- [ ] Attach buffered images when subsequent text is ingested.
-- [ ] Ensure purge runs on Telegram image/text ingest paths.
+- [x] Add store APIs:
+  - [x] persist pending Telegram images,
+  - [x] claim pending images to run (transactional),
+  - [x] pending-buffer limit checks by `(source, thread_key, user_key)`.
+- [x] Add Telegram image handlers (`photo` + image `document`) with immediate DB persistence.
+- [x] Attach buffered images when subsequent text is ingested.
+- [x] Ensure purge runs on Telegram image/text ingest paths.
 
 ### Cross-phase docs and release hygiene
 
-- [ ] Add/adjust tests (unit + integration + telegram).
-- [ ] Update `README.md`, `docs/architecture.md`, `docs/testing.md` (if loop changed), `CHANGELOG.md` (`[Unreleased]`).
+- [x] Add/adjust tests (unit + integration + telegram).
+- [x] Update `README.md`, `docs/architecture.md`, `docs/testing.md` (if loop changed), `CHANGELOG.md` (`[Unreleased]`).
 
 ---
 

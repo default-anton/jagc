@@ -150,7 +150,7 @@ jagc share --thread-key cli:default --json
 - Thread→session persistence (`thread_key -> session`) survives process restarts
 - Same-thread turn ordering enforced by per-thread pi session controller
 - Structured run payload contract (`output` is structured; not plain-text-only)
-- Temporary run-linked image staging in SQLite `input_images` (purged on ingest-triggered TTL cleanup; deleted after successful pi message submission)
+- Temporary image staging in SQLite `input_images` for both run-linked and Telegram-pending rows (purged on message/image ingest-triggered TTL cleanup; run-linked rows deleted after successful pi message submission)
 
 ### API
 
@@ -174,6 +174,11 @@ jagc share --thread-key cli:default --json
 
 - Long polling (personal chats)
 - Commands: `/settings`, `/cancel`, `/new`, `/delete`, `/share`, `/model`, `/thinking`, `/auth`, `/steer`
+- Incoming photo/image-document messages are persisted immediately into SQLite `input_images` pending buffer (`run_id=NULL`) scoped by `(source, thread_key, user_key)`; bot replies `Saved N image(s). Send text instructions.` and does not create a run yet.
+- Next inbound text/`/steer` ingest for that same Telegram chat+user claims pending buffered images transactionally into the new run, refreshes image TTL, and preserves deterministic attach order.
+- Telegram pending image buffer limits match API/CLI limits (max 10 images, max 50MiB decoded bytes total); over-limit pending scope rejects with `image_buffer_limit_exceeded`.
+- Telegram image buffering is idempotent by `update_id` (replayed Telegram updates do not duplicate staged rows or re-send waiting hints).
+- Telegram image handlers reject `file_size` values above the decoded 50MiB cap before downloading bytes (`image_total_bytes_exceeded`).
 - Topic-aware routing: inbound private-chat topic messages map to `telegram:chat:<chat_id>:topic:<message_thread_id>`; Telegram general topic (`message_thread_id=1`) is normalized to base chat routing (`telegram:chat:<chat_id>`) to avoid Bot API `message thread not found` sends.
 - `/delete` removes the current Telegram topic thread (only when called inside a topic), clears the corresponding jagc session mapping, and clears any scheduled-task execution-thread binding for that topic so the next task run recreates a fresh topic.
 - Scheduled task runs always use a dedicated per-task topic. On first due/run-now, jagc lazily creates and persists a task-owned topic named from the task title (`<title>`, trimmed to Telegram limits) and routes progress/final delivery inside that topic thread (including tasks created from base/default chats and creator topic threads).
