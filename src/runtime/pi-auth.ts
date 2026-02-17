@@ -67,7 +67,7 @@ export class PiAuthService {
   private readonly oauthLoginBroker: OAuthLoginBroker;
 
   constructor(agentDir: string) {
-    this.authStorage = new AuthStorage(join(agentDir, 'auth.json'));
+    this.authStorage = AuthStorage.create(join(agentDir, 'auth.json'));
     this.modelRegistry = new ModelRegistry(this.authStorage, join(agentDir, 'models.json'));
     this.oauthLoginBroker = new OAuthLoginBroker(this.authStorage, {
       onCredentialsUpdated: () => {

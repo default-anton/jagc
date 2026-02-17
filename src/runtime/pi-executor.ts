@@ -91,7 +91,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
     private readonly options: PiExecutorOptions,
   ) {
     this.sessionDir = options.sessionDir ?? join(options.workspaceDir, '.sessions');
-    this.authStorage = new AuthStorage(join(options.workspaceDir, 'auth.json'));
+    this.authStorage = AuthStorage.create(join(options.workspaceDir, 'auth.json'));
     this.modelRegistry = new ModelRegistry(this.authStorage, join(options.workspaceDir, 'models.json'));
     this.settingsManager = SettingsManager.create(options.workspaceDir, options.workspaceDir);
     this.logger = options.logger ?? noopLogger;
@@ -128,6 +128,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
 
     const session = await this.getSession(threadKey);
     await session.setModel(model);
+    await this.settingsManager.flush();
 
     return stateFromSession(threadKey, session);
   }
@@ -135,6 +136,7 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
   async setThreadThinkingLevel(threadKey: string, thinkingLevel: SupportedThinkingLevel): Promise<ThreadRuntimeState> {
     const session = await this.getSession(threadKey);
     session.setThinkingLevel(thinkingLevel);
+    await this.settingsManager.flush();
 
     return stateFromSession(threadKey, session);
   }

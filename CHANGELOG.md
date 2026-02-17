@@ -18,6 +18,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
+- Updated bundled `@mariozechner/pi-coding-agent` dependency to `^0.53.0`.
 - Telegram now adds a best-effort random emoji reaction on inbound assistant-bound user messages (`followUp`/`steer`) while preserving the existing typing indicator/progress flow.
 - Telegram image buffering now enforces pending-scope limits (10 images / 50MiB decoded) with stable reject code `image_buffer_limit_exceeded`, runs TTL purge on both image and text ingest paths (no in-memory buffering), and deduplicates replayed image updates by Telegram `update_id`.
 - Telegram image handlers now preflight `file_size` metadata and reject oversized payloads (`image_total_bytes_exceeded`) before downloading bytes.
@@ -26,6 +27,7 @@ All notable changes to `jagc` are documented here.
 
 ### Fixed
 
+- Updated pi SDK integration for 0.53.0 breaking changes: `AuthStorage` now uses static factories and thread runtime model/thinking updates now flush settings writes before returning so persisted defaults remain durable.
 - Scheduled-task dispatch now traps ingest failures (including idempotency payload conflicts) and marks task runs failed instead of leaving background unhandled rejections.
 
 ## [0.4.0] - 2026-02-16
