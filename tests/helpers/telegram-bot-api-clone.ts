@@ -24,6 +24,26 @@ interface InjectTextMessageInput {
   messageThreadId?: number;
 }
 
+interface InjectPhotoMessageInput {
+  chatId: number;
+  fromId: number;
+  imageBytes: Buffer;
+  reportedFileSize?: number;
+  mediaGroupId?: string;
+  messageThreadId?: number;
+}
+
+interface InjectDocumentMessageInput {
+  chatId: number;
+  fromId: number;
+  imageBytes: Buffer;
+  reportedFileSize?: number;
+  fileName?: string;
+  mimeType?: string;
+  mediaGroupId?: string;
+  messageThreadId?: number;
+}
+
 interface InjectCallbackQueryInput {
   chatId: number;
   fromId: number;
@@ -57,6 +77,14 @@ interface QueuedApiError extends TelegramCloneApiErrorSpec {
   remaining: number;
 }
 
+interface TelegramCloneFileFixture {
+  fileId: string;
+  filePath: string;
+  bytes: Buffer;
+  mimeType: string;
+  fileName: string | null;
+}
+
 class TelegramCloneApiError extends Error {
   constructor(readonly spec: TelegramCloneApiErrorSpec) {
     super(spec.description);
@@ -81,6 +109,9 @@ export class TelegramBotApiClone {
   private nextMessageId = 1;
   private nextCallbackQueryId = 1;
   private nextMessageThreadId = 1_000;
+  private nextFileSequence = 1;
+  private readonly filesById = new Map<string, TelegramCloneFileFixture>();
+  private readonly filesByPath = new Map<string, TelegramCloneFileFixture>();
 
   apiRoot: string | null = null;
 
@@ -160,6 +191,91 @@ export class TelegramBotApiClone {
         },
         ...(input.messageThreadId ? { message_thread_id: input.messageThreadId } : {}),
         text: input.text,
+      },
+    };
+
+    this.updates.push(update);
+    this.notifyUpdateWaiters();
+    return updateId;
+  }
+
+  injectPhotoMessage(input: InjectPhotoMessageInput): number {
+    const updateId = this.nextUpdateId++;
+    const fixture = this.registerFileFixture({
+      bytes: input.imageBytes,
+      mimeType: 'image/jpeg',
+      fileName: null,
+      prefix: 'photos',
+      extension: 'jpg',
+    });
+
+    const update = {
+      update_id: updateId,
+      message: {
+        message_id: this.nextMessageId++,
+        date: Math.floor(Date.now() / 1000),
+        chat: {
+          id: input.chatId,
+          type: 'private',
+        },
+        from: {
+          id: input.fromId,
+          is_bot: false,
+          first_name: 'Tester',
+        },
+        ...(input.messageThreadId ? { message_thread_id: input.messageThreadId } : {}),
+        ...(input.mediaGroupId ? { media_group_id: input.mediaGroupId } : {}),
+        photo: [
+          {
+            file_id: fixture.fileId,
+            file_unique_id: `unique-${fixture.fileId}`,
+            width: 1600,
+            height: 900,
+            file_size: input.reportedFileSize ?? fixture.bytes.byteLength,
+          },
+        ],
+      },
+    };
+
+    this.updates.push(update);
+    this.notifyUpdateWaiters();
+    return updateId;
+  }
+
+  injectDocumentMessage(input: InjectDocumentMessageInput): number {
+    const updateId = this.nextUpdateId++;
+    const fileName = input.fileName ?? 'image.png';
+    const fixture = this.registerFileFixture({
+      bytes: input.imageBytes,
+      mimeType: input.mimeType ?? 'image/png',
+      fileName,
+      prefix: 'documents',
+      extension: fileName.split('.').pop() ?? 'bin',
+    });
+
+    const update = {
+      update_id: updateId,
+      message: {
+        message_id: this.nextMessageId++,
+        date: Math.floor(Date.now() / 1000),
+        chat: {
+          id: input.chatId,
+          type: 'private',
+        },
+        from: {
+          id: input.fromId,
+          is_bot: false,
+          first_name: 'Tester',
+        },
+        ...(input.messageThreadId ? { message_thread_id: input.messageThreadId } : {}),
+        ...(input.mediaGroupId ? { media_group_id: input.mediaGroupId } : {}),
+        document: {
+          file_id: fixture.fileId,
+          file_unique_id: `unique-${fixture.fileId}`,
+          file_name: fileName,
+          mime_type: fixture.mimeType,
+          file_size: input.reportedFileSize ?? fixture.bytes.byteLength,
+        },
       },
     };
 
@@ -257,9 +373,80 @@ export class TelegramBotApiClone {
     });
   }
 
+  private registerFileFixture(input: {
+    bytes: Buffer;
+    mimeType: string;
+    fileName: string | null;
+    prefix: string;
+    extension: string;
+  }): TelegramCloneFileFixture {
+    const sequence = this.nextFileSequence++;
+    const fileId = `file-${sequence}`;
+    const filePath = `${input.prefix}/${fileId}.${input.extension.replace(/\./gu, '')}`;
+
+    const fixture: TelegramCloneFileFixture = {
+      fileId,
+      filePath,
+      bytes: Buffer.from(input.bytes),
+      mimeType: input.mimeType,
+      fileName: input.fileName,
+    };
+
+    this.filesById.set(fileId, fixture);
+    this.filesByPath.set(filePath, fixture);
+    return fixture;
+  }
+
+  private tryHandleFileDownload(url: string, response: ServerResponse): boolean {
+    const match = url.match(/^\/file\/bot([^/]+)\/(.+)$/u);
+    if (!match) {
+      return false;
+    }
+
+    const token = decodeURIComponent(match[1] ?? '');
+    if (token !== this.token) {
+      this.writeJson(response, 401, {
+        ok: false,
+        error_code: 401,
+        description: 'Unauthorized',
+      });
+      return true;
+    }
+
+    const encodedPath = match[2] ?? '';
+    const decodedPath = encodedPath
+      .split('/')
+      .filter((segment) => segment.length > 0)
+      .map((segment) => decodeURIComponent(segment))
+      .join('/');
+
+    const fixture = this.filesByPath.get(decodedPath);
+    if (!fixture) {
+      this.writeJson(response, 404, {
+        ok: false,
+        error_code: 404,
+        description: 'Not Found',
+      });
+      return true;
+    }
+
+    response.statusCode = 200;
+    response.setHeader('content-type', fixture.mimeType);
+    response.end(fixture.bytes);
+    return true;
+  }
+
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const method = request.method;
     const url = request.url;
+
+    if (method === 'GET' && url) {
+      const handled = this.tryHandleFileDownload(url, response);
+      if (handled) {
+        return;
+      }
+    }
+
     if (method !== 'POST' || !url) {
       this.writeJson(response, 404, {
         ok: false,
@@ -360,6 +547,23 @@ export class TelegramBotApiClone {
       }
       case 'getUpdates': {
         return this.getUpdates(parseGetUpdatesArgs(payload));
+      }
+      case 'getFile': {
+        const fileId = typeof payload.file_id === 'string' ? payload.file_id : '';
+        const fixture = this.filesById.get(fileId);
+        if (!fixture) {
+          throw new TelegramCloneApiError({
+            errorCode: 400,
+            description: 'Bad Request: file not found',
+          });
+        }
+
+        return {
+          file_id: fixture.fileId,
+          file_unique_id: `unique-${fixture.fileId}`,
+          file_size: fixture.bytes.byteLength,
+          file_path: fixture.filePath,
+        };
       }
       case 'createForumTopic': {
         this.recordBotCall({ method, payload });

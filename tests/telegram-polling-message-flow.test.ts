@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, test, vi } from 'vitest';
 
 import type { RunService } from '../src/server/service.js';
+import { type DecodedInputImage, maxInputImageTotalBytes } from '../src/shared/input-images.js';
 import type { RunProgressEvent } from '../src/shared/run-progress.js';
 import type { MessageIngest, RunRecord } from '../src/shared/run-types.js';
 import {
@@ -42,6 +43,111 @@ describe('TelegramPollingAdapter message flow integration', () => {
           idempotencyKey: `telegram:update:${updateId}`,
         },
       ]);
+    });
+  });
+
+  test('buffers photo-only updates in DB flow and asks for text instructions', async () => {
+    const runService = new StubRunService('run-photo-buffer', [
+      runRecord({
+        runId: 'run-photo-buffer',
+        status: 'succeeded',
+        output: { text: 'unused' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      const updateId = clone.injectPhotoMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        imageBytes: sampleJpegBytes(),
+        mediaGroupId: 'album-1',
+      });
+
+      const waitingReply = await clone.waitForBotCall(
+        'sendMessage',
+        (call) => call.payload.text === 'Saved 1 image. Send text instructions.',
+      );
+      expect(waitingReply.payload.text).toBe('Saved 1 image. Send text instructions.');
+
+      expect(runService.ingests).toEqual([]);
+      expect(runService.bufferedImages).toHaveLength(1);
+      expect(runService.bufferedImages[0]).toMatchObject({
+        threadKey: 'telegram:chat:101',
+        userKey: 'telegram:user:202',
+        telegramUpdateId: updateId,
+        telegramMediaGroupId: 'album-1',
+      });
+      expect(runService.bufferedImages[0]?.images[0]?.mimeType).toBe('image/jpeg');
+    });
+  });
+
+  test('buffers image documents and preserves filename metadata', async () => {
+    const runService = new StubRunService('run-document-buffer', [
+      runRecord({
+        runId: 'run-document-buffer',
+        status: 'succeeded',
+        output: { text: 'unused' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      const updateId = clone.injectDocumentMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        imageBytes: samplePngBytes(),
+        fileName: 'diagram.png',
+        mimeType: 'image/png',
+      });
+
+      const waitingReply = await clone.waitForBotCall(
+        'sendMessage',
+        (call) => call.payload.text === 'Saved 1 image. Send text instructions.',
+      );
+      expect(waitingReply.payload.text).toBe('Saved 1 image. Send text instructions.');
+
+      expect(runService.ingests).toEqual([]);
+      expect(runService.bufferedImages).toHaveLength(1);
+      expect(runService.bufferedImages[0]).toMatchObject({
+        telegramUpdateId: updateId,
+      });
+      expect(runService.bufferedImages[0]?.images[0]).toMatchObject({
+        mimeType: 'image/png',
+        filename: 'diagram.png',
+      });
+    });
+  });
+
+  test('rejects oversized Telegram image metadata before download', async () => {
+    const runService = new StubRunService('run-document-too-large', [
+      runRecord({
+        runId: 'run-document-too-large',
+        status: 'succeeded',
+        output: { text: 'unused' },
+      }),
+    ]);
+
+    await withTelegramAdapter({ runService: runService.asRunService() }, async ({ clone }) => {
+      clone.injectDocumentMessage({
+        chatId: testChatId,
+        fromId: testUserId,
+        imageBytes: samplePngBytes(),
+        fileName: 'too-large.png',
+        mimeType: 'image/png',
+        reportedFileSize: maxInputImageTotalBytes + 1,
+      });
+
+      const rejection = await clone.waitForBotCall(
+        'sendMessage',
+        (call) =>
+          typeof call.payload.text === 'string' &&
+          call.payload.text.includes('image_total_bytes_exceeded') &&
+          call.payload.text.includes('decoded payload limit'),
+      );
+
+      expect(runService.ingests).toEqual([]);
+      expect(runService.bufferedImages).toEqual([]);
+      expect(rejection.payload.text).toContain('image_total_bytes_exceeded');
+      expect(clone.getApiCallCount('getFile')).toBe(0);
     });
   });
 
@@ -1704,12 +1810,27 @@ describe('TelegramPollingAdapter message flow integration', () => {
   });
 });
 
+function sampleJpegBytes(): Buffer {
+  return Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+}
+
+function samplePngBytes(): Buffer {
+  return Buffer.from('89504e470d0a1a0a0000000049454e44ae426082', 'hex');
+}
+
 function isFunnyProgressLine(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z]+\.\.\.$/u.test(value);
 }
 
 class StubRunService {
   readonly ingests: MessageIngest[] = [];
+  readonly bufferedImages: Array<{
+    threadKey: string;
+    userKey: string;
+    telegramUpdateId: number;
+    telegramMediaGroupId: string | null;
+    images: DecodedInputImage[];
+  }> = [];
   private pollCount = 0;
   private readonly runProgressListeners = new Set<(event: RunProgressEvent) => void>();
 
@@ -1734,6 +1855,32 @@ class StubRunService {
         return {
           deduplicated: false,
           run: initialRun,
+        };
+      },
+      bufferTelegramImages: async (request: {
+        threadKey: string;
+        userKey: string;
+        telegramUpdateId: number;
+        telegramMediaGroupId?: string | null;
+        images: DecodedInputImage[];
+      }) => {
+        this.bufferedImages.push({
+          threadKey: request.threadKey,
+          userKey: request.userKey,
+          telegramUpdateId: request.telegramUpdateId,
+          telegramMediaGroupId: request.telegramMediaGroupId ?? null,
+          images: request.images,
+        });
+
+        const bufferedCount = this.bufferedImages.reduce((sum, current) => sum + current.images.length, 0);
+        const bufferedBytes = this.bufferedImages
+          .flatMap((entry) => entry.images)
+          .reduce((sum, image) => sum + image.data.byteLength, 0);
+
+        return {
+          insertedCount: request.images.length,
+          bufferedCount,
+          bufferedBytes,
         };
       },
       getRun: async (runId: string) => {

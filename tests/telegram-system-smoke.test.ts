@@ -112,6 +112,74 @@ describe('Telegram system smoke', () => {
     runningStacks.delete(stack);
   });
 
+  test('buffers Telegram images in DB and attaches them to the next text run', async () => {
+    const stack = await startTelegramSystemStack(testDb.database);
+    runningStacks.add(stack);
+
+    const photoUpdateId = stack.clone.injectPhotoMessage({
+      chatId: telegramTestChatId,
+      fromId: telegramTestUserId,
+      imageBytes: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+      mediaGroupId: 'album-123',
+    });
+
+    const waitingReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) => call.payload.text === 'Saved 1 image. Send text instructions.',
+      5_000,
+    );
+    expect(waitingReply.payload.text).toBe('Saved 1 image. Send text instructions.');
+
+    expect(loadRunByTelegramUpdateIdOrNull(testDb.database, photoUpdateId)).toBeNull();
+
+    const textUpdateId = stack.clone.injectTextMessage({
+      chatId: telegramTestChatId,
+      fromId: telegramTestUserId,
+      text: 'describe buffered image',
+    });
+
+    const runReply = await stack.clone.waitForBotCall(
+      'sendMessage',
+      (call) => call.payload.text === 'describe buffered image',
+      5_000,
+    );
+    expect(runReply.payload.text).toBe('describe buffered image');
+
+    const persistedRun = await loadRunByTelegramUpdateId(testDb.database, textUpdateId);
+    const linkedImages = testDb.database
+      .prepare<unknown[], { image_count: number; media_group_id: string | null }>(
+        `
+          SELECT COUNT(*) AS image_count, MIN(telegram_media_group_id) AS media_group_id
+          FROM input_images
+          WHERE run_id = ?
+        `,
+      )
+      .get(persistedRun.run_id);
+
+    expect(linkedImages).toEqual({
+      image_count: 1,
+      media_group_id: 'album-123',
+    });
+
+    const pendingImages = testDb.database
+      .prepare<unknown[], { image_count: number }>(
+        `
+          SELECT COUNT(*) AS image_count
+          FROM input_images
+          WHERE source = ?
+            AND thread_key = ?
+            AND user_key = ?
+            AND run_id IS NULL
+        `,
+      )
+      .get('telegram', 'telegram:chat:101', 'telegram:user:202');
+
+    expect(pendingImages?.image_count).toBe(0);
+
+    await stack.stop();
+    runningStacks.delete(stack);
+  });
+
   test('run-now lazily creates a Telegram topic and delivers scheduled output in that topic thread', async () => {
     const stack = await startTelegramSystemStack(testDb.database);
     runningStacks.add(stack);
@@ -492,6 +560,17 @@ async function stopTelegramSystemResources(resources: {
 }
 
 async function loadRunByTelegramUpdateId(database: SqliteDatabase, updateId: number): Promise<PersistedRunRow> {
+  const run = loadRunByTelegramUpdateIdOrNull(database, updateId);
+  const idempotencyKey = `telegram:update:${updateId}`;
+
+  if (!run) {
+    throw new Error(`run not found for telegram idempotency key ${idempotencyKey}`);
+  }
+
+  return run;
+}
+
+function loadRunByTelegramUpdateIdOrNull(database: SqliteDatabase, updateId: number): PersistedRunRow | null {
   const idempotencyKey = `telegram:update:${updateId}`;
 
   const run = database
@@ -506,7 +585,7 @@ async function loadRunByTelegramUpdateId(database: SqliteDatabase, updateId: num
     .get('telegram', idempotencyKey);
 
   if (!run) {
-    throw new Error(`run not found for telegram idempotency key ${idempotencyKey}`);
+    return null;
   }
 
   return {

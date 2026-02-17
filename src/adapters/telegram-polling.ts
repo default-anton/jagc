@@ -11,6 +11,12 @@ import type {
 } from '../runtime/pi-auth.js';
 import type { ThreadControlService } from '../runtime/pi-executor.js';
 import type { RunService } from '../server/service.js';
+import {
+  type DecodedInputImage,
+  detectInputImageMimeType,
+  InputImageValidationError,
+  maxInputImageTotalBytes,
+} from '../shared/input-images.js';
 import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
 import {
@@ -40,6 +46,7 @@ const defaultPollIntervalMs = 500;
 const defaultPollRequestTimeoutSeconds = 30;
 const telegramMessageLimit = 3500;
 const defaultWorkspaceDir = join(homedir(), '.jagc');
+const defaultTelegramApiRoot = 'https://api.telegram.org';
 const telegramWorkingReactionEmojis = ['👍', '🔥', '👏', '😁', '🤔', '🤯', '🎉', '🤩', '🙏', '👌', '❤'] as const;
 
 interface TelegramPollingAdapterOptions {
@@ -81,6 +88,7 @@ export class TelegramPollingAdapter {
   private readonly runDelivery: TelegramRunDelivery;
   private readonly backgroundRuns = new TelegramBackgroundRunRegistry();
   private privateTopicsEnabled: boolean | null = null;
+  private readonly telegramApiRoot: string;
 
   constructor(private readonly options: TelegramPollingAdapterOptions) {
     const botConfig: BotConfig<Context> = {};
@@ -105,6 +113,7 @@ export class TelegramPollingAdapter {
     this.logger = options.logger ?? noopLogger;
     this.allowedTelegramUserIds = new Set((options.allowedTelegramUserIds ?? []).map(canonicalizeTelegramUserId));
     this.workspaceDir = options.workspaceDir ?? null;
+    this.telegramApiRoot = (options.telegramApiRoot ?? defaultTelegramApiRoot).replace(/\/$/u, '');
     this.runDelivery = new TelegramRunDelivery({
       bot: this.bot,
       runService: options.runService,
@@ -122,6 +131,14 @@ export class TelegramPollingAdapter {
 
     this.bot.on('message:text', async (ctx) => {
       await this.handleTextMessage(ctx);
+    });
+
+    this.bot.on('message:photo', async (ctx) => {
+      await this.handlePhotoMessage(ctx);
+    });
+
+    this.bot.on('message:document', async (ctx) => {
+      await this.handleDocumentMessage(ctx);
     });
 
     this.bot.on('callback_query:data', async (ctx) => {
@@ -308,6 +325,83 @@ export class TelegramPollingAdapter {
     await this.handleAssistantMessage(ctx, text, 'followUp');
   }
 
+  private async handlePhotoMessage(ctx: Context): Promise<void> {
+    if (!ctx.chat || ctx.chat.type !== 'private') {
+      return;
+    }
+
+    if (!this.isTelegramUserAuthorized(ctx.from?.id)) {
+      await this.handleUnauthorizedTelegramAccess(ctx);
+      return;
+    }
+
+    const message = ctx.message;
+    if (!message || !('photo' in message) || !Array.isArray(message.photo) || message.photo.length === 0) {
+      return;
+    }
+
+    try {
+      const largestPhoto = selectLargestTelegramPhoto(message.photo);
+      if (!largestPhoto) {
+        throw new Error('photo message is missing file metadata');
+      }
+
+      assertTelegramFileSizeWithinLimit(largestPhoto.file_size, 'photo');
+
+      const bytes = await this.downloadTelegramFile(largestPhoto.file_id);
+      const mimeType = detectInputImageMimeType(bytes);
+      if (!mimeType) {
+        throw new InputImageValidationError('image_mime_type_unsupported', 'unsupported Telegram photo type');
+      }
+
+      await this.persistTelegramPendingImages(ctx, [
+        {
+          mimeType,
+          data: bytes,
+          filename: null,
+        },
+      ]);
+    } catch (error) {
+      await this.handleTelegramImageIngestError(ctx, error);
+    }
+  }
+
+  private async handleDocumentMessage(ctx: Context): Promise<void> {
+    if (!ctx.chat || ctx.chat.type !== 'private') {
+      return;
+    }
+
+    if (!this.isTelegramUserAuthorized(ctx.from?.id)) {
+      await this.handleUnauthorizedTelegramAccess(ctx);
+      return;
+    }
+
+    const message = ctx.message;
+    if (!message || !('document' in message) || !message.document) {
+      return;
+    }
+
+    try {
+      assertTelegramFileSizeWithinLimit(message.document.file_size, 'document');
+
+      const bytes = await this.downloadTelegramFile(message.document.file_id);
+      const mimeType = detectInputImageMimeType(bytes);
+      if (!mimeType) {
+        throw new InputImageValidationError('image_mime_type_unsupported', 'unsupported Telegram image document type');
+      }
+
+      await this.persistTelegramPendingImages(ctx, [
+        {
+          mimeType,
+          data: bytes,
+          filename: message.document.file_name ?? null,
+        },
+      ]);
+    } catch (error) {
+      await this.handleTelegramImageIngestError(ctx, error);
+    }
+  }
+
   private async handleCommand(ctx: Context, command: ParsedTelegramCommand, rawText: string): Promise<void> {
     try {
       switch (command.command) {
@@ -461,6 +555,96 @@ export class TelegramPollingAdapter {
 
       await this.reply(ctx, `❌ ${message}`);
     }
+  }
+
+  private async persistTelegramPendingImages(ctx: Context, images: DecodedInputImage[]): Promise<void> {
+    if (!ctx.chat || ctx.chat.type !== 'private') {
+      return;
+    }
+
+    const userKey = telegramUserKey(ctx.from?.id);
+    if (!userKey) {
+      throw new Error('telegram user id is required for image buffering');
+    }
+
+    const route = routeFromMessageContext(ctx);
+    const threadKey = telegramThreadKeyFromRoute(route);
+
+    const buffered = await this.options.runService.bufferTelegramImages({
+      threadKey,
+      userKey,
+      telegramUpdateId: ctx.update.update_id,
+      telegramMediaGroupId: typeof ctx.message?.media_group_id === 'string' ? ctx.message.media_group_id : null,
+      images,
+    });
+
+    const count = buffered.insertedCount;
+    if (count === 0) {
+      return;
+    }
+
+    const suffix = count === 1 ? '' : 's';
+    await this.reply(ctx, `Saved ${count} image${suffix}. Send text instructions.`);
+  }
+
+  private async handleTelegramImageIngestError(ctx: Context, error: unknown): Promise<void> {
+    const route = routeFromMessageContext(ctx);
+    const threadKey = telegramThreadKeyFromRoute(route);
+
+    if (error instanceof InputImageValidationError) {
+      this.logger.warn({
+        event: 'telegram_image_ingest_rejected',
+        reason: error.code,
+        source: 'telegram',
+        thread_key: threadKey,
+      });
+      await this.reply(ctx, `❌ ${error.code}: ${error.message}`);
+      return;
+    }
+
+    const message = userFacingError(error);
+    this.logger.error({
+      event: 'telegram_image_ingest_failed',
+      source: 'telegram',
+      thread_key: threadKey,
+      message,
+    });
+    await this.reply(ctx, `❌ ${message}`);
+  }
+
+  private async downloadTelegramFile(fileId: string): Promise<Buffer> {
+    const response = (await callTelegramWithRetry(() =>
+      this.bot.api.raw.getFile({
+        file_id: fileId,
+      }),
+    )) as { file_path?: unknown };
+
+    if (typeof response.file_path !== 'string' || response.file_path.trim().length === 0) {
+      throw new Error(`telegram getFile returned invalid file_path for ${fileId}`);
+    }
+
+    const fileResponse = await fetch(this.buildTelegramFileUrl(response.file_path));
+    if (!fileResponse.ok) {
+      throw new Error(`failed to download Telegram file ${fileId}: HTTP ${fileResponse.status}`);
+    }
+
+    const fileBytes = Buffer.from(await fileResponse.arrayBuffer());
+    if (fileBytes.byteLength === 0) {
+      throw new Error(`downloaded Telegram file ${fileId} is empty`);
+    }
+
+    return fileBytes;
+  }
+
+  private buildTelegramFileUrl(filePath: string): string {
+    const encodedToken = encodeURIComponent(this.options.botToken);
+    const encodedPath = filePath
+      .split('/')
+      .filter((segment) => segment.length > 0)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+
+    return `${this.telegramApiRoot}/file/bot${encodedToken}/${encodedPath}`;
   }
 
   private async handleDeleteTopicCommand(ctx: Context): Promise<void> {
@@ -642,6 +826,53 @@ export class TelegramPollingAdapter {
       await this.start();
     }
   }
+}
+
+interface TelegramPhotoSize {
+  file_id: string;
+  file_size?: number;
+  width: number;
+  height: number;
+}
+
+function selectLargestTelegramPhoto(photoSizes: TelegramPhotoSize[]): TelegramPhotoSize | null {
+  if (photoSizes.length === 0) {
+    return null;
+  }
+
+  let selected = photoSizes[0] ?? null;
+  if (!selected) {
+    return null;
+  }
+
+  let selectedScore = (selected.file_size ?? 0) * 1_000_000 + selected.width * selected.height;
+
+  for (const candidate of photoSizes.slice(1)) {
+    const candidateScore = (candidate.file_size ?? 0) * 1_000_000 + candidate.width * candidate.height;
+    if (candidateScore <= selectedScore) {
+      continue;
+    }
+
+    selected = candidate;
+    selectedScore = candidateScore;
+  }
+
+  return selected;
+}
+
+function assertTelegramFileSizeWithinLimit(fileSize: number | undefined, imageKind: 'photo' | 'document'): void {
+  if (typeof fileSize !== 'number' || !Number.isFinite(fileSize) || fileSize <= 0) {
+    return;
+  }
+
+  if (fileSize <= maxInputImageTotalBytes) {
+    return;
+  }
+
+  throw new InputImageValidationError(
+    'image_total_bytes_exceeded',
+    `telegram ${imageKind} exceeds decoded payload limit (${maxInputImageTotalBytes} bytes max per image)`,
+  );
 }
 
 function pickWorkingReaction(randomSource: () => number = Math.random): (typeof telegramWorkingReactionEmojis)[number] {
