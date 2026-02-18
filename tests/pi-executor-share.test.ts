@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 interface SpawnPlan {
@@ -70,22 +72,32 @@ vi.mock('node:child_process', () => ({
 import { PiRunExecutor } from '../src/runtime/pi-executor.js';
 
 describe('PiRunExecutor.shareThreadSession', () => {
+  const tempDirs: string[] = [];
+
   beforeEach(() => {
     spawnPlans.length = 0;
     spawnCalls.length = 0;
     spawnMock.mockClear();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.PI_SHARE_VIEWER_URL;
+
+    for (const dir of tempDirs) {
+      await rm(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
   });
 
   test('validates PI_SHARE_VIEWER_URL before loading thread session', async () => {
     process.env.PI_SHARE_VIEWER_URL = 'not-a-url';
     spawnPlans.push({ code: 0 });
 
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-share-'));
+    tempDirs.push(workspaceDir);
+
     const executor = new PiRunExecutor({} as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     const getSession = vi.fn();
@@ -109,8 +121,11 @@ describe('PiRunExecutor.shareThreadSession', () => {
     spawnPlans.push({ code: 0 });
     spawnPlans.push({ code: 0, stdout: 'https://gist.github.com/test/abc123\n' });
 
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-share-'));
+    tempDirs.push(workspaceDir);
+
     const executor = new PiRunExecutor({} as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     const exportToHtml = vi.fn(async (path: string) => {

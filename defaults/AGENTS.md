@@ -1,80 +1,40 @@
 ## Global instructions (always on)
 
-- Treat this file as the default instruction layer for all chats and projects.
-- Never open with canned fluff ("Great question", "Absolutely", etc.).
-- Ask clarifying questions only when blocked.
+- Use this file for durable instructions that apply across chats and projects.
+- Keep entries instruction-first (imperative), not profile/fact tables.
+- Keep this file concise; remove stale rules quickly.
 
-## How this template works
+## How to address me
 
-- Each section has guidance plus placeholders.
-- Guidance explains what belongs in the section.
-- Placeholders are the parts to fill in and update over time.
-- If something is unknown, leave `<fill me>` and continue.
+- Call me <fill me>.
+- Use pronouns <fill me>.
+- Reply in <fill me>.
+- Assume timezone <fill me> when scheduling/time calculations.
 
-## How to address me (the user)
-
-### Guidance
-
-- Use my preferred name/call-sign when known; otherwise skip name-based greetings.
-- Mirror my language.
-- Use pronouns only when explicitly known.
-- Use timezone-aware answers when scheduling matters.
-
-### Data
-
-- Name: <fill me>
-- Call me: <fill me>
-- Pronouns: <fill me>
-- Timezone: <fill me>
-- Language(s): <fill me>
-
-## User preferences (free-form)
-
-### Guidance
-
-- Store durable preferences here as they are learned in conversation.
-- Keep entries concrete and actionable (tone, format, tooling, workflow, constraints).
-- Prefer short bullets over prose.
-
-### Entries
+## Communication preferences
 
 - <fill me>
 - <fill me>
 
-## Environment facts (agent-maintained)
+## Workflow and tooling preferences
 
-### Guidance
+- <fill me>
+- <fill me>
 
-- Discover and maintain these from the local environment; ask only when blocked.
-- Keep values factual and specific.
+## Environment instructions
 
-### Data
+- Assume OS/shell context: <fill me>.
+- Prefer these toolchains/package managers: <fill me>.
+- Treat these local services/devices as available: <fill me>.
 
-- OS + shell: <fill me>
-- Toolchains/package managers: <fill me>
-- Core local services/devices: <fill me>
+## Important paths
 
-## Important paths (path + one-line purpose)
+- Use `/absolute/path` for <fill me>.
+- Use `~/path/from/home` for <fill me>.
 
-### Guidance
-
-- Track high-signal paths as they become relevant.
-- Format each entry as: ``/absolute/path`` or ``~/path/from/home`` — one sentence on what it contains and why it matters.
-
-### Entries
-
-- `/absolute/path` — <fill me>
-- `~/path/from/home` — <fill me>
-
-## Safety and guardrails
+## Safety defaults
 
 - Confirm before destructive/irreversible actions.
 - Never perform purchases, financial transfers, or account-level changes without explicit approval.
 - Never expose secrets or private data outside the current task scope.
 - If a request is risky or ambiguous, propose the safest concrete next step first.
-
-## Maintenance
-
-- Keep this file concise and instruction-first.
-- Update it whenever the user corrects a preference.
-- Update environment facts and important paths when newly discovered.

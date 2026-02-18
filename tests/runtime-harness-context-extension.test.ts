@@ -35,6 +35,10 @@ describe('runtimeHarnessContextExtension', () => {
     expect(result?.systemPrompt).toContain('the user did not ask for scheduling');
     expect(result?.systemPrompt).toContain('require explicit user approval before creating/updating tasks');
     expect(result?.systemPrompt).toContain('canonical task command contract and verification loop');
+    expect(result?.systemPrompt).toContain('AGENTS.md instructions are hierarchical');
+    expect(result?.systemPrompt).toContain('Global AGENTS.md is preloaded; subtree AGENTS.md files auto-load');
+    expect(result?.systemPrompt).toContain('Do not proactively search for AGENTS.md unless the user asks');
+    expect(result?.systemPrompt).toContain('prefer terse imperative rules over fact/profile tables');
     expect(result?.systemPrompt).toContain(path.join(fakeCwd, 'skills', 'task-ops', 'SKILL.md'));
     expect(result?.systemPrompt).toContain(`Your skills are located in: ${path.join(fakeCwd, 'skills')}/`);
     expect(result?.systemPrompt).toContain(`Your extensions are located in: ${path.join(fakeCwd, 'extensions')}/`);

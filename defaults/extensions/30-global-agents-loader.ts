@@ -29,7 +29,7 @@ export default function globalAgentsLoaderExtension(pi: {
   ) => void;
 }) {
   pi.on('before_agent_start', async (event, ctx) => {
-    const marker = 'Global AGENTS.md purpose:';
+    const marker = '<agents_files>';
     if (event.systemPrompt.includes(marker)) {
       return;
     }
@@ -43,11 +43,6 @@ export default function globalAgentsLoaderExtension(pi: {
 
     const globalAgentsContent = fs.readFileSync(globalAgentsPath, 'utf-8').trim();
     const promptLines = [
-      marker,
-      '- Global AGENTS.md defines baseline instructions that apply across chats and projects.',
-      '- AGENTS.md instructions are hierarchical: global AGENTS.md is the baseline, and subdir AGENTS.md files define local rules for that subtree.',
-      '- Global AGENTS.md is preloaded; subtree AGENTS.md auto-load when you `read` files in that subtree. Do not proactively search for AGENTS.md unless the user asks, you are editing AGENTS.md files, or instructions appear missing/conflicting.',
-      '',
       `Global AGENTS.md: ${formatPathForPrompt(globalAgentsPath)} (applies to all projects)`,
       '',
       'AGENTS.md files:',

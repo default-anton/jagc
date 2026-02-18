@@ -1,11 +1,27 @@
-import { describe, expect, test, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { PiRunExecutor } from '../src/runtime/pi-executor.js';
 
 describe('PiRunExecutor.cancelThreadRun', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs) {
+      await rm(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
   test('returns cancelled false when a session exists but is idle', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-cancel-'));
+    tempDirs.push(workspaceDir);
+
     const executor = new PiRunExecutor({} as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     const abort = vi.fn(async () => undefined);
@@ -25,8 +41,11 @@ describe('PiRunExecutor.cancelThreadRun', () => {
   });
 
   test('returns cancelled true and aborts when a session is actively streaming', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-cancel-'));
+    tempDirs.push(workspaceDir);
+
     const executor = new PiRunExecutor({} as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     const abort = vi.fn(async () => undefined);
@@ -46,8 +65,11 @@ describe('PiRunExecutor.cancelThreadRun', () => {
   });
 
   test('returns cancelled true when a session has queued follow-up messages', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-cancel-'));
+    tempDirs.push(workspaceDir);
+
     const executor = new PiRunExecutor({} as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     const abort = vi.fn(async () => undefined);
@@ -67,8 +89,11 @@ describe('PiRunExecutor.cancelThreadRun', () => {
   });
 
   test('surfaces abort errors with cancellation context', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-cancel-'));
+    tempDirs.push(workspaceDir);
+
     const executor = new PiRunExecutor({} as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     setExecutorSession(executor, 'cli:default', {

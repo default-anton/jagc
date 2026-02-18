@@ -27,7 +27,7 @@ This doc is the implementation snapshot (not design intent).
 ### Runtime/adapters
 
 - Executors: `echo` (deterministic), `pi` (real agent)
-- `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts` (runtime/harness context, global AGENTS hierarchy, available skills metadata, local pi docs/examples paths, and Codex harness notes)
+- `PiRunExecutor` creates pi sessions with a custom `DefaultResourceLoader` that disables SDK built-in AGENTS.md/skills loading; equivalent context is injected by bundled workspace extensions in `defaults/extensions/*.ts` (runtime/harness context, AGENTS hierarchy/authoring rules, global AGENTS file payload, available skills metadata, local pi docs/examples paths, and Codex harness notes)
 - Telegram polling adapter (personal chats) with `/settings`, `/cancel`, `/new`, `/delete`, `/share`, `/model`, `/thinking`, `/auth` and pass-through for unknown slash commands (for prompt-template packages like `/handoff`)
 - SQLite persistence (`runs`, ingest idempotency + payload hash, `thread_sessions`, temporary `input_images`)
 - SQLite DB is configured in WAL mode with `foreign_keys=ON`, `synchronous=NORMAL`, and `busy_timeout=5000`
@@ -40,7 +40,7 @@ This doc is the implementation snapshot (not design intent).
 
 - Startup bootstraps `JAGC_WORKSPACE_DIR` (`~/.jagc` by default) with directory mode `0700`.
 - Bootstrap creates default `SYSTEM.md`, `AGENTS.md`, and `settings.json` from repo templates when missing (does not overwrite by default).
-- Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (does not overwrite by default), including context-injection extensions for runtime/harness context, global AGENTS.md, skills listing, local pi docs/examples references, and Codex harness instructions.
+- Bootstrap also seeds bundled `defaults/skills/**` and `defaults/extensions/**` files into the workspace when missing (does not overwrite by default), including context-injection extensions for runtime/harness context + AGENTS hierarchy/authoring rules, global AGENTS.md file loading, skills listing, local pi docs/examples references, and Codex harness instructions.
 - Dev-only overwrite mode (`JAGC_DEV_OVERWRITE_DEFAULTS=1`, enabled by `pnpm dev`) rewrites workspace `SYSTEM.md`, `AGENTS.md`, bundled `defaults/skills/**`, and bundled `defaults/extensions/**` on each startup, while preserving existing `settings.json`.
 - `pnpm dev` also prepends a repo-local `scripts/dev-bin/jagc` shim to `PATH`, so agent `bash` calls to `jagc` resolve to `pnpm dev:cli` from the current checkout instead of any globally installed `jagc` binary.
 - Default `settings.json` includes bootstrap pi packages (`pi-librarian`, `pi-subdir-context`) but remains user-editable after creation.

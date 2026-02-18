@@ -1,10 +1,26 @@
-import { describe, expect, test, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { PiRunExecutor } from '../src/runtime/pi-executor.js';
 import type { RunRecord } from '../src/shared/run-types.js';
 
 describe('PiRunExecutor.execute session persistence', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of tempDirs) {
+      await rm(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
   test('upserts the current session mapping after each run', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-session-sync-'));
+    tempDirs.push(workspaceDir);
+
     const runStore = {
       upsertThreadSession: vi.fn(async () => ({
         threadKey: 'cli:default',
@@ -14,7 +30,7 @@ describe('PiRunExecutor.execute session persistence', () => {
     };
 
     const executor = new PiRunExecutor(runStore as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     const session = {
@@ -38,6 +54,9 @@ describe('PiRunExecutor.execute session persistence', () => {
   });
 
   test('still reconciles session mapping when run execution fails', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-session-sync-'));
+    tempDirs.push(workspaceDir);
+
     const runStore = {
       upsertThreadSession: vi.fn(async () => ({
         threadKey: 'cli:default',
@@ -47,7 +66,7 @@ describe('PiRunExecutor.execute session persistence', () => {
     };
 
     const executor = new PiRunExecutor(runStore as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     setExecutorSession(executor, 'cli:default', {
@@ -71,6 +90,9 @@ describe('PiRunExecutor.execute session persistence', () => {
   });
 
   test('skips stale upsert when thread generation changes during run execution', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'jagc-pi-executor-session-sync-'));
+    tempDirs.push(workspaceDir);
+
     const runStore = {
       upsertThreadSession: vi.fn(async () => ({
         threadKey: 'cli:default',
@@ -80,7 +102,7 @@ describe('PiRunExecutor.execute session persistence', () => {
     };
 
     const executor = new PiRunExecutor(runStore as never, {
-      workspaceDir: process.cwd(),
+      workspaceDir,
     });
 
     setExecutorSession(executor, 'cli:default', {
