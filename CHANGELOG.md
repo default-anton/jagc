@@ -19,6 +19,7 @@ All notable changes to `jagc` are documented here.
 
 - Consolidated AGENTS.md semantics into `defaults/extensions/20-runtime-harness-context.ts` (hierarchy, preload/autoload behavior, and instruction-first authoring guidance), and reduced `defaults/extensions/30-global-agents-loader.ts` to path + `<agents_files>` payload injection only.
 - Reworked the default `defaults/AGENTS.md` template to be instruction-first (imperative entries) and removed embedded "how-to-fill" policy prose.
+- Synced bundled `defaults/skills/agent-browser/**` to upstream `vercel-labs/agent-browser` `v0.10.0`.
 
 ### Fixed
 
