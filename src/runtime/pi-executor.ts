@@ -12,7 +12,6 @@ import {
   type PromptOptions,
   SessionManager,
   SettingsManager,
-  type ToolDefinition,
 } from '@mariozechner/pi-coding-agent';
 import type { RunExecutor } from '../server/executor.js';
 import type { RunInputImageRecord, RunStore } from '../server/store.js';
@@ -20,13 +19,15 @@ import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
 import type { RunProgressEvent, RunProgressListener } from '../shared/run-progress.js';
 import type { RunOutput, RunRecord } from '../shared/run-types.js';
+import { createSessionCustomTools } from './session-custom-tools.js';
 import { ThreadRunController } from './thread-run-controller.js';
-import { createThreadScopedBashToolDefinition } from './thread-scoped-bash-tool.js';
 
 interface PiExecutorOptions {
   workspaceDir: string;
   sessionDir?: string;
   logger?: Logger;
+  telegramBotToken?: string;
+  telegramApiRoot?: string;
 }
 
 export const supportedThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
@@ -430,7 +431,12 @@ export class PiRunExecutor implements RunExecutor, ThreadControlService {
       modelRegistry: this.modelRegistry,
       settingsManager: this.settingsManager,
       resourceLoader,
-      customTools: [createThreadScopedBashToolDefinition(this.options.workspaceDir, threadKey) as ToolDefinition],
+      customTools: createSessionCustomTools({
+        workspaceDir: this.options.workspaceDir,
+        threadKey,
+        telegramBotToken: this.options.telegramBotToken,
+        telegramApiRoot: this.options.telegramApiRoot,
+      }),
     });
 
     return result.session;

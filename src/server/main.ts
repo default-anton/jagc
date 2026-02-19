@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     const piRunExecutor = new PiRunExecutor(runStore, {
       workspaceDir: config.JAGC_WORKSPACE_DIR,
       logger: rootLogger.child({ component: 'run_executor' }),
+      telegramBotToken: config.JAGC_TELEGRAM_BOT_TOKEN,
     });
 
     runExecutor = piRunExecutor;

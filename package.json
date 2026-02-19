@@ -52,7 +52,7 @@
     "prepack": "pnpm build",
     "start": "node dist/server/main.mjs",
     "test": "vitest run",
-    "test:telegram": "vitest run tests/telegram-bot-api-clone.test.ts tests/telegram-markdown.test.ts tests/telegram-polling.test.ts tests/telegram-polling-message-flow.test.ts tests/telegram-runtime-controls.test.ts tests/telegram-system-smoke.test.ts",
+    "test:telegram": "vitest run tests/session-custom-tools.test.ts tests/telegram-bot-api-clone.test.ts tests/telegram-markdown.test.ts tests/telegram-polling.test.ts tests/telegram-polling-message-flow.test.ts tests/telegram-runtime-controls.test.ts tests/telegram-send-files-tool.test.ts tests/telegram-system-smoke.test.ts",
     "test:pack": "scripts/pack-smoke.sh",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",

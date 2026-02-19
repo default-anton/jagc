@@ -245,6 +245,105 @@ describe('TelegramBotApiClone', () => {
     }
   });
 
+  test('parses multipart payloads for sendPhoto', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const form = new FormData();
+      form.set('chat_id', '101');
+      form.set('caption', 'photo caption');
+      form.set('photo', new Blob(['jpeg-data'], { type: 'image/jpeg' }), 'sample.jpg');
+
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/sendPhoto`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(response.status).toBe(200);
+
+      const calls = clone.getBotCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe('sendPhoto');
+      expect(calls[0]?.payload.caption).toBe('photo caption');
+
+      const photoPayload = calls[0]?.payload.photo as { filename?: string; content?: string };
+      expect(photoPayload.filename).toBe('sample.jpg');
+      expect(photoPayload.content).toBe('jpeg-data');
+    } finally {
+      await clone.stop();
+    }
+  });
+
+  test('parses multipart payloads for sendMediaGroup', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const form = new FormData();
+      form.set('chat_id', '101');
+      form.set(
+        'media',
+        JSON.stringify([
+          { type: 'photo', media: 'attach://file-1', caption: 'first' },
+          { type: 'photo', media: 'attach://file-2' },
+        ]),
+      );
+      form.set('file-1', new Blob(['jpeg-data-1'], { type: 'image/jpeg' }), 'one.jpg');
+      form.set('file-2', new Blob(['jpeg-data-2'], { type: 'image/jpeg' }), 'two.jpg');
+
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/sendMediaGroup`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(response.status).toBe(200);
+
+      const calls = clone.getBotCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe('sendMediaGroup');
+
+      const media = calls[0]?.payload.media as Array<{ media?: string; caption?: string }>;
+      expect(media).toHaveLength(2);
+      expect(media[0]?.media).toBe('attach://file-1');
+      expect(media[0]?.caption).toBe('first');
+    } finally {
+      await clone.stop();
+    }
+  });
+
+  test('rejects sendMediaGroup when attach reference is missing', async () => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const form = new FormData();
+      form.set('chat_id', '101');
+      form.set(
+        'media',
+        JSON.stringify([
+          { type: 'photo', media: 'attach://file-1', caption: 'first' },
+          { type: 'photo', media: 'attach://missing-file' },
+        ]),
+      );
+      form.set('file-1', new Blob(['jpeg-data-1'], { type: 'image/jpeg' }), 'one.jpg');
+
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/sendMediaGroup`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(response.status).toBe(200);
+
+      const body = (await response.json()) as { ok: boolean; error_code?: number; description?: string };
+      expect(body.ok).toBe(false);
+      expect(body.error_code).toBe(400);
+      expect(body.description).toContain('attachment missing-file is missing');
+    } finally {
+      await clone.stop();
+    }
+  });
+
   test('supports createForumTopic and returns message_thread_id', async () => {
     const clone = new TelegramBotApiClone({ token: testBotToken });
     await clone.start();

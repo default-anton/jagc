@@ -638,6 +638,70 @@ export class TelegramBotApiClone {
           text,
         };
       }
+      case 'sendPhoto': {
+        this.recordBotCall({ method, payload });
+
+        const chatId = toNumber(payload.chat_id) ?? 0;
+        const caption = typeof payload.caption === 'string' ? payload.caption : '';
+        const messageThreadId = toNumber(payload.message_thread_id);
+        const photo = parsePhotoPayload(payload.photo, payload);
+        assertTelegramMessageThreadId(messageThreadId);
+
+        return {
+          message_id: this.nextMessageId++,
+          date: Math.floor(Date.now() / 1000),
+          chat: {
+            id: chatId,
+            type: 'private',
+          },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
+          caption,
+          photo: [
+            {
+              file_id: `file-${this.nextMessageId}`,
+              file_unique_id: `file-unique-${this.nextMessageId}`,
+              width: 1600,
+              height: 900,
+              file_size: photo.content.length,
+            },
+          ],
+        };
+      }
+      case 'sendMediaGroup': {
+        this.recordBotCall({ method, payload });
+
+        const chatId = toNumber(payload.chat_id) ?? 0;
+        const messageThreadId = toNumber(payload.message_thread_id);
+        assertTelegramMessageThreadId(messageThreadId);
+
+        const media = parseMediaGroupPayload(payload);
+        if (media.length < 2 || media.length > 10) {
+          throw new TelegramCloneApiError({
+            errorCode: 400,
+            description: 'Bad Request: media group must include 2-10 items',
+          });
+        }
+
+        return media.map((item) => ({
+          message_id: this.nextMessageId++,
+          date: Math.floor(Date.now() / 1000),
+          chat: {
+            id: chatId,
+            type: 'private',
+          },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
+          ...(item.caption ? { caption: item.caption } : {}),
+          photo: [
+            {
+              file_id: `file-${this.nextMessageId}`,
+              file_unique_id: `file-unique-${this.nextMessageId}`,
+              width: 1600,
+              height: 900,
+              file_size: item.content.length,
+            },
+          ],
+        }));
+      }
       case 'sendDocument': {
         this.recordBotCall({ method, payload });
 
@@ -855,26 +919,94 @@ function assertTelegramMessageThreadId(messageThreadId: number | null): void {
   });
 }
 
+function parsePhotoPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
+  return parseAttachedFilePayload(value, payload, 'photo.jpg');
+}
+
 function parseDocumentPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
+  return parseAttachedFilePayload(value, payload, 'document.txt');
+}
+
+function parseMediaGroupPayload(
+  payload: Record<string, unknown>,
+): Array<{ fileName: string; content: string; caption?: string }> {
+  if (!Array.isArray(payload.media)) {
+    throw new TelegramCloneApiError({
+      errorCode: 400,
+      description: 'Bad Request: media must be an array',
+    });
+  }
+
+  return payload.media.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new TelegramCloneApiError({
+        errorCode: 400,
+        description: `Bad Request: media[${index}] must be an object`,
+      });
+    }
+
+    const record = entry as Record<string, unknown>;
+    const type = typeof record.type === 'string' ? record.type : '';
+    if (type !== 'photo') {
+      throw new TelegramCloneApiError({
+        errorCode: 400,
+        description: `Bad Request: unsupported media type ${type || 'unknown'}`,
+      });
+    }
+
+    const mediaFile = parseAttachedFilePayload(record.media, payload, `photo-${index + 1}.jpg`);
+    const caption = typeof record.caption === 'string' ? record.caption : undefined;
+
+    return {
+      ...mediaFile,
+      ...(caption ? { caption } : {}),
+    };
+  });
+}
+
+function parseAttachedFilePayload(
+  value: unknown,
+  payload: Record<string, unknown>,
+  fallbackName: string,
+): { fileName: string; content: string } {
   let resolvedValue = value;
   const visitedAttachKeys = new Set<string>();
 
   while (typeof resolvedValue === 'string' && resolvedValue.startsWith('attach://')) {
     const attachKey = resolvedValue.slice('attach://'.length);
+    if (attachKey.length === 0) {
+      throw new TelegramCloneApiError({
+        errorCode: 400,
+        description: 'Bad Request: attachment reference is missing key',
+      });
+    }
+
     if (visitedAttachKeys.has(attachKey)) {
-      break;
+      throw new TelegramCloneApiError({
+        errorCode: 400,
+        description: `Bad Request: cyclic attachment reference for ${attachKey}`,
+      });
     }
 
     visitedAttachKeys.add(attachKey);
-    resolvedValue = payload[attachKey] ?? null;
+
+    const attachedValue = payload[attachKey];
+    if (attachedValue === undefined) {
+      throw new TelegramCloneApiError({
+        errorCode: 400,
+        description: `Bad Request: attachment ${attachKey} is missing`,
+      });
+    }
+
+    resolvedValue = attachedValue;
   }
 
   if (!resolvedValue || typeof resolvedValue !== 'object') {
-    return fallbackDocumentPayload(payload);
+    return fallbackAttachedFilePayload(payload, fallbackName);
   }
 
   const record = resolvedValue as Record<string, unknown>;
-  const fileName = typeof record.filename === 'string' && record.filename.length > 0 ? record.filename : 'document.txt';
+  const fileName = typeof record.filename === 'string' && record.filename.length > 0 ? record.filename : fallbackName;
   const content = typeof record.content === 'string' ? record.content : '';
 
   return {
@@ -883,11 +1015,14 @@ function parseDocumentPayload(value: unknown, payload: Record<string, unknown>):
   };
 }
 
-function fallbackDocumentPayload(payload: Record<string, unknown>): { fileName: string; content: string } {
-  return findMultipartDocumentPayload(payload) ?? { fileName: 'document.txt', content: '' };
+function fallbackAttachedFilePayload(
+  payload: Record<string, unknown>,
+  fallbackName: string,
+): { fileName: string; content: string } {
+  return findMultipartAttachedFile(payload) ?? { fileName: fallbackName, content: '' };
 }
 
-function findMultipartDocumentPayload(payload: Record<string, unknown>): { fileName: string; content: string } | null {
+function findMultipartAttachedFile(payload: Record<string, unknown>): { fileName: string; content: string } | null {
   for (const value of Object.values(payload)) {
     if (!value || typeof value !== 'object') {
       continue;
