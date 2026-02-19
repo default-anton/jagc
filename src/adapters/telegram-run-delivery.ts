@@ -7,9 +7,9 @@ import type { Logger } from '../shared/logger.js';
 import type { RunProgressEvent } from '../shared/run-progress.js';
 import type { RunRecord } from '../shared/run-types.js';
 import { normalizeTelegramMessageThreadId, type TelegramRoute } from '../shared/telegram-threading.js';
-import { extractTelegramRetryAfterSeconds } from './telegram-api-errors.js';
 import { renderTelegramMarkdown, type TelegramRenderedAttachment } from './telegram-markdown.js';
 import { TelegramRunProgressReporter } from './telegram-progress.js';
+import { callTelegramWithRetry } from './telegram-retry.js';
 
 const defaultPollIntervalMs = 500;
 const defaultMessageLimit = 3500;
@@ -181,24 +181,6 @@ export class TelegramRunDelivery {
       document,
       caption,
     });
-  }
-}
-
-async function callTelegramWithRetry<T>(operation: () => Promise<T>, maxAttempts = 3): Promise<T> {
-  let attempt = 0;
-
-  while (true) {
-    try {
-      return await operation();
-    } catch (error) {
-      const retryAfterSeconds = extractTelegramRetryAfterSeconds(error);
-      if (retryAfterSeconds === null || attempt >= maxAttempts - 1) {
-        throw error;
-      }
-
-      attempt += 1;
-      await sleep(Math.ceil(retryAfterSeconds * 1000));
-    }
   }
 }
 
