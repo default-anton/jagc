@@ -3,6 +3,11 @@ export interface TelegramRoute {
   messageThreadId?: number;
 }
 
+export interface TelegramBotApiRoutePayload {
+  chat_id: number;
+  message_thread_id?: number;
+}
+
 const telegramThreadKeyPattern = /^telegram:chat:(-?\d+)(?::topic:(\d+))?$/u;
 
 export function normalizeTelegramMessageThreadId(messageThreadId: number | undefined): number | undefined {
@@ -23,6 +28,15 @@ export function normalizeTelegramMessageThreadId(messageThreadId: number | undef
   }
 
   return messageThreadId;
+}
+
+export function telegramBotApiRoutePayload(route: TelegramRoute): TelegramBotApiRoutePayload {
+  const messageThreadId = normalizeTelegramMessageThreadId(route.messageThreadId);
+
+  return {
+    chat_id: route.chatId,
+    ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+  };
 }
 
 export function telegramThreadKeyFromRoute(route: TelegramRoute): string {

@@ -23,3 +23,12 @@ export function configureSqliteDatabase(database: SqliteDatabase): void {
   database.pragma('synchronous = NORMAL');
   database.pragma('busy_timeout = 5000');
 }
+
+export function isSqliteConstraintViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return false;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.startsWith('SQLITE_CONSTRAINT');
+}

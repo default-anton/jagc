@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   normalizeTelegramMessageThreadId,
+  telegramBotApiRoutePayload,
   telegramRoute,
   telegramRouteFromThreadKey,
   telegramThreadKeyFromRoute,
@@ -22,5 +23,14 @@ describe('telegram threading helpers', () => {
     expect(normalizeTelegramMessageThreadId(333)).toBe(333);
     expect(telegramRoute(101, 333)).toEqual({ chatId: 101, messageThreadId: 333 });
     expect(telegramThreadKeyFromRoute({ chatId: 101, messageThreadId: 333 })).toBe('telegram:chat:101:topic:333');
+  });
+
+  test('formats Telegram Bot API route payloads with normalized thread id', () => {
+    expect(telegramBotApiRoutePayload({ chatId: 101 })).toEqual({ chat_id: 101 });
+    expect(telegramBotApiRoutePayload({ chatId: 101, messageThreadId: 1 })).toEqual({ chat_id: 101 });
+    expect(telegramBotApiRoutePayload({ chatId: 101, messageThreadId: 333 })).toEqual({
+      chat_id: 101,
+      message_thread_id: 333,
+    });
   });
 });

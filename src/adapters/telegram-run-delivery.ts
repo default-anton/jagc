@@ -6,8 +6,9 @@ import type { RunService } from '../server/service.js';
 import type { Logger } from '../shared/logger.js';
 import type { RunProgressEvent } from '../shared/run-progress.js';
 import type { RunRecord } from '../shared/run-types.js';
-import { normalizeTelegramMessageThreadId, type TelegramRoute } from '../shared/telegram-threading.js';
+import { type TelegramRoute, telegramBotApiRoutePayload } from '../shared/telegram-threading.js';
 import { renderTelegramMarkdown, type TelegramRenderedAttachment } from './telegram-markdown.js';
+import { userFacingError } from './telegram-polling-helpers.js';
 import { TelegramRunProgressReporter } from './telegram-progress.js';
 import { callTelegramWithRetry } from './telegram-retry.js';
 
@@ -169,7 +170,7 @@ export class TelegramRunDelivery {
 
   private sendMessage(route: TelegramRoute, text: string, entities?: MessageEntity[]): Promise<unknown> {
     return this.options.bot.api.raw.sendMessage({
-      ...routePayload(route),
+      ...telegramBotApiRoutePayload(route),
       text,
       ...(entities && entities.length > 0 ? { entities } : {}),
     });
@@ -177,20 +178,11 @@ export class TelegramRunDelivery {
 
   private sendDocument(route: TelegramRoute, document: InputFile, caption: string): Promise<unknown> {
     return this.options.bot.api.raw.sendDocument({
-      ...routePayload(route),
+      ...telegramBotApiRoutePayload(route),
       document,
       caption,
     });
   }
-}
-
-function routePayload(route: TelegramRoute): { chat_id: number; message_thread_id?: number } {
-  const messageThreadId = normalizeTelegramMessageThreadId(route.messageThreadId);
-
-  return {
-    chat_id: route.chatId,
-    ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
-  };
 }
 
 type FormattedRunResult =
@@ -257,12 +249,4 @@ function chunkMessage(text: string, maxLength: number): string[] {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.message === 'telegram run wait aborted';
-}
-
-function userFacingError(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message.slice(0, 180);
-  }
-
-  return 'Action failed. Please try again.';
 }

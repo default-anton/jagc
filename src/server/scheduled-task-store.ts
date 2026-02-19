@@ -14,7 +14,7 @@ import type {
   ScheduledTaskRunStatus,
   UpdateScheduledTaskInput,
 } from './scheduled-task-types.js';
-import type { SqliteDatabase } from './sqlite.js';
+import { isSqliteConstraintViolation, type SqliteDatabase } from './sqlite.js';
 
 export interface ScheduledTaskStore {
   init(): Promise<void>;
@@ -467,19 +467,6 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
 
     return row ? mapTaskRunRow(row) : null;
   }
-}
-
-function isSqliteConstraintViolation(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  if (!('code' in error)) {
-    return false;
-  }
-
-  const code = (error as { code?: string }).code;
-  return typeof code === 'string' && code.startsWith('SQLITE_CONSTRAINT');
 }
 
 function nowIsoTimestamp(): string {

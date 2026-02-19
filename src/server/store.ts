@@ -3,7 +3,7 @@ import { hashMessageIngestPayload } from '../shared/input-images.js';
 import type { Logger } from '../shared/logger.js';
 import { noopLogger } from '../shared/logger.js';
 import type { DeliveryMode, MessageIngest, RunOutput, RunRecord } from '../shared/run-types.js';
-import type { SqliteDatabase } from './sqlite.js';
+import { isSqliteConstraintViolation, type SqliteDatabase } from './sqlite.js';
 import {
   type ImageLogContext,
   type PendingTelegramImageIngest,
@@ -432,19 +432,6 @@ function parseOutput(runId: string, serialized: string | null): RunOutput | null
       `failed to parse run ${runId} output JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-}
-
-function isSqliteConstraintViolation(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  if (!('code' in error)) {
-    return false;
-  }
-
-  const code = (error as { code?: string }).code;
-  return typeof code === 'string' && code.startsWith('SQLITE_CONSTRAINT');
 }
 
 function nowIsoTimestamp(): string {

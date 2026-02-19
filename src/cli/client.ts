@@ -56,12 +56,12 @@ export async function sendMessage(apiUrl: string, payload: MessageRequest): Prom
     body: JSON.stringify(payload),
   });
 
-  return parseRunResponse(response);
+  return parseApiResponse(response, runResponseSchema);
 }
 
 export async function getRun(apiUrl: string, runId: string): Promise<ApiRunResponse> {
   const response = await fetch(`${apiUrl}/v1/runs/${encodeURIComponent(runId)}`);
-  return parseRunResponse(response);
+  return parseApiResponse(response, runResponseSchema);
 }
 
 export async function waitForRun(
@@ -103,17 +103,7 @@ export async function healthcheck(apiUrl: string): Promise<void> {
 
 export async function getAuthProviders(apiUrl: string): Promise<ApiAuthProvidersResponse> {
   const response = await fetch(`${apiUrl}/v1/auth/providers`);
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return authProvidersResponseSchema.parse(responseBody);
+  return parseApiResponse(response, authProvidersResponseSchema);
 }
 
 export async function startOAuthLogin(
@@ -126,7 +116,7 @@ export async function startOAuthLogin(
     headers: ownerKey ? oauthOwnerHeader(ownerKey) : undefined,
   });
 
-  return parseOAuthLoginAttemptResponse(response);
+  return parseApiResponse(response, oauthLoginAttemptSchema);
 }
 
 export async function getOAuthLoginAttempt(
@@ -137,7 +127,7 @@ export async function getOAuthLoginAttempt(
   const response = await fetch(`${apiUrl}/v1/auth/logins/${encodeURIComponent(attemptId)}`, {
     headers: oauthOwnerHeader(ownerKey),
   });
-  return parseOAuthLoginAttemptResponse(response);
+  return parseApiResponse(response, oauthLoginAttemptSchema);
 }
 
 export async function submitOAuthLoginInput(
@@ -157,7 +147,7 @@ export async function submitOAuthLoginInput(
     body: JSON.stringify(parsedPayload),
   });
 
-  return parseOAuthLoginAttemptResponse(response);
+  return parseApiResponse(response, oauthLoginAttemptSchema);
 }
 
 export async function cancelOAuthLogin(
@@ -170,27 +160,17 @@ export async function cancelOAuthLogin(
     headers: oauthOwnerHeader(ownerKey),
   });
 
-  return parseOAuthLoginAttemptResponse(response);
+  return parseApiResponse(response, oauthLoginAttemptSchema);
 }
 
 export async function getModelCatalog(apiUrl: string): Promise<ApiModelCatalogResponse> {
   const response = await fetch(`${apiUrl}/v1/models`);
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return modelCatalogResponseSchema.parse(responseBody);
+  return parseApiResponse(response, modelCatalogResponseSchema);
 }
 
 export async function getThreadRuntime(apiUrl: string, threadKey: string): Promise<ApiThreadRuntimeStateResponse> {
   const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/runtime`);
-  return parseThreadRuntimeResponse(response);
+  return parseApiResponse(response, threadRuntimeStateSchema);
 }
 
 export async function setThreadModel(
@@ -198,15 +178,12 @@ export async function setThreadModel(
   threadKey: string,
   payload: SetThreadModelRequest,
 ): Promise<ApiThreadRuntimeStateResponse> {
-  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/model`, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  return parseThreadRuntimeResponse(response);
+  return sendJsonRequest(
+    `${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/model`,
+    'PUT',
+    payload,
+    threadRuntimeStateSchema,
+  );
 }
 
 export async function setThreadThinkingLevel(
@@ -214,15 +191,12 @@ export async function setThreadThinkingLevel(
   threadKey: string,
   payload: SetThreadThinkingRequest,
 ): Promise<ApiThreadRuntimeStateResponse> {
-  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/thinking`, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  return parseThreadRuntimeResponse(response);
+  return sendJsonRequest(
+    `${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/thinking`,
+    'PUT',
+    payload,
+    threadRuntimeStateSchema,
+  );
 }
 
 export async function cancelThreadRun(apiUrl: string, threadKey: string): Promise<ApiCancelThreadRunResponse> {
@@ -230,7 +204,7 @@ export async function cancelThreadRun(apiUrl: string, threadKey: string): Promis
     method: 'POST',
   });
 
-  return parseCancelThreadRunResponse(response);
+  return parseApiResponse(response, cancelThreadRunResponseSchema);
 }
 
 export async function resetThreadSession(apiUrl: string, threadKey: string): Promise<ApiResetThreadSessionResponse> {
@@ -238,7 +212,7 @@ export async function resetThreadSession(apiUrl: string, threadKey: string): Pro
     method: 'DELETE',
   });
 
-  return parseResetThreadSessionResponse(response);
+  return parseApiResponse(response, resetThreadSessionResponseSchema);
 }
 
 export async function shareThreadSession(apiUrl: string, threadKey: string): Promise<ApiShareThreadSessionResponse> {
@@ -246,7 +220,7 @@ export async function shareThreadSession(apiUrl: string, threadKey: string): Pro
     method: 'POST',
   });
 
-  return parseShareThreadSessionResponse(response);
+  return parseApiResponse(response, shareThreadSessionResponseSchema);
 }
 
 export async function createTask(
@@ -254,15 +228,12 @@ export async function createTask(
   threadKey: string,
   payload: CreateTaskRequest,
 ): Promise<ApiTaskResponse> {
-  const response = await fetch(`${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/tasks`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  return parseTaskResponse(response);
+  return sendJsonRequest(
+    `${apiUrl}/v1/threads/${encodeURIComponent(threadKey)}/tasks`,
+    'POST',
+    payload,
+    taskResponseSchema,
+  );
 }
 
 export async function listTasks(
@@ -280,24 +251,16 @@ export async function listTasks(
   }
 
   const response = await fetch(url);
-  return parseTaskListResponse(response);
+  return parseApiResponse(response, taskListResponseSchema);
 }
 
 export async function getTask(apiUrl: string, taskId: string): Promise<ApiTaskResponse> {
   const response = await fetch(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`);
-  return parseTaskResponse(response);
+  return parseApiResponse(response, taskResponseSchema);
 }
 
 export async function updateTask(apiUrl: string, taskId: string, payload: UpdateTaskRequest): Promise<ApiTaskResponse> {
-  const response = await fetch(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    method: 'PATCH',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  return parseTaskResponse(response);
+  return sendJsonRequest(`${apiUrl}/v1/tasks/${encodeURIComponent(taskId)}`, 'PATCH', payload, taskResponseSchema);
 }
 
 export async function deleteTask(apiUrl: string, taskId: string): Promise<{ deleted: boolean }> {
@@ -305,16 +268,7 @@ export async function deleteTask(apiUrl: string, taskId: string): Promise<{ dele
     method: 'DELETE',
   });
 
-  const responseBody = await parseJsonResponse(response);
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return deleteTaskResponseSchema.parse(responseBody);
+  return parseApiResponse(response, deleteTaskResponseSchema);
 }
 
 export async function runTaskNow(apiUrl: string, taskId: string): Promise<ApiRunNowTaskResponse> {
@@ -322,7 +276,7 @@ export async function runTaskNow(apiUrl: string, taskId: string): Promise<ApiRun
     method: 'POST',
   });
 
-  return parseRunNowTaskResponse(response);
+  return parseApiResponse(response, runNowTaskResponseSchema);
 }
 
 function oauthOwnerHeader(ownerKey: string): Record<string, string> {
@@ -331,130 +285,43 @@ function oauthOwnerHeader(ownerKey: string): Record<string, string> {
   };
 }
 
-async function parseRunResponse(response: Response): Promise<ApiRunResponse> {
-  const responseBody = await parseJsonResponse(response);
+async function sendJsonRequest<T>(
+  url: string,
+  method: 'POST' | 'PUT' | 'PATCH',
+  payload: unknown,
+  schema: ResponseBodySchema<T>,
+): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
 
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return runResponseSchema.parse(responseBody);
+  return parseApiResponse(response, schema);
 }
 
-async function parseOAuthLoginAttemptResponse(response: Response): Promise<ApiOAuthLoginAttemptResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return oauthLoginAttemptSchema.parse(responseBody);
+interface ResponseBodySchema<T> {
+  parse(input: unknown): T;
 }
 
-async function parseThreadRuntimeResponse(response: Response): Promise<ApiThreadRuntimeStateResponse> {
+async function parseApiResponse<T>(response: Response, schema: ResponseBodySchema<T>): Promise<T> {
   const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return threadRuntimeStateSchema.parse(responseBody);
+  throwForUnexpectedResponse(response, responseBody);
+  return schema.parse(responseBody);
 }
 
-async function parseCancelThreadRunResponse(response: Response): Promise<ApiCancelThreadRunResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
+function throwForUnexpectedResponse(response: Response, responseBody: unknown): void {
+  if (response.ok) {
+    return;
   }
 
-  return cancelThreadRunResponseSchema.parse(responseBody);
-}
-
-async function parseResetThreadSessionResponse(response: Response): Promise<ApiResetThreadSessionResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return resetThreadSessionResponseSchema.parse(responseBody);
-}
-
-async function parseShareThreadSessionResponse(response: Response): Promise<ApiShareThreadSessionResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return shareThreadSessionResponseSchema.parse(responseBody);
-}
-
-async function parseTaskResponse(response: Response): Promise<ApiTaskResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return taskResponseSchema.parse(responseBody);
-}
-
-async function parseTaskListResponse(response: Response): Promise<ApiTaskListResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return taskListResponseSchema.parse(responseBody);
-}
-
-async function parseRunNowTaskResponse(response: Response): Promise<ApiRunNowTaskResponse> {
-  const responseBody = await parseJsonResponse(response);
-
-  if (!response.ok) {
-    const message =
-      responseBody && typeof responseBody === 'object'
-        ? extractErrorMessage(responseBody)
-        : `request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return runNowTaskResponseSchema.parse(responseBody);
+  const message =
+    responseBody && typeof responseBody === 'object'
+      ? extractErrorMessage(responseBody)
+      : `request failed with status ${response.status}`;
+  throw new Error(message);
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {
