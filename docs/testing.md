@@ -26,10 +26,12 @@ Primary coverage lives in:
 - `tests/telegram-polling-message-flow.test.ts` (plain text, `/steer`, topic-thread key mapping, topic-aware delivery payloads, append-log progress + typing indicator behavior, `>`/`~` stream rendering, tool-argument snippet rendering, completion states, no-timeout long-run delivery, entity-based Markdown terminal rendering, language-aware code attachments, progress overflow splitting into additional Telegram messages, long-output chunking, and adapter-level recovery from transient polling errors)
 - `tests/telegram-runtime-controls.test.ts` (settings/model/thinking/auth callback flows, including topic-thread `/new`/callback scoping)
 - `tests/telegram-polling.test.ts` (command/callback parsing and stale callback recovery)
-- `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), topic API support (`createForumTopic`), malformed payload handling, urlencoded payload parsing, and multipart `sendDocument` payload parsing)
+- `tests/telegram-bot-api-clone.test.ts` (clone contract edges: `allowed_updates`/offset semantics, transient `getUpdates` error retry compatibility (`500`/`429 retry_after`), topic API support (`createForumTopic`), malformed payload handling, urlencoded payload parsing, and multipart `sendDocument`/`sendPhoto`/`sendMediaGroup` payload parsing)
+- `tests/telegram-send-files-tool.test.ts` (Telegram custom tool behavior: single-photo send, photo media-group chunking, >10 photo split, mixed photo+document ordering, and retry-after handling)
 - `tests/telegram-markdown.test.ts` (Markdown AST-to-entity rendering, entity-safe chunking, language-aware code attachment filename mapping, and a small fixture corpus of realistic messy LLM markdown inputs)
 - `tests/telegram-system-smoke.test.ts` (system-level smoke: real run service + scheduler + scheduled-task service + SQLite + Fastify app + polling adapter + clone)
 - `tests/cli-service-manager.test.ts` (launchd service-manager helpers: plist rendering, server entrypoint resolution, launchctl output parsing)
+- `tests/session-custom-tools.test.ts` (session tool-registration guards, including Telegram-only tool availability)
 
 This clone is intentionally narrow: it only implements the polling and messaging surface that jagc uses in v0:
 
@@ -42,6 +44,8 @@ This clone is intentionally narrow: it only implements the polling and messaging
 - `sendChatAction`
 - `deleteMessage`
 - `answerCallbackQuery`
+- `sendPhoto`
+- `sendMediaGroup`
 - `sendDocument`
 
 ### Why

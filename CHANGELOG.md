@@ -13,11 +13,13 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added Telegram-thread custom tool `telegram_send_files` in pi sessions for direct outbound file delivery to the active chat/topic route, with photo-album grouping (`sendMediaGroup` up to 10), photos-first ordering, document fallback, and structured partial-failure reporting.
+- Added Telegram clone + behavioral test coverage for outbound media methods (`sendPhoto`, `sendMediaGroup`) and new runtime tests for Telegram-only session tool registration.
 
 ### Changed
 
-- None.
+- `PiRunExecutor` now builds session custom tools per thread (`bash` always, `telegram_send_files` only for Telegram threads with bot auth configured).
+- Extended focused Telegram test loop (`pnpm test:telegram`) to include `tests/telegram-send-files-tool.test.ts`.
 
 ### Fixed
 
