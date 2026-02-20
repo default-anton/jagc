@@ -13,6 +13,20 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
+- None.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+## [0.6.0] - 2026-02-19
+
+### Added
+
 - Added first-class Telegram audio/video delivery in `telegram_send_files` (`sendVideo` for `.mp4`, `sendAudio` for `.mp3`/`.m4a`) with deterministic photos→videos→audios→documents ordering, explicit unsupported-kind downgrade warnings, and additive result counters (`sent.videos`, `sent.audios`).
 - Added Telegram clone + behavioral test coverage for outbound media methods (`sendPhoto`, `sendMediaGroup`, `sendVideo`, `sendAudio`) and runtime tests for Telegram-only session tool registration.
 
