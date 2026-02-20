@@ -275,6 +275,60 @@ describe('TelegramBotApiClone', () => {
     }
   });
 
+  test.each([
+    {
+      method: 'sendVideo',
+      mediaField: 'video',
+      contentType: 'video/mp4',
+      caption: 'video caption',
+      filename: 'sample.mp4',
+      content: 'mp4-data',
+    },
+    {
+      method: 'sendAudio',
+      mediaField: 'audio',
+      contentType: 'audio/mpeg',
+      caption: 'audio caption',
+      filename: 'sample.mp3',
+      content: 'mp3-data',
+    },
+  ])('parses multipart payloads for $method', async ({
+    method,
+    mediaField,
+    contentType,
+    caption,
+    filename,
+    content,
+  }) => {
+    const clone = new TelegramBotApiClone({ token: testBotToken });
+    await clone.start();
+
+    try {
+      const form = new FormData();
+      form.set('chat_id', '101');
+      form.set('caption', caption);
+      form.set(mediaField, new Blob([content], { type: contentType }), filename);
+
+      const response = await fetch(`${clone.apiRoot}/bot${encodeURIComponent(testBotToken)}/${method}`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(response.status).toBe(200);
+
+      const calls = clone.getBotCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe(method);
+      expect(calls[0]?.payload.caption).toBe(caption);
+
+      const mediaPayload = calls[0]?.payload[mediaField] as { filename?: string; content?: string };
+      expect(mediaPayload.filename).toBe(filename);
+      expect(mediaPayload.content).toBe(content);
+    } finally {
+      await clone.stop();
+    }
+  });
+
   test('parses multipart payloads for sendMediaGroup', async () => {
     const clone = new TelegramBotApiClone({ token: testBotToken });
     await clone.start();

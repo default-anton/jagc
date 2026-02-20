@@ -1,5 +1,5 @@
 import { open, stat } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { extname, isAbsolute, resolve } from 'node:path';
 
 import { type Bot, InputFile } from 'grammy';
 import { callTelegramWithRetry } from '../adapters/telegram-retry.js';
@@ -14,9 +14,16 @@ export const telegramMediaGroupMaxItems = 10;
 export const defaultRetryAttempts = 3;
 
 const photoMimes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const videoExtensions = new Set(['.mp4']);
+const audioExtensions = new Set(['.mp3', '.m4a']);
+
+export const requestedSendKinds = ['auto', 'photo', 'video', 'audio', 'document'] as const;
+export type RequestedSendKind = (typeof requestedSendKinds)[number];
+
+export const sendOrder = ['photo', 'video', 'audio', 'document'] as const;
+export type SendKind = (typeof sendOrder)[number];
 
 export type CaptionMode = 'per_file' | 'first_only';
-export type SendKind = 'photo' | 'document';
 
 export interface PreparedFile {
   path: string;
@@ -44,6 +51,8 @@ export interface ToolResultDetails {
   sent: {
     photo_groups: number;
     photos: number;
+    videos: number;
+    audios: number;
     documents: number;
   };
   warnings: string[];
@@ -63,7 +72,7 @@ export class ToolInputError extends Error {
 }
 
 export async function prepareFiles(
-  files: Array<{ path: string; kind?: 'auto' | 'photo' | 'document'; caption?: string }>,
+  files: Array<{ path: string; kind?: RequestedSendKind; caption?: string }>,
   workspaceDir: string,
   warnings: string[],
 ): Promise<PreparedFile[]> {
@@ -87,7 +96,7 @@ export async function prepareFiles(
     if (sizeBytes > telegramDocumentMaxBytes) {
       throw new ToolInputError(
         'file_too_large',
-        `File exceeds Telegram bot document limit (${telegramDocumentMaxBytes} bytes): ${resolvedPath}`,
+        `File exceeds Telegram bot non-photo limit (${telegramDocumentMaxBytes} bytes): ${resolvedPath}`,
       );
     }
 
@@ -97,19 +106,14 @@ export async function prepareFiles(
     const normalizedCaption = normalizeCaption(file.caption, warnings, file.path);
     const requestedKind = file.kind ?? 'auto';
 
-    let kind: SendKind;
-    if (requestedKind === 'document') {
-      kind = 'document';
-    } else if (requestedKind === 'photo') {
-      if (canSendAsPhoto(mimeType, sizeBytes)) {
-        kind = 'photo';
-      } else {
-        kind = 'document';
-        warnings.push(`downgraded ${file.path} to document because it does not meet photo constraints`);
-      }
-    } else {
-      kind = canSendAsPhoto(mimeType, sizeBytes) ? 'photo' : 'document';
-    }
+    const kind = resolveSendKind({
+      requestedKind,
+      filePath: file.path,
+      resolvedPath,
+      mimeType,
+      sizeBytes,
+      warnings,
+    });
 
     prepared.push({
       path: file.path,
@@ -250,6 +254,85 @@ async function sendPhotoGroup(
   }
 }
 
+type DirectSendKind = Exclude<SendKind, 'photo'>;
+
+const sentCounterByKind: Record<DirectSendKind, 'videos' | 'audios' | 'documents'> = {
+  video: 'videos',
+  audio: 'audios',
+  document: 'documents',
+};
+
+async function sendFilesIndividually(
+  files: PreparedFile[],
+  kind: DirectSendKind,
+  result: ToolResultDetails,
+  send: (file: PreparedFile) => Promise<{ message_id: number }>,
+): Promise<void> {
+  const sentCounter = sentCounterByKind[kind];
+
+  for (const file of files) {
+    try {
+      const message = await send(file);
+      result.sent[sentCounter] += 1;
+      result.items.push({
+        path: file.path,
+        resolved_path: file.resolvedPath,
+        kind,
+        status: 'sent',
+        telegram_message_id: message.message_id,
+      });
+    } catch (error) {
+      result.items.push({
+        path: file.path,
+        resolved_path: file.resolvedPath,
+        kind,
+        status: 'failed',
+        error: errorMessage(error),
+      });
+
+      throw new ToolInputError('telegram_api_error', `failed to send ${kind} ${file.path}: ${errorMessage(error)}`);
+    }
+  }
+}
+
+export async function sendVideos(
+  bot: Bot,
+  route: TelegramRoute,
+  videos: PreparedFile[],
+  result: ToolResultDetails,
+  retryAttempts: number,
+): Promise<void> {
+  await sendFilesIndividually(videos, 'video', result, (video) =>
+    callTelegramWithRetry(
+      () =>
+        bot.api.sendVideo(route.chatId, new InputFile(video.resolvedPath), {
+          ...(route.messageThreadId ? { message_thread_id: route.messageThreadId } : {}),
+          ...(video.caption ? { caption: video.caption } : {}),
+        }),
+      retryAttempts,
+    ),
+  );
+}
+
+export async function sendAudios(
+  bot: Bot,
+  route: TelegramRoute,
+  audios: PreparedFile[],
+  result: ToolResultDetails,
+  retryAttempts: number,
+): Promise<void> {
+  await sendFilesIndividually(audios, 'audio', result, (audio) =>
+    callTelegramWithRetry(
+      () =>
+        bot.api.sendAudio(route.chatId, new InputFile(audio.resolvedPath), {
+          ...(route.messageThreadId ? { message_thread_id: route.messageThreadId } : {}),
+          ...(audio.caption ? { caption: audio.caption } : {}),
+        }),
+      retryAttempts,
+    ),
+  );
+}
+
 export async function sendDocuments(
   bot: Bot,
   route: TelegramRoute,
@@ -257,40 +340,16 @@ export async function sendDocuments(
   result: ToolResultDetails,
   retryAttempts: number,
 ): Promise<void> {
-  for (const document of documents) {
-    try {
-      const message = await callTelegramWithRetry(
-        () =>
-          bot.api.sendDocument(route.chatId, new InputFile(document.resolvedPath), {
-            ...(route.messageThreadId ? { message_thread_id: route.messageThreadId } : {}),
-            ...(document.caption ? { caption: document.caption } : {}),
-          }),
-        retryAttempts,
-      );
-
-      result.sent.documents += 1;
-      result.items.push({
-        path: document.path,
-        resolved_path: document.resolvedPath,
-        kind: 'document',
-        status: 'sent',
-        telegram_message_id: message.message_id,
-      });
-    } catch (error) {
-      result.items.push({
-        path: document.path,
-        resolved_path: document.resolvedPath,
-        kind: 'document',
-        status: 'failed',
-        error: errorMessage(error),
-      });
-
-      throw new ToolInputError(
-        'telegram_api_error',
-        `failed to send document ${document.path}: ${errorMessage(error)}`,
-      );
-    }
-  }
+  await sendFilesIndividually(documents, 'document', result, (document) =>
+    callTelegramWithRetry(
+      () =>
+        bot.api.sendDocument(route.chatId, new InputFile(document.resolvedPath), {
+          ...(route.messageThreadId ? { message_thread_id: route.messageThreadId } : {}),
+          ...(document.caption ? { caption: document.caption } : {}),
+        }),
+      retryAttempts,
+    ),
+  );
 }
 
 export function errorMessage(error: unknown): string {
@@ -339,12 +398,84 @@ async function detectFileMimeType(path: string): Promise<string | null> {
   }
 }
 
+interface KindResolutionInput {
+  requestedKind: RequestedSendKind;
+  filePath: string;
+  resolvedPath: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  warnings: string[];
+}
+
+interface KindClassifier {
+  kind: Exclude<SendKind, 'document'>;
+  canSend: (input: KindResolutionInput) => boolean;
+}
+
+const classifiersByKind: Record<Exclude<RequestedSendKind, 'auto' | 'document'>, KindClassifier> = {
+  photo: {
+    kind: 'photo',
+    canSend: ({ mimeType, sizeBytes }) => canSendAsPhoto(mimeType, sizeBytes),
+  },
+  video: {
+    kind: 'video',
+    canSend: ({ resolvedPath }) => canSendAsVideo(resolvedPath),
+  },
+  audio: {
+    kind: 'audio',
+    canSend: ({ resolvedPath }) => canSendAsAudio(resolvedPath),
+  },
+};
+
+const autoKindClassifiers = [
+  classifiersByKind.photo,
+  classifiersByKind.video,
+  classifiersByKind.audio,
+] satisfies KindClassifier[];
+
+function resolveSendKind(input: KindResolutionInput): SendKind {
+  const { requestedKind, filePath, warnings } = input;
+
+  if (requestedKind === 'document') {
+    return 'document';
+  }
+
+  if (requestedKind === 'auto') {
+    for (const classifier of autoKindClassifiers) {
+      if (classifier.canSend(input)) {
+        return classifier.kind;
+      }
+    }
+
+    return 'document';
+  }
+
+  const classifier = classifiersByKind[requestedKind];
+  if (classifier.canSend(input)) {
+    return classifier.kind;
+  }
+
+  warnings.push(`downgraded ${filePath} to document because it does not meet ${requestedKind} constraints`);
+  return 'document';
+}
+
 function canSendAsPhoto(mimeType: string | null, sizeBytes: number): boolean {
   if (!mimeType || !photoMimes.has(mimeType)) {
     return false;
   }
-
   return sizeBytes <= telegramPhotoMaxBytes;
+}
+
+function canSendAsVideo(path: string): boolean {
+  return videoExtensions.has(normalizeExtension(path));
+}
+
+function canSendAsAudio(path: string): boolean {
+  return audioExtensions.has(normalizeExtension(path));
+}
+
+function normalizeExtension(path: string): string {
+  return extname(path).toLowerCase();
 }
 
 function chunkBy<T>(values: T[], size: number): T[][] {

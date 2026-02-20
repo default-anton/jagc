@@ -186,7 +186,7 @@ jagc share --thread-key cli:default --json
 - Scheduled task topic creation requires Telegram private topics enabled for the bot (`getMe().has_topics_enabled=true`). Capability is read at adapter startup, so restart jagc after toggling topic mode in BotFather.
 - Final assistant replies are rendered from Markdown into Telegram `entities` (no `parse_mode` string escaping path)
 - Short code fences render inline as Telegram code blocks; oversized code fences are sent as document attachments with language-aware filenames (for example `snippet-1.ts`)
-- Telegram-thread pi sessions expose a `telegram_send_files` tool for direct outbound delivery (photos via `sendPhoto`/`sendMediaGroup` in photos-first order, then documents via `sendDocument`)
+- Telegram-thread pi sessions expose a `telegram_send_files` tool for direct outbound delivery (photos via `sendPhoto`/`sendMediaGroup`, then videos via `sendVideo`, then audios via `sendAudio`, then documents via `sendDocument`; `auto` routing is conservative: photo magic-byte + <=10MB check first, then `.mp4`/`.mp3`/`.m4a`, else document)
 - Incoming assistant-bound user text messages get a best-effort random emoji reaction (from a curated working set) so users get instant "got it" feedback before output arrives
 - Progress stream with thinking/tool snippets and tool completion status updates (separate thinking content blocks render as separate `~` lines)
 - Long progress logs split into continuation messages to preserve visibility

@@ -11,16 +11,33 @@ import {
   maxFilesPerCall,
   type PreparedFile,
   prepareFiles,
+  requestedSendKinds,
+  type SendKind,
+  sendAudios,
   sendDocuments,
+  sendOrder,
   sendPhotos,
+  sendVideos,
   ToolInputError,
   type ToolResultDetails,
 } from './telegram-send-files-core.js';
 
 const defaultTelegramApiRoot = 'https://api.telegram.org';
 const toolName = 'telegram_send_files';
-const fileKinds = ['auto', 'photo', 'document'] as const;
 const captionModes = ['per_file', 'first_only'] as const;
+
+const sendOrderLabels: Record<SendKind, string> = {
+  photo: 'photos',
+  video: 'videos',
+  audio: 'audios',
+  document: 'documents',
+};
+
+const sendOrderSummary = sendOrder.map((kind) => sendOrderLabels[kind]).join(', then ');
+
+type PreparedFilesByKind = Record<SendKind, PreparedFile[]>;
+
+type KindSender = (files: PreparedFile[], result: ToolResultDetails, retryAttempts: number) => Promise<void>;
 
 const toolParametersSchema = {
   type: 'object',
@@ -42,8 +59,9 @@ const toolParametersSchema = {
           },
           kind: {
             type: 'string',
-            enum: fileKinds,
-            description: 'Delivery kind. auto chooses photo for jpg/png/webp <=10MB, otherwise document.',
+            enum: requestedSendKinds,
+            description:
+              'Delivery kind. auto chooses photo for jpg/png/webp <=10MB, then video for .mp4, then audio for .mp3/.m4a, otherwise document.',
           },
           caption: {
             type: 'string',
@@ -65,7 +83,7 @@ const inputSchema = z.object({
     .array(
       z.object({
         path: z.string().trim().min(1),
-        kind: z.enum(fileKinds).optional(),
+        kind: z.enum(requestedSendKinds).optional(),
         caption: z.string().optional(),
       }),
     )
@@ -96,11 +114,12 @@ export function createTelegramSendFilesToolDefinition(options: TelegramSendFiles
     },
   });
 
+  const senders = createSenders(bot, route);
+
   return {
     name: toolName,
     label: toolName,
-    description:
-      'Send files directly to the active Telegram chat/thread. Photos are grouped into albums (up to 10) and sent before documents.',
+    description: `Send files directly to the active Telegram chat/thread. ${sendOrderSummary}.`,
     parameters: toolParametersSchema as never,
     execute: async (_toolCallId, rawParams) => {
       const result = createToolResult(route);
@@ -109,13 +128,14 @@ export function createTelegramSendFilesToolDefinition(options: TelegramSendFiles
         const params: ToolInput = inputSchema.parse(rawParams);
         const captionMode: CaptionMode = params.caption_mode ?? 'per_file';
         const prepared = await prepareFiles(params.files, options.workspaceDir, result.warnings);
-        const { photos, documents } = partitionPreparedFiles(prepared);
+        const partitioned = partitionPreparedFiles(prepared);
 
-        applyCaptionMode([...photos, ...documents], captionMode);
+        applyCaptionMode(flattenPreparedFiles(partitioned), captionMode);
 
         const retryAttempts = options.retryAttempts ?? defaultRetryAttempts;
-        await sendPhotos(bot, route, photos, result, retryAttempts);
-        await sendDocuments(bot, route, documents, result, retryAttempts);
+        for (const kind of sendOrder) {
+          await senders[kind](partitioned[kind], result, retryAttempts);
+        }
 
         result.ok = true;
         return asToolResponse(result);
@@ -125,6 +145,15 @@ export function createTelegramSendFilesToolDefinition(options: TelegramSendFiles
       }
     },
   } as ToolDefinition;
+}
+
+function createSenders(bot: Bot, route: TelegramRoute): Record<SendKind, KindSender> {
+  return {
+    photo: async (files, result, retryAttempts) => sendPhotos(bot, route, files, result, retryAttempts),
+    video: async (files, result, retryAttempts) => sendVideos(bot, route, files, result, retryAttempts),
+    audio: async (files, result, retryAttempts) => sendAudios(bot, route, files, result, retryAttempts),
+    document: async (files, result, retryAttempts) => sendDocuments(bot, route, files, result, retryAttempts),
+  };
 }
 
 function createToolResult(route: TelegramRoute): ToolResultDetails {
@@ -137,6 +166,8 @@ function createToolResult(route: TelegramRoute): ToolResultDetails {
     sent: {
       photo_groups: 0,
       photos: 0,
+      videos: 0,
+      audios: 0,
       documents: 0,
     },
     warnings: [],
@@ -144,23 +175,18 @@ function createToolResult(route: TelegramRoute): ToolResultDetails {
   };
 }
 
-function partitionPreparedFiles(files: PreparedFile[]): { photos: PreparedFile[]; documents: PreparedFile[] } {
-  const photos: PreparedFile[] = [];
-  const documents: PreparedFile[] = [];
+function partitionPreparedFiles(files: PreparedFile[]): PreparedFilesByKind {
+  const grouped = Object.fromEntries(sendOrder.map((kind) => [kind, [] as PreparedFile[]])) as PreparedFilesByKind;
 
   for (const file of files) {
-    if (file.kind === 'photo') {
-      photos.push(file);
-      continue;
-    }
-
-    documents.push(file);
+    grouped[file.kind].push(file);
   }
 
-  return {
-    photos,
-    documents,
-  };
+  return grouped;
+}
+
+function flattenPreparedFiles(grouped: PreparedFilesByKind): PreparedFile[] {
+  return sendOrder.flatMap((kind) => grouped[kind]);
 }
 
 function toToolFailure(error: unknown): { code: string; message: string } {

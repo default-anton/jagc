@@ -128,7 +128,7 @@ This doc is the implementation snapshot (not design intent).
 ## Session/thread model (pi executor)
 
 - Session identity is per `thread_key`.
-- `PiRunExecutor` configures thread-scoped session tools per thread: `bash` (with spawn-hook env injection for `JAGC_THREAD_KEY`, `JAGC_TRANSPORT`, and Telegram `JAGC_TELEGRAM_CHAT_ID` / `JAGC_TELEGRAM_TOPIC_ID`) and Telegram-only `telegram_send_files` (direct outbound `sendPhoto`/`sendMediaGroup`/`sendDocument` delivery) for Telegram thread keys when bot auth is configured.
+- `PiRunExecutor` configures thread-scoped session tools per thread: `bash` (with spawn-hook env injection for `JAGC_THREAD_KEY`, `JAGC_TRANSPORT`, and Telegram `JAGC_TELEGRAM_CHAT_ID` / `JAGC_TELEGRAM_TOPIC_ID`) and Telegram-only `telegram_send_files` (direct outbound `sendPhoto`/`sendMediaGroup`/`sendVideo`/`sendAudio`/`sendDocument` delivery) for Telegram thread keys when bot auth is configured.
 - `thread_sessions` persists `thread_key`, `session_id`, `session_file`.
 - `PiRunExecutor` reopens persisted sessions when possible; creates/persists when missing/invalid.
 - After each run, `PiRunExecutor` reconciles `thread_sessions` with the live `AgentSession` (`session_id`/`session_file`) so extension-driven session switches during a run remain durable across restarts.
@@ -179,7 +179,7 @@ Operational note:
 - Terminal assistant text replies are parsed as Markdown and sent via Telegram `entities` (not `parse_mode` Markdown strings) for robust formatting.
 - Other adapter-originated text replies (command/status errors, runtime-control panels, and auth/allowlist guidance) are sent as literal text to avoid markdown-driven mutation of operator commands and path snippets.
 - Fenced code blocks above inline thresholds are emitted as Telegram document uploads with language-aware filenames (for example `snippet-1.ts`); shorter blocks stay inline as `pre` entities.
-- Telegram-thread pi sessions additionally expose a `telegram_send_files` custom tool so the agent can push workspace/local files directly to the active Telegram route; photos are grouped (`sendMediaGroup`, 2..10) and sent before documents.
+- Telegram-thread pi sessions additionally expose a `telegram_send_files` custom tool so the agent can push workspace/local files directly to the active Telegram route; photos are grouped (`sendMediaGroup`, 2..10), then videos (`sendVideo`), then audios (`sendAudio`), then documents (`sendDocument`). `auto` routing is conservative: photo magic-byte+size checks first, then `.mp4` for video, `.mp3`/`.m4a` for audio, else document.
 - `/model` and `/thinking` use button pickers; text args are intentionally unsupported.
 - Unknown slash commands are not rejected by the adapter; they are forwarded to the assistant as normal `followUp` text with the original message content.
 - After model/thinking changes, the adapter returns to the `/settings` panel and shows the updated runtime state.

@@ -667,6 +667,60 @@ export class TelegramBotApiClone {
           ],
         };
       }
+      case 'sendVideo': {
+        this.recordBotCall({ method, payload });
+
+        const chatId = toNumber(payload.chat_id) ?? 0;
+        const caption = typeof payload.caption === 'string' ? payload.caption : '';
+        const messageThreadId = toNumber(payload.message_thread_id);
+        const video = parseVideoPayload(payload.video, payload);
+        assertTelegramMessageThreadId(messageThreadId);
+
+        return {
+          message_id: this.nextMessageId++,
+          date: Math.floor(Date.now() / 1000),
+          chat: {
+            id: chatId,
+            type: 'private',
+          },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
+          caption,
+          video: {
+            file_id: `file-${this.nextMessageId}`,
+            file_unique_id: `file-unique-${this.nextMessageId}`,
+            file_name: video.fileName,
+            mime_type: 'video/mp4',
+            file_size: video.content.length,
+          },
+        };
+      }
+      case 'sendAudio': {
+        this.recordBotCall({ method, payload });
+
+        const chatId = toNumber(payload.chat_id) ?? 0;
+        const caption = typeof payload.caption === 'string' ? payload.caption : '';
+        const messageThreadId = toNumber(payload.message_thread_id);
+        const audio = parseAudioPayload(payload.audio, payload);
+        assertTelegramMessageThreadId(messageThreadId);
+
+        return {
+          message_id: this.nextMessageId++,
+          date: Math.floor(Date.now() / 1000),
+          chat: {
+            id: chatId,
+            type: 'private',
+          },
+          ...(messageThreadId !== null ? { message_thread_id: messageThreadId } : {}),
+          caption,
+          audio: {
+            file_id: `file-${this.nextMessageId}`,
+            file_unique_id: `file-unique-${this.nextMessageId}`,
+            file_name: audio.fileName,
+            mime_type: 'audio/mpeg',
+            file_size: audio.content.length,
+          },
+        };
+      }
       case 'sendMediaGroup': {
         this.recordBotCall({ method, payload });
 
@@ -921,6 +975,14 @@ function assertTelegramMessageThreadId(messageThreadId: number | null): void {
 
 function parsePhotoPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
   return parseAttachedFilePayload(value, payload, 'photo.jpg');
+}
+
+function parseVideoPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
+  return parseAttachedFilePayload(value, payload, 'video.mp4');
+}
+
+function parseAudioPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
+  return parseAttachedFilePayload(value, payload, 'audio.mp3');
 }
 
 function parseDocumentPayload(value: unknown, payload: Record<string, unknown>): { fileName: string; content: string } {
