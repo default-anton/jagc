@@ -265,10 +265,13 @@ jagc uninstall --purge-data
 
 ## Docs map
 
-- Architecture (implemented behavior): [`docs/architecture.md`](docs/architecture.md)
+- Architecture (system model + invariants): [`docs/architecture.md`](docs/architecture.md)
+- Operations/service lifecycle: [`docs/operations.md`](docs/operations.md)
+- Telegram adapter contract: [`docs/telegram.md`](docs/telegram.md)
 - Auth details: [`docs/auth.md`](docs/auth.md)
 - Testing loops: [`docs/testing.md`](docs/testing.md)
 - Release process: [`docs/release.md`](docs/release.md)
+- Tooling notes: [`docs/tooling.md`](docs/tooling.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License

@@ -11,16 +11,6 @@ jagc uses pi SDK auth resolution order for model credentials:
 
 `JAGC_WORKSPACE_DIR` is the single directory for both jagc workspace files and pi agent resources (skills, prompts, extensions, themes, settings, auth, sessions).
 
-## Workspace bootstrap
-
-On server startup, jagc ensures `JAGC_WORKSPACE_DIR` exists (mode `0700`), initializes it as a local git repository when `.git` is missing, creates missing defaults (`SYSTEM.md`, `AGENTS.md`, `settings.json`), seeds bundled `defaults/skills/**` and `defaults/extensions/**` files when missing, and ensures workspace `.gitignore` contains:
-
-- `.sessions/`
-- `auth.json`
-- `git/`
-
-It **does not copy** `~/.pi/agent/settings.json` or `~/.pi/agent/auth.json`.
-
 ## Fast setup paths
 
 ### Path A: OAuth login via jagc (recommended for remote/headless)
