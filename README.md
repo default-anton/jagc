@@ -94,7 +94,7 @@ jagc packages update
 ```
 
 - `install` is safe to rerun and ensures launchd points at the currently installed jagc server entrypoint.
-- `defaults sync` refreshes bundled `skills/**` and `extensions/**` in your workspace without deleting your custom files.
+- `defaults sync` refreshes bundled `skills/**`, `extensions/**`, and `memory/**` in your workspace without deleting your custom files.
 - `packages update` updates workspace pi packages using jagc's bundled pi dependency.
 
 ## Day-to-day usage

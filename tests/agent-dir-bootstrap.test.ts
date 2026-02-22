@@ -25,7 +25,7 @@ const defaultGlobalAgentsLoaderExtensionTemplatePath = resolve(
   '30-global-agents-loader.ts',
 );
 const defaultWorkspaceTemplateFiles = ['SYSTEM.md', 'AGENTS.md', 'settings.json'] as const;
-const defaultWorkspaceTemplateDirectories = ['skills', 'extensions'] as const;
+const defaultWorkspaceTemplateDirectories = ['skills', 'extensions', 'memory'] as const;
 
 describe('bootstrapAgentDir', () => {
   const tempDirs: string[] = [];

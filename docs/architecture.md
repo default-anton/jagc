@@ -33,6 +33,7 @@ Core components:
 4. **ScheduledTaskService** claims due tasks and dispatches deterministic task occurrences.
 5. **SQLite state** persists runs, sessions, scheduled tasks/runs, ingest idempotency, and staged images.
 6. **Telegram adapter** maps inbound updates to thread/user keys and drives progress + final delivery.
+7. **Workspace bootstrap** seeds default prompt/config files plus bundled skills, extensions, and markdown memory scaffolding under `memory/`.
 
 ## Core flows
 
@@ -61,6 +62,7 @@ Core components:
 - **`thread_sessions`**: durable session mapping (`thread_key`, `session_id`, `session_file`).
 - **`scheduled_tasks` / `scheduled_task_runs`**: task definitions + occurrence execution history.
 - **`input_images`**: temporary staged images for API/Telegram ingest and run-linked submissions.
+- **`memory/**/*.md`**: markdown-first curated assistant memory in workspace files (bootstrap scaffolds defaults; agent curates contents).
 - **pi settings/session state**: model + thinking state (not duplicated in jagc DB).
 
 Schemas/migrations source of truth:

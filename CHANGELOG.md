@@ -13,7 +13,7 @@ All notable changes to `jagc` are documented here.
 
 ### Added
 
-- None.
+- Added bundled markdown memory scaffolding under `defaults/memory/**` (including `memory/INDEX.md`, domain index stubs, and subtree memory authoring rules) and workspace bootstrap seeding for `memory/**`.
 
 ### Changed
 

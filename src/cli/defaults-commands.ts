@@ -28,7 +28,7 @@ export function registerDefaultsCommands(program: Command, dependencies: Default
 
   defaultsCommand
     .command('sync')
-    .description('sync latest bundled defaults/skills/extensions into workspace without deleting user files')
+    .description('sync latest bundled defaults/skills/extensions/memory into workspace without deleting user files')
     .option('--workspace-dir <path>', 'workspace directory', defaultWorkspaceDir)
     .option('--json', 'JSON output')
     .action(async (options: DefaultsSyncCommandOptions) => {

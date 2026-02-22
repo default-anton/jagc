@@ -47,7 +47,7 @@ const defaultWorkspaceFiles = [
     templatePath: workspaceTemplatePath('settings.json'),
   },
 ] as const;
-const defaultWorkspaceDirectories = ['skills', 'extensions'] as const;
+const defaultWorkspaceDirectories = ['skills', 'extensions', 'memory'] as const;
 
 export async function bootstrapAgentDir(
   agentDir: string,

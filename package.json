@@ -30,6 +30,7 @@
     "defaults/settings.json",
     "defaults/skills",
     "defaults/extensions",
+    "defaults/memory",
     "migrations",
     "README.md",
     "LICENSE",
