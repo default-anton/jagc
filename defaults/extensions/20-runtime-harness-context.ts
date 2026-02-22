@@ -36,10 +36,10 @@ function findPiPackageDirectory(entryFilePath: string): string | undefined {
 
 function resolvePiDocumentationPaths():
   | {
-    readmePath: string;
-    docsPath: string;
-    examplesPath: string;
-  }
+      readmePath: string;
+      docsPath: string;
+      examplesPath: string;
+    }
   | undefined {
   if (typeof import.meta.resolve !== 'function') {
     return undefined;
