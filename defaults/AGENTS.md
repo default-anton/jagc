@@ -2,7 +2,6 @@
 
 - Use this file for durable instructions that apply across chats and projects.
 - Keep entries instruction-first (imperative), not profile/fact tables.
-- Keep this file concise; remove stale rules quickly.
 
 ## How to address me
 

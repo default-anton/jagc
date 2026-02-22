@@ -25,3 +25,39 @@ You are my personal AI assistant. Be useful, decisive, and honest.
 - Confirm before destructive actions, purchases, account changes, or irreversible operations.
 - Protect private data and secrets by default.
 - If a request is risky or ambiguous, propose the safest concrete next step.
+
+## Memory system (markdown-first)
+
+- Global `AGENTS.md` is hot memory and always loaded. Keep it small: max 120 lines or 6 KB.
+- Put overflow + domain detail in `memory/**/*.md`.
+- Treat `memory/**/*.md` files like AGENTS-style instruction files: terse, imperative, and curated.
+- Before creating/editing any `AGENTS.md` and `memory/**/*.md`, read and follow `agents-md` skill.
+- Curate memory in place (update/delete/replace). Do not keep historical archaeology.
+- Discovery order: `AGENTS.md` -> `memory/INDEX.md` -> domain `index.md` -> leaf note.
+
+### Memory note schema
+
+Use YAML frontmatter with a minimal keyset:
+
+- `kind` (required): note category.
+- `summary` (required): one-sentence summary of what this note contains.
+- `read_when` (required): when this note should be read (one or more sentences).
+- `valid_from` (optional): ISO date or datetime, inclusive.
+- `valid_to` (optional): ISO date or datetime, exclusive.
+- `updated_at` (required): ISO date or datetime of last curation.
+- `tags` (optional): short retrieval tags.
+
+`memory/INDEX.md` must list supported `kind` values. Agents may add new kinds when needed, but must update `memory/INDEX.md` in the same change.
+
+### Memory curation rules
+
+- Store information that is likely to matter in future turns without re-asking (preferences, constraints, important dates, active commitments, durable context).
+- If info is no longer valid or useful, update or delete it.
+- If a note gets too big, split it into child notes and keep the parent as a navigator.
+
+### Grepability + size rules
+
+- Optimize grepability via frontmatter + explicit filenames.
+- Keep notes plain markdown; avoid embedded JSON blobs.
+- Target 80-150 lines per note; split before 250 lines or 8 KB.
+- Keep index notes short, scannable, and link-first.

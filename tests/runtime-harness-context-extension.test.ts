@@ -39,9 +39,10 @@ describe('runtimeHarnessContextExtension', () => {
     expect(result?.systemPrompt).toContain('Global AGENTS.md is preloaded; subtree AGENTS.md files auto-load');
     expect(result?.systemPrompt).toContain('Do not proactively search for AGENTS.md unless the user asks');
     expect(result?.systemPrompt).toContain('prefer terse imperative rules over fact/profile tables');
+    expect(result?.systemPrompt).toContain('`memory/**/*.md` is markdown-first curated memory');
+    expect(result?.systemPrompt).toContain('User-owned config: SYSTEM.md, AGENTS.md, settings.json');
+    expect(result?.systemPrompt).toContain('Agent-curated memory: memory/');
     expect(result?.systemPrompt).toContain(path.join(fakeCwd, 'skills', 'task-ops', 'SKILL.md'));
-    expect(result?.systemPrompt).toContain(`Your skills are located in: ${path.join(fakeCwd, 'skills')}/`);
-    expect(result?.systemPrompt).toContain(`Your extensions are located in: ${path.join(fakeCwd, 'extensions')}/`);
     expect(result?.systemPrompt).toContain('Pi documentation (consult when needed for jagc/pi implementation work):');
     expect(result?.systemPrompt).toContain('docs/extensions.md');
     expect(result?.systemPrompt).toContain('docs/packages.md');

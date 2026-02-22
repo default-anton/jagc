@@ -17,7 +17,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Updated default system/runtime guidance so `AGENTS.md` is treated as hot memory with size limits, `memory/**/*.md` is the curated overflow layer, and memory note frontmatter now uses `summary` + `read_when` + temporal validity fields.
 
 ### Fixed
 

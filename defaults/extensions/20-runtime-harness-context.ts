@@ -36,10 +36,10 @@ function findPiPackageDirectory(entryFilePath: string): string | undefined {
 
 function resolvePiDocumentationPaths():
   | {
-      readmePath: string;
-      docsPath: string;
-      examplesPath: string;
-    }
+    readmePath: string;
+    docsPath: string;
+    examplesPath: string;
+  }
   | undefined {
   if (typeof import.meta.resolve !== 'function') {
     return undefined;
@@ -100,12 +100,12 @@ export default function runtimeHarnessContextExtension(pi: {
         '- Global AGENTS.md is preloaded; subtree AGENTS.md files auto-load when you `read` files in that subtree.',
         '- Do not proactively search for AGENTS.md unless the user asks, you are editing AGENTS.md files, or instructions appear missing/conflicting.',
         '- Treat AGENTS.md entries as instructions to follow; when editing AGENTS.md, prefer terse imperative rules over fact/profile tables.',
+        `- \`memory/**/*.md\` is markdown-first curated memory. Treat memory notes with the same style/rules as AGENTS.md files and apply the agents-md skill before editing them: ${formatPathForPrompt(path.join(agentDir, 'skills', 'agents-md', 'SKILL.md'))}.`,
         `- Workspace model: \`${agentDir}\` is the jagc home dir/workspace root (\`JAGC_WORKSPACE_DIR\`, default \`~/.jagc\`) and also the pi agent dir.`,
-        '- Purpose: keep prompts, config, extensions, auth, sessions, DB, and service env in one portable state root for deterministic CLI/service behavior.',
-        '- User-owned config: `SYSTEM.md`, `AGENTS.md`, `settings.json`, `extensions/`, `skills/`, `service.env`.',
-        '- Runtime state (usually do not edit directly): `service.env.snapshot`, `auth.json`, `.sessions/`, `jagc.sqlite*`, `logs/`.',
-        `- Your skills are located in: ${formatPathForPrompt(path.join(agentDir, 'skills'))}/`,
-        `- Your extensions are located in: ${formatPathForPrompt(path.join(agentDir, 'extensions'))}/`,
+        '  - Purpose: keep prompts, config, extensions, auth, sessions, DB, and service env in one portable state root for deterministic CLI/service behavior.',
+        '  - User-owned config: SYSTEM.md, AGENTS.md, settings.json, extensions/ (your extensions), skills/ (your skills), service.env.',
+        '  - Agent-curated memory: memory/ (user-editable, but primarily maintained by the agent).',
+        '  - Runtime state in (usually do not edit directly): service.env.snapshot, auth.json, .sessions/, jagc.sqlite*, logs/.',
         '- Themes/TUI/keybindings are usually irrelevant for jagc runtime work unless explicitly requested.',
       ];
       sections.push(runtimeContextLines.join('\n'));
