@@ -18,6 +18,7 @@
 - Local server + CLI (`jagc ...`) as a control plane for operators and agent self-maintenance
 - Durable run/thread state in SQLite
 - Scheduled tasks (one-off + recurring) with per-task execution threads
+- Markdown-first memory (`memory/**/*.md`) with proactive per-turn capture triage for durable context
 - pi-coding-agent runtime features (sessions, skills, prompts, extensions)
 
 ## Mental model (2 minutes)

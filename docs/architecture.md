@@ -62,7 +62,7 @@ Core components:
 - **`thread_sessions`**: durable session mapping (`thread_key`, `session_id`, `session_file`).
 - **`scheduled_tasks` / `scheduled_task_runs`**: task definitions + occurrence execution history.
 - **`input_images`**: temporary staged images for API/Telegram ingest and run-linked submissions.
-- **`memory/**/*.md`**: markdown-first curated assistant memory in workspace files (bootstrap scaffolds defaults; agent curates contents).
+- **`memory/**/*.md`**: markdown-first curated assistant memory in workspace files (bootstrap scaffolds defaults; agent curates contents via per-turn memory checkpoint triage + in-place updates).
 - **pi settings/session state**: model + thinking state (not duplicated in jagc DB).
 
 Schemas/migrations source of truth:

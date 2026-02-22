@@ -40,6 +40,10 @@ describe('runtimeHarnessContextExtension', () => {
     expect(result?.systemPrompt).toContain('Do not proactively search for AGENTS.md unless the user asks');
     expect(result?.systemPrompt).toContain('prefer terse imperative rules over fact/profile tables');
     expect(result?.systemPrompt).toContain('`memory/**/*.md` is markdown-first curated memory');
+    expect(result?.systemPrompt).toContain('Run a memory checkpoint each substantive turn');
+    expect(result?.systemPrompt).toContain('Prefer updating existing memory notes over creating new files');
+    expect(result?.systemPrompt).toContain('ask one brief confirmation question before persisting memory');
+    expect(result?.systemPrompt).toContain('Before context-dependent follow-ups, quickly read `memory/INDEX.md`');
     expect(result?.systemPrompt).toContain('User-owned config: SYSTEM.md, AGENTS.md, settings.json');
     expect(result?.systemPrompt).toContain('Agent-curated memory: memory/');
     expect(result?.systemPrompt).toContain(path.join(fakeCwd, 'skills', 'task-ops', 'SKILL.md'));

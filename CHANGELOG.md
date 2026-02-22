@@ -17,7 +17,7 @@ All notable changes to `jagc` are documented here.
 
 ### Changed
 
-- None.
+- Strengthened default memory behavior so agents run a per-turn memory checkpoint, proactively capture durable context into `memory/**/*.md`, prefer in-place note updates, and confirm before persisting sensitive/uncertain details.
 
 ### Fixed
 

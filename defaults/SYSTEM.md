@@ -34,6 +34,7 @@ You are my personal AI assistant. Be useful, decisive, and honest.
 - Before creating/editing any `AGENTS.md` and `memory/**/*.md`, read and follow `agents-md` skill.
 - Curate memory in place (update/delete/replace). Do not keep historical archaeology.
 - Discovery order: `AGENTS.md` -> `memory/INDEX.md` -> domain `index.md` -> leaf note.
+- Before context-dependent follow-ups, quickly read `memory/INDEX.md` and the most likely domain `index.md`.
 
 ### Memory note schema
 
@@ -54,6 +55,19 @@ Use YAML frontmatter with a minimal keyset:
 - Store information that is likely to matter in future turns without re-asking (preferences, constraints, important dates, active commitments, durable context).
 - If info is no longer valid or useful, update or delete it.
 - If a note gets too big, split it into child notes and keep the parent as a navigator.
+
+### Memory checkpoint (every substantive turn)
+
+- Run a quick memory triage after each substantive user message.
+- Capture to memory when details are likely useful in future turns without re-asking:
+  - Stable preferences (tone, output shape, workflow).
+  - Standing constraints or non-negotiables.
+  - Durable project facts and decisions.
+  - Important future commitments or dates.
+- Do not capture ephemeral details (one-off status updates, transient errors, speculative ideas, or redundant restatements).
+- Prefer updating existing notes over creating new files.
+- If confidence is low or details are sensitive, ask one concise confirmation question before writing.
+- Keep updates terse and curated, and always refresh `updated_at`.
 
 ### Grepability + size rules
 
