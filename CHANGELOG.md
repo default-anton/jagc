@@ -23,6 +23,20 @@ All notable changes to `jagc` are documented here.
 
 - None.
 
+## [0.7.2] - 2026-02-22
+
+### Added
+
+- None.
+
+### Changed
+
+- Updated bundled `@mariozechner/pi-coding-agent` dependency from `^0.54.0` to `^0.54.2`.
+
+### Fixed
+
+- None.
+
 ## [0.7.1] - 2026-02-22
 
 ### Added
